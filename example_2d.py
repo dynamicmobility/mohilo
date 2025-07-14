@@ -28,8 +28,8 @@ fb = SimulatedFeedback(objective=objective,
 # setup the GP model
 gp = BasicGP(lengthscale=1, signal_var=1)
 gp.setup(pbl.action_space, likelihood=pbl.overall_likelihood,
-                        #    dlikelihood=pbl.overall_jacobian,
-                           d2likelihood=pbl.overall_hessian
+                           dlikelihood=pbl.overall_jacobian,
+                        #    d2likelihood=pbl.overall_hessian
                            )
 # setup a random sampler to sample actions during data collection
 sampler = RandomSampler()
@@ -41,8 +41,8 @@ for idx in range(epochs):
     curr = sampler.sample(pbl.action_space)
     preference, coactive, ordinal = fb.evaluate(curr, prev,
                                                 get_pairwise=True,
-                                                get_coactive=True,
-                                                get_ordinal=True)
+                                                get_coactive=False,
+                                                get_ordinal=False)
     pbl.add_feedback(preference, coactive, ordinal)
     prev = curr
 elapsed = time.time() - start

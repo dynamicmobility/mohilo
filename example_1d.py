@@ -33,7 +33,7 @@ gp = BasicGP(lengthscale=1, signal_var=1)
 gp.setup(
     action_space = pbl.action_space,
     likelihood   = pbl.overall_likelihood,
-    dlikelihood  = pbl.overall_jacobian,
+    # dlikelihood  = pbl.overall_jacobian,
     # d2likelihood = pbl.overall_hessian
 ) 
 
@@ -60,7 +60,7 @@ for idx in range(epochs):
 
 N = len(pbl.action_space)
 
-if True:
+if False:
     print('FBK:\t', pbl.preference_fbk)
     def check_gradient(obj, jac):
         # Check the gradient

@@ -65,6 +65,8 @@ class SimulatedObjective:
             self.objective = self.objective_1d
         elif function == '2D':
             self.objective = self.objective_2d
+        elif function == '3D':
+            self.objective = self.objective_3d
         else:
             raise Exception('TODO')
         if ord_lbls:
@@ -84,6 +86,11 @@ class SimulatedObjective:
         if len(a.shape) == 2:
             return 1 / (1 + a[:,0]**2) - a[:,1]**2
         return 1 / (1 + a[0]**2) - a[1]**2
+    
+    def objective_3d(self, a):
+        if len(a.shape) == 2:
+            return a[:,0]**2 + a[:,1]**2 + a[:,2]**2
+        return a[0]**2 + a[1]**2 + a[2]**2
 
     def __call__(self, a):
         return self.objective(a)
