@@ -19,7 +19,7 @@ print('here')
 objective = SimulatedObjective(smooth=True, 
                                ord_lbls=3,
                                action_space=pbl.action_space,
-                               function='2D')
+                               function='2D-circle')
 
 # simulates feedback according to a 1D objective function
 fb = SimulatedFeedback(objective=objective,
@@ -29,7 +29,7 @@ fb = SimulatedFeedback(objective=objective,
 gp = BasicGP(lengthscale=1, signal_var=1)
 gp.setup(pbl.action_space, likelihood=pbl.overall_likelihood,
                            dlikelihood=pbl.overall_jacobian,
-                        #    d2likelihood=pbl.overall_hessian
+                           d2likelihood=pbl.overall_hessian
                            )
 # setup a random sampler to sample actions during data collection
 sampler = RandomSampler()
@@ -50,7 +50,7 @@ print(f'Time to collect data: {elapsed}')
 
 start = time.time()
 # fit the model
-mu = gp.fit(method='trust-constr', options={'disp': False})
+mu = gp.fit(method='trust-krylov', options={'disp': False})
 elapsed = time.time() - start
 print(f'Time to fit: {elapsed}')
 

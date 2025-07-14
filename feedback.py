@@ -67,6 +67,8 @@ class SimulatedObjective:
             self.objective = self.objective_2d
         elif function == '3D':
             self.objective = self.objective_3d
+        elif function == '2D-circle':
+            self.objective = self.objective_circle
         else:
             raise Exception('TODO')
         if ord_lbls:
@@ -91,6 +93,16 @@ class SimulatedObjective:
         if len(a.shape) == 2:
             return a[:,0]**2 + a[:,1]**2 + a[:,2]**2
         return a[0]**2 + a[1]**2 + a[2]**2
+    
+    def objective_circle(self, a):
+        arr = lambda i: a[i]
+        r = 0.6
+        xc = 0
+        yc = 0
+        if len(a.shape) == 2:
+            arr = lambda i: a[:, i]
+        return -np.abs(r**2 - ((arr(0) - xc)**2 + (arr(1) - yc)**2))
+
 
     def __call__(self, a):
         return self.objective(a)
