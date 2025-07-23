@@ -69,6 +69,12 @@ class SimulatedObjective:
             self.objective = self.objective_3d
         elif function == '2D-circle':
             self.objective = self.objective_circle
+        elif function == 'blue':
+            self.objective = self.objective_blue
+        elif function == 'dark':
+            self.objective = self.objective_dark
+        elif function == 'vibrant':
+            self.objective = self.hsv_obj
         else:
             raise Exception('TODO')
         if ord_lbls:
@@ -102,6 +108,62 @@ class SimulatedObjective:
         if len(a.shape) == 2:
             arr = lambda i: a[:, i]
         return -np.abs(r**2 - ((arr(0) - xc)**2 + (arr(1) - yc)**2))
+    
+    def rgb2hsv(self, rgb):
+        """
+        Convert an array of RGB values to HSV.
+        Input: rgb array of shape (..., 3) with values in [0, 255]
+        Output: hsv array of shape (..., 3) with H in [0, 360], S and V in [0, 1]
+        """
+        rgb = np.asarray(rgb, dtype=np.float32) / 255.0
+        r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+
+        c_max = np.max(rgb, axis=-1)
+        c_min = np.min(rgb, axis=-1)
+        delta = c_max - c_min
+
+        h = np.zeros_like(c_max)
+
+        # Avoid division by zero
+        mask = delta != 0
+
+        # Red is max
+        idx = (c_max == r) & mask
+        h[idx] = (60 * ((g[idx] - b[idx]) / delta[idx]) + 360) % 360
+
+        # Green is max
+        idx = (c_max == g) & mask
+        h[idx] = (60 * ((b[idx] - r[idx]) / delta[idx]) + 120) % 360
+
+        # Blue is max
+        idx = (c_max == b) & mask
+        h[idx] = (60 * ((r[idx] - g[idx]) / delta[idx]) + 240) % 360
+
+        # Saturation
+        s = np.zeros_like(c_max)
+        s[c_max != 0] = delta[c_max != 0] / c_max[c_max != 0]
+
+        # Value
+        v = c_max
+
+        hsv = np.stack([h, s, v], axis=-1)
+        return hsv
+
+    def hsv_obj(self, rgb):
+        hsv = self.rgb2hsv(rgb)
+        if len(hsv.shape) == 2:
+            return -np.linalg.norm(hsv[:, 1:] - np.ones(2), axis=1)
+        return -np.linalg.norm(hsv[1:] - np.ones(2))
+    
+    def objective_dark(self, rgb):
+        if len(rgb.shape) == 2:
+            return -np.linalg.norm(rgb, axis=1)
+        return -np.linalg.norm(rgb)
+    
+    def objective_blue(self, a):
+        if len(a.shape) == 2:
+            return -np.linalg.norm([0, 0, 255] - a, axis=1)
+        return -np.linalg.norm([0, 0, 255] - a)
 
 
     def __call__(self, a):
