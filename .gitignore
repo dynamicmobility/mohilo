@@ -51,26 +51,6 @@ pip-delete-this-directory.txt
 *.sublime-workspace
 *.sublime-project
 
-# === C++ ===
-*.o
-*.obj
-*.so
-*.dll
-*.exe
-*.out
-*.a
-*.lib
-*.dylib
-
-# Build directories
-build/
-cmake-build-*/
-CMakeFiles/
-CMakeCache.txt
-Makefile
-cmake_install.cmake
-compile_commands.json
-
 # === General ===
 *.swp
 *~
