@@ -1,6 +1,6 @@
 # pypolar
 
-Python implementation of POLAR (Preference Optimization via Laplace Approximation of the Reward) for preference-based learning. Uses JAX for automatic differentiation and JIT compilation of likelihood functions.
+Python implementation of POLAR (Preference Optimization and Learning Algorithm for Robotics) for preference-based learning. Uses JAX for automatic differentiation and JIT compilation of likelihood functions.
 
 ## Project structure
 

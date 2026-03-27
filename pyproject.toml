@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pypolar"
 version = "0.1.0"
-description = "Preference-based learning using POLAR (Preference Optimization via Laplace Approximation of the Reward)"
+description = "Preference-based learning using POLAR (Preference Optimization and Learning Algorithm for Robotics)"
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
