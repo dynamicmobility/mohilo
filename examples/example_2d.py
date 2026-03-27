@@ -9,7 +9,7 @@ np.random.seed(20)
 pbl = PreferenceBasedLearning(
     low              = np.array([-1, -1]),
     high             = np.array([1, 1]),
-    action_dims      = np.array([10, 10]),
+    action_dims      = np.array([30, 30]),
     preference_noise = 0.01,
     coactive_noise   = 0.01,
     ordinal_noise    = 0.01,
@@ -19,7 +19,7 @@ objective = SimulatedObjective(
     smooth       = True,
     ord_lbls     = 3,
     action_space = pbl.action_space,
-    function     = '2D-circle',
+    function     = '2D',
 )
 
 # simulates feedback according to a 2D objective function
@@ -32,7 +32,7 @@ fb = SimulatedFeedback(
 sampler = RandomSampler()
 
 start = time.time()
-epochs = 20  # number of pairwise comparisons to collect
+epochs = 100  # number of pairwise comparisons to collect
 prev = sampler.sample(pbl.action_space)
 for idx in range(epochs):
     curr = sampler.sample(pbl.action_space)
