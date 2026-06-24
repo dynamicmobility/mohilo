@@ -176,6 +176,38 @@ class BasicGP:
         self.mu = res.x
         return self.mu
 
+    def posterior_cov(self, r=None):
+        """Laplace-approximation posterior covariance over the reward vector.
+
+        The fit objective is the negative log-posterior (negative log-likelihood
+        plus the GP prior term ``0.5 r^T cov_inv r``). Its Hessian at the mode is
+        the posterior precision matrix, so the posterior covariance is the
+        inverse of that Hessian. Requires ``fit()`` (or at least ``setup()``) to
+        have been called.
+
+        Args:
+            r: reward vector to linearize around (defaults to the current ``mu``)
+
+        Returns:
+            (N, N) posterior covariance matrix.
+        """
+        if r is None:
+            r = self.mu
+        precision = self.hessian(r)
+        return np.linalg.inv(precision)
+
+    def std(self, r=None):
+        """Per-action posterior standard deviation (Laplace approximation).
+
+        Args:
+            r: reward vector to linearize around (defaults to the current ``mu``)
+
+        Returns:
+            Length-N array of standard deviations, one per action.
+        """
+        var = np.diag(self.posterior_cov(r))
+        return np.sqrt(np.clip(var, 0, None))
+
     def functionalize(self, degree=2):
         """Fits a polynomial to the GP mean for continuous evaluation.
 

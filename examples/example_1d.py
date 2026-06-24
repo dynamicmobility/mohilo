@@ -24,7 +24,7 @@ objective = plr.feedback.rewards.IdealPoint(
 
 # simulates feedback according to a 1D objective function
 oracle = plr.feedback.oracles.BradleyTerryOracle(
-    beta_boltzmann = 100.0,
+    beta_boltzmann = 1.0,
     reward_fn      = objective,
     rng            = rng
 )
@@ -73,9 +73,12 @@ print(f'Train consistency: {consistent / len(train_preferences) * 100}% '
 # TODO
 
 actions = gp.actions.flatten()
+std = gp.std()
 fig, ax = plt.subplots()
 ax.scatter(actions, gp.mu, c='b', s=1)
 ax.plot(actions, gp.mu, c='b', ls='--', label='GP mean')
+ax.fill_between(actions, gp.mu - 1 * std, gp.mu + 1 * std,
+                color='b', alpha=0.2, label='GP ±σ')
 ax.set_xlabel('Action')
 ax.set_ylabel('GP reward', color='b')
 ax.tick_params(axis='y', labelcolor='b')
