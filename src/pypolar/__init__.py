@@ -3,14 +3,14 @@ jax.config.update("jax_enable_x64", True)
 
 from pypolar.pbl import PreferenceBasedLearning
 from pypolar.gp import BasicGP
-from pypolar.feedback import SimulatedFeedback, SimulatedObjective
+from pypolar import feedback
 from pypolar.sampler import RandomSampler, ThompsonSampler
 
 __all__ = [
     "PreferenceBasedLearning",
     "BasicGP",
-    "SimulatedFeedback",
-    "SimulatedObjective",
+    "rewards",
+    "oracles",
     "RandomSampler",
     "ThompsonSampler",
 ]

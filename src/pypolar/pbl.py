@@ -48,6 +48,11 @@ class PreferenceBasedLearning:
         self._jax_ordi_bounds = None
         self._compiled = False
 
+        # padded-array capacities for the data-parameterized fast path. These
+        # grow geometrically so feedback_data() returns arrays whose shapes
+        # change only occasionally, avoiding per-iteration JAX recompilation.
+        self._cap = {"pref": 0, "coac": 0, "ordi": 0}
+
     def add_feedback(
         self,
         preference: tuple[list[float] | np.ndarray, list[float] | np.ndarray, bool] | None,
@@ -200,6 +205,104 @@ class PreferenceBasedLearning:
             ret = ret + self.coactive_likelihood(r)
         if self._jax_ordi_idx is not None:
             ret = ret + self.ordinal_likelihood(r)
+        return ret
+
+    @staticmethod
+    def _grow_capacity(current: int, needed: int) -> int:
+        """Return a capacity >= needed, growing geometrically from current.
+
+        Capacity doubles whenever it is exceeded (like a dynamic array), so the
+        number of distinct array shapes seen over a run is O(log n) rather than
+        n. JAX recompiles only when a shape changes, so this bounds recompiles.
+        """
+        if needed <= current:
+            return current
+        cap = max(current, 1)
+        while cap < needed:
+            cap *= 2
+        return cap
+
+    def feedback_data(self) -> dict:
+        """Build padded JAX feedback arrays for the data-parameterized fast path.
+
+        Returns a pytree (dict) of padded index/mask arrays — one entry per
+        feedback type that has data. Unused rows are masked out (mask=0) and
+        point at index 0, so they contribute exactly zero to the likelihood,
+        its gradient, and its Hessian. Array shapes are padded to a
+        geometrically-growing capacity, so passing this dict as a runtime
+        argument to a JIT-compiled likelihood avoids recompilation until a
+        feedback type outgrows its current capacity.
+
+        Pass the result to ``likelihood_from_data`` and to ``BasicGP.setup`` /
+        ``BasicGP.set_feedback``.
+        """
+        data = {}
+
+        if self.preference_fbk:
+            n = len(self.preference_fbk)
+            cap = self._cap["pref"] = self._grow_capacity(self._cap["pref"], n)
+            idx = np.zeros((cap, 2), dtype=np.int32)
+            idx[:n] = np.asarray(self.preference_fbk, dtype=np.int32)
+            mask = np.zeros(cap)
+            mask[:n] = 1.0
+            data["pref"] = (jnp.array(idx), jnp.array(mask))
+
+        if self.coactive_fbk:
+            n = len(self.coactive_fbk)
+            cap = self._cap["coac"] = self._grow_capacity(self._cap["coac"], n)
+            idx = np.zeros((cap, 2), dtype=np.int32)
+            idx[:n] = np.asarray(self.coactive_fbk, dtype=np.int32)
+            mask = np.zeros(cap)
+            mask[:n] = 1.0
+            data["coac"] = (jnp.array(idx), jnp.array(mask))
+
+        if self.ordinal_fbk:
+            n = len(self.ordinal_fbk)
+            cap = self._cap["ordi"] = self._grow_capacity(self._cap["ordi"], n)
+            ordi = np.asarray(self.ordinal_fbk)
+            a_idx = np.zeros(cap, dtype=np.int32)
+            a_idx[:n] = ordi[:, 0]
+            bounds = np.zeros((cap, 2))
+            bounds[:n] = ordi[:, 1:]
+            mask = np.zeros(cap)
+            mask[:n] = 1.0
+            data["ordi"] = (jnp.array(a_idx), jnp.array(bounds), jnp.array(mask))
+
+        return data
+
+    def _masked_pairwise(self, r, a1, a2, mask, noise):
+        """Mask-weighted negative log-likelihood of pairwise feedback (a1 over a2)."""
+        if noise != 0:
+            nll = -jnp.log(self.sigmoid((r[a1] - r[a2]) / noise))
+        else:
+            nll = -jnp.log(jnp.where(r[a1] >= r[a2], 1.0, 0.01))
+        return jnp.sum(mask * nll)
+
+    def _masked_ordinal(self, r, a, b0, b1, mask):
+        """Mask-weighted negative log-likelihood of ordinal feedback."""
+        temp = self.sigmoid((b1 - r[a]) / self.ordinal_noise)
+        temp = temp - self.sigmoid((b0 - r[a]) / self.ordinal_noise)
+        return jnp.sum(mask * -jnp.log(temp + 1e-8))
+
+    def likelihood_from_data(self, r, data):
+        """Overall negative log-likelihood as a pure function of (r, data).
+
+        ``data`` is a pytree produced by ``feedback_data()``. Because the
+        feedback enters as a runtime argument (rather than a baked-in constant),
+        a JIT-compiled version of this function is reused across iterations and
+        recompiles only when an array shape changes. Compatible with jax.grad,
+        jax.jit, and jax.hessian. The ``in data`` checks resolve at trace time.
+        """
+        ret = 0.0
+        if "pref" in data:
+            idx, mask = data["pref"]
+            ret = ret + self._masked_pairwise(r, idx[:, 0], idx[:, 1], mask, self.preference_noise)
+        if "coac" in data:
+            idx, mask = data["coac"]
+            ret = ret + self._masked_pairwise(r, idx[:, 0], idx[:, 1], mask, self.coactive_noise)
+        if "ordi" in data:
+            a_idx, bounds, mask = data["ordi"]
+            ret = ret + self._masked_ordinal(r, a_idx, bounds[:, 0], bounds[:, 1], mask)
         return ret
 
     def predict(self, r, a1, a2) -> bool:

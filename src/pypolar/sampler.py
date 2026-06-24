@@ -25,7 +25,7 @@ class ThompsonSampler:
     sampling when no GP has been fit yet.
     """
 
-    def __init__(self, gp):
+    def __init__(self, gp, rng: np.random.Generator = np.random.default_rng()):
         """
         Args:
             gp: a BasicGP instance. Must have been fit (via gp.fit()) before
@@ -33,6 +33,7 @@ class ThompsonSampler:
                 back to uniform random.
         """
         self.gp = gp
+        self.rng = rng
         self._posterior_cov = None
         self._posterior_L = None
 
@@ -64,10 +65,10 @@ class ThompsonSampler:
             A single action from the action space.
         """
         if self.gp.mu is None or self._posterior_L is None:
-            idx = np.random.choice(a=actions.shape[0], replace=False)
+            idx = self.rng.choice(a=actions.shape[0], replace=False)
             return actions[idx]
 
         # Draw a sample from the posterior: r ~ N(mu, posterior_cov)
-        z = np.random.randn(len(self.gp.mu))
+        z = self.rng.standard_normal(len(self.gp.mu))
         r_sample = self.gp.mu + self._posterior_L @ z
         return actions[np.argmax(r_sample)]

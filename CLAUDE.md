@@ -52,7 +52,7 @@ python examples/example_2d.py
 python examples/example_3d.py
 ```
 
-`example_1d.py` is the go-to script for verifying the package works end-to-end. It collects 20 pairwise comparisons, fits a GP, evaluates prediction accuracy (~90%), and shows a matplotlib plot.
+`example_1d.py` is the go-to script for verifying the package works end-to-end. It collects 20 pairwise comparisons, fits a GP, evaluates prediction accuracy (~85%, varies with the random query trajectory), and shows a matplotlib plot.
 
 ## Package API
 
@@ -78,8 +78,10 @@ Core class that manages the discretized action space and feedback likelihoods. L
   - preference: `(curr_action, prev_action, curr_is_preferred: bool)`
   - coactive: `(suggested_action, curr_action, suggested_is_better: bool)`
   - ordinal: `(action, lower_bound, upper_bound)`
-- `compile()` - **must be called after adding feedback and before fitting/differentiating.** Converts feedback lists into JAX arrays. Clears compiled state when new feedback is added.
-- `overall_likelihood(r)` - compute total negative log-likelihood given reward vector `r`. Compatible with `jax.grad` and `jax.jit`.
+- `compile()` - **must be called after adding feedback and before using `overall_likelihood` (legacy path).** Converts feedback lists into JAX arrays. Clears compiled state when new feedback is added. Not needed for the `feedback_data` / `likelihood_from_data` fast path below.
+- `overall_likelihood(r)` - compute total negative log-likelihood given reward vector `r`. Compatible with `jax.grad` and `jax.jit`. Feedback is baked in as a constant, so a JIT'd version recompiles whenever feedback changes.
+- `feedback_data()` - build a padded JAX feedback pytree for the recompilation-free fast path. Array shapes grow geometrically (capacity doubling), so they change only O(log n) times over a run. Reads the raw feedback lists directly (no `compile()` required). Pass to `likelihood_from_data` and `BasicGP.setup`/`set_feedback`.
+- `likelihood_from_data(r, data)` - same negative log-likelihood as `overall_likelihood`, but as a pure function of `(r, data)` where `data` comes from `feedback_data()`. Because feedback is a runtime argument, a JIT'd version is reused across iterations and recompiles only when an array shape grows. Numerically identical to `overall_likelihood`.
 - `predict(r, a1, a2)` - predict whether a1 is preferred over a2 (numpy)
 - `optimal_action(r)` - return action with highest predicted reward (numpy)
 - `get_idx(action)` - map continuous action to nearest index in discretized space (numpy)
@@ -108,7 +110,10 @@ Gaussian process model that learns the latent reward function. Uses JAX autodiff
 - `mu_init_method` (str): mean initialization, currently only `'random'`
 
 **Key methods:**
-- `setup(action_space, likelihood)` - initialize GP with action space and compiled PBL likelihood. Automatically creates JIT-compiled objective, jacobian, and hessian via `jax.grad` and `jax.hessian`. The scipy-compatible wrappers handle numpy/jax conversion.
+- `setup(action_space, likelihood, feedback_data=None)` - initialize GP with action space and PBL likelihood. Automatically creates JIT-compiled objective, jacobian, and hessian via `jax.grad` and `jax.hessian`. The scipy-compatible wrappers handle numpy/jax conversion. The prior covariance and its inverse are cached and recomputed only when the action space or kernel hyperparameters change.
+  - **Legacy path** (`feedback_data=None`): `likelihood` is called as `likelihood(r)` (e.g. `pbl.overall_likelihood`). Feedback is baked in as a constant, so `setup()` must be re-run whenever feedback changes — each re-run recompiles.
+  - **Fast path** (`feedback_data` provided): pass `likelihood=pbl.likelihood_from_data` and an initial `feedback_data=pbl.feedback_data()`. Call `setup()` **once**; update feedback each iteration via `set_feedback()` with no recompilation (JAX recompiles only when a padded array shape grows).
+- `set_feedback(feedback_data)` - update the feedback pytree for the fast path without rebuilding/recompiling. Call once per iteration (instead of re-running `setup`) after adding feedback.
 - `fit(**kwargs)` - fit the GP via `scipy.optimize.minimize`. Always provides exact gradient and Hessian. Pass `method` and `options` as kwargs. Good methods: `'trust-constr'` (1D), `'trust-krylov'` (higher dims).
 - `functionalize(degree=2)` - fit a polynomial to the GP mean for continuous evaluation
 
@@ -150,15 +155,17 @@ Samples actions uniformly at random from the action space.
 
 ## Typical workflow
 
+Recommended (fast path — used by `example_1d.py`, avoids per-iteration recompilation):
+
 1. Create `PreferenceBasedLearning` to define the action space
 2. Create a feedback source (`SimulatedFeedback` for testing, or collect real feedback)
-3. Loop: sample actions, collect feedback via `evaluate()`, add via `add_feedback()`
-4. Call `pbl.compile()` to convert feedback into JAX arrays
-5. Create `BasicGP` and call `setup()` with the PBL's action space and `overall_likelihood`
-6. Call `gp.fit()` to learn the reward function (uses JAX autodiff for exact gradients)
-7. Use `pbl.predict()` or `pbl.optimal_action()` with `gp.mu`
+3. Create `BasicGP` and call `setup(action_space, pbl.likelihood_from_data, feedback_data=pbl.feedback_data())` **once**
+4. Loop: sample actions, collect feedback via `evaluate()`, add via `add_feedback()`, then `gp.set_feedback(pbl.feedback_data())` and `gp.fit()` to refit
+5. Use `pbl.predict()` or `pbl.optimal_action()` with `gp.mu`
 
-**Important:** `compile()` must be called after all `add_feedback()` calls and before `gp.setup()`. If new feedback is added after compilation, call `compile()` again and re-run `gp.setup()`.
+`mu` persists across `fit()` calls, giving a natural warm start. JAX recompiles the objective/gradient/Hessian only when a padded feedback array grows (capacity doubling), which is O(log n) times rather than every iteration.
+
+**Legacy path:** call `pbl.compile()` after all `add_feedback()` calls, then `gp.setup(action_space, pbl.overall_likelihood)`. Here feedback is baked in as a constant, so if new feedback is added you must call `compile()` again and re-run `gp.setup()` — and each re-run recompiles. Prefer the fast path for iterative loops.
 
 ## Dependencies
 

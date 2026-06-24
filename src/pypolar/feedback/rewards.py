@@ -1,52 +1,36 @@
 import numpy as np
 
+class InternalReward:
+    def __init__(self):
+        raise NotImplementedError(
+            "This is an abstract class."
+        )
+    
+    def compute(self, x):
+        raise NotImplementedError(
+            "This is an abstract class."
+        )
 
-class SimulatedFeedback:
-    """Simulates feedback from a perfect decider using a known objective function."""
+class IdealPoint(InternalReward):
+    def __init__(self, w, delta):
+        self.w = w
+        self.delta = delta
+    
+    def compute(self, x):
+        return -self.delta * np.sum(np.square(self.w - x))
+    
+    
+class NonStationaryIdealPoint(InternalReward):
+    pass
 
-    def __init__(self, objective=None, action_space=None):
-        """
-        Args:
-            objective: a callable objective function (e.g. SimulatedObjective)
-            action_space: the discretized action space (needed for coactive feedback)
-        """
-        self.objective = objective
-        self.action_space = action_space
+class MultiObjectiveIdealPoint(InternalReward):
+    def __init__(self, ideal_point_rewards: list[IdealPoint]):
+        self.ideal_point_rewards = ideal_point_rewards
 
-    def evaluate(self, curr, prev=None, get_pairwise=False, get_coactive=False, get_ordinal=False):
-        """Evaluates the current and previous actions as if a perfect decider
-        was returning their preferences.
+    def compute(self, x):
+        fs = [ip_rew.compute(x) for ip_rew in self.ideal_point_rewards]
+        return np.array(fs)
 
-        Args:
-            curr: current action
-            prev: previous action (required for pairwise feedback)
-            get_pairwise: whether to return pairwise preference feedback
-            get_coactive: whether to return coactive feedback
-            get_ordinal: whether to return ordinal feedback
-
-        Returns:
-            Tuple of (preference, coactive, ordinal), each None if not requested.
-        """
-        preference, coactive, ordinal = None, None, None
-
-        if get_pairwise:
-            if prev is None:
-                raise ValueError("curr and prev must both be specified for pairwise feedback")
-            pref_lbl = bool(self.objective(curr) >= self.objective(prev))
-            preference = (curr, prev, pref_lbl)
-
-        if get_coactive:
-            if self.action_space is None:
-                raise ValueError("action_space must not be None for coactive feedback simulation")
-            a_bar = self.action_space[np.random.choice(len(self.action_space))]
-            coac_lbl = bool(self.objective(a_bar) >= self.objective(curr))
-            coactive = (a_bar, curr, coac_lbl)
-
-        if get_ordinal:
-            b0, b1 = self.objective.get_ordinal_label(curr)
-            ordinal = (curr, b0, b1)
-
-        return preference, coactive, ordinal
 
 
 class SimulatedObjective:
