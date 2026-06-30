@@ -113,5 +113,18 @@ class MultiObjectiveOracle(BradleyTerryOracle):
             chosen_f_idx = self.rng.choice(np.arange(len(w_fs)), p=p_fs)
             return indexes[chosen_f_idx]
         
+    def mo_query(self, w: np.ndarray, v: np.ndarray):
+        """Multi-objective query that returns a vector of preferences (one for 
+        each objective function.)"""
+        # compute w on fs and v on fs
+        # compute the probability of preferring w over v for each f
+        w_fs, v_fs = self.get_groundtruth_rewards(w, v)
+        
+        p_ws, p_vs = self.compute_probabilities_from_reward(w_fs, v_fs)
+        indexes = np.array(
+            [self.rng.choice([0, 1], p=[p_w, 1 - p_w]) for p_w in p_ws]
+        )
+        return indexes
+        
     def get_groundtruth_rewards(self, w: np.ndarray, v: np.ndarray):
         return self.reward_fn.compute(w), self.reward_fn.compute(v)
