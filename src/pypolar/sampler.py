@@ -21,7 +21,7 @@ class RandomSampler:
             A single randomly selected action.
         """
         idx = self.rng.choice(a=actions.shape[0], replace=False)
-        return actions[idx]
+        return idx, actions[idx]
 
 
 class ThompsonSampler:

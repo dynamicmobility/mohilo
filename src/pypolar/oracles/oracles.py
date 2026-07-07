@@ -128,3 +128,20 @@ class MultiObjectiveOracle(BradleyTerryOracle):
         
     def get_groundtruth_rewards(self, w: np.ndarray, v: np.ndarray):
         return self.reward_fn.compute(w), self.reward_fn.compute(v)
+    
+
+class NoisyRegressionOracle:
+    def __init__(
+        self,
+        reward_fn: rewards.InternalReward,
+        noise_std: float,
+        rng: np.random.Generator
+    ):
+        self.reward_fn = reward_fn
+        self.noise_std = noise_std
+        self.rng = rng
+    
+    def query(self, x):
+        r = self.reward_fn.compute(x)
+        noisy_r = r + self.rng.normal(0, self.noise_std)
+        return noisy_r

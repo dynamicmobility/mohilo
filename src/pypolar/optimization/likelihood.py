@@ -1,8 +1,54 @@
 import numpy as np
 import jax.numpy as jnp
 
+class Likelihood:
+    def __init__(
+        self,
+        low: list[float] | np.ndarray,
+        high: list[float] | np.ndarray,
+        action_dims: list[float] | np.ndarray,
+    ):
+        """Base class for likelihood functions used for PBL/HILO + GPs.
 
-class PreferenceBasedLearning:
+        Args:
+            low: the lower bound of the action parameters
+            high: the upper bound of the action parameters
+            action_dims: the dimension of each action component (discretization)
+        """
+        # action space setup
+        self.action_space = None
+        self.low = np.asarray(low, dtype=float)
+        self.high = np.asarray(high, dtype=float)
+        self.action_dims = np.asarray(action_dims, dtype=int)
+        self.step = (self.high - self.low) / (self.action_dims - 1)
+        self.generate_action_space()
+        
+    def generate_action_space(self) -> None:
+        """Generates an action space given initial parameters (see __init__)."""
+        action_dims = []
+        for _start, _stop, _num in zip(self.low, self.high, self.action_dims):
+            action_dims.append(np.linspace(start=_start, stop=_stop, num=_num))
+
+        # Generate the grid
+        action_space = np.array(np.meshgrid(*action_dims))
+        self.action_space = action_space.reshape(len(action_space), -1).T
+        
+    def get_idx(self, action) -> int:
+        """Gets the closest index corresponding to a particular action in the
+        generated action space.
+
+        Args:
+            action: the action to find the index of
+
+        Returns:
+            The index of the action in the discretized action space.
+        """
+        ret = 0
+        for idx, (a, low, disc) in enumerate(zip(action, self.low, self.step)):
+            ret += round((a - low) / disc) * np.prod(self.action_dims[:idx])
+        return int(ret)
+    
+class PreferenceBasedLearning(Likelihood):
 
     def __init__(
         self,
@@ -25,13 +71,7 @@ class PreferenceBasedLearning:
             coactive_noise: c_c, noisiness of coactive feedback
             ordinal_noise: c_o, noisiness of ordinal feedback
         """
-        # action space setup
-        self.action_space = None
-        self.low = np.asarray(low, dtype=float)
-        self.high = np.asarray(high, dtype=float)
-        self.action_dims = np.asarray(action_dims, dtype=int)
-        self.step = (self.high - self.low) / (self.action_dims - 1)
-        self.generate_action_space()
+        super().__init__(low, high, action_dims)
 
         # feedback setup
         self.preference_noise = preference_noise
@@ -110,31 +150,6 @@ class PreferenceBasedLearning:
             self._jax_ordi_bounds = jnp.array(ordi[:, 1:])
 
         self._compiled = True
-
-    def generate_action_space(self) -> None:
-        """Generates an action space given initial parameters (see __init__)."""
-        action_dims = []
-        for _start, _stop, _num in zip(self.low, self.high, self.action_dims):
-            action_dims.append(np.linspace(start=_start, stop=_stop, num=_num))
-
-        # Generate the grid
-        action_space = np.array(np.meshgrid(*action_dims))
-        self.action_space = action_space.reshape(len(action_space), -1).T
-
-    def get_idx(self, action) -> int:
-        """Gets the closest index corresponding to a particular action in the
-        generated action space.
-
-        Args:
-            action: the action to find the index of
-
-        Returns:
-            The index of the action in the discretized action space.
-        """
-        ret = 0
-        for idx, (a, low, disc) in enumerate(zip(action, self.low, self.step)):
-            ret += round((a - low) / disc) * np.prod(self.action_dims[:idx])
-        return int(ret)
 
     @staticmethod
     def sigmoid(x):
@@ -328,3 +343,52 @@ class PreferenceBasedLearning:
             The action with the highest predicted reward.
         """
         return self.action_space[np.argmax(r)]
+
+
+class Regression(Likelihood):
+    
+    def __init__(
+        self,
+        low: list[float] | np.ndarray,
+        high: list[float] | np.ndarray,
+        action_dims: list[float] | np.ndarray,
+        precision: float = 1.0,
+    ):
+        """Sets up regression based learning, useful for HILO.
+
+        Args:
+            low: the lower bound of the action parameters
+            high: the upper bound of the action parameters
+            action_dims: the dimension of each action component (discretization)
+        """
+        super().__init__(low, high, action_dims)
+        self.precision = precision
+        self.feedback_data = np.array([], dtype=float).reshape(0, 2)  # shape (n, 2): [action_idx, value]
+        
+    def add_feedback(
+        self, 
+        action: list[float] | np.ndarray, 
+        value: float
+    ) -> None:
+        """Adds regression feedback to the class.
+
+        Args:
+            action: the action corresponding to the observed value
+            value: the observed value (regression target)
+        """
+        idx = self.get_idx(action)
+        if self.feedback_data.size == 0:
+            self.feedback_data = np.array([[idx, value]])
+        else:
+            self.feedback_data = np.vstack([self.feedback_data, [idx, value]])
+        
+    def likelihood(self, r):
+        """Computes the negative log-likelihood of the regression data given a latent reward function.
+
+        Args:
+            r: the learned latent reward function
+            y: the observed regression data
+        """
+        return self.precision * jnp.sum(
+            (r[self.feedback_data[:, 0].astype(jnp.int32)] - self.feedback_data[:, 1]) ** 2
+        )
