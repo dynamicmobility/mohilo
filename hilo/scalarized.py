@@ -27,25 +27,25 @@ sampler = plr.RandomSampler(
 )
 
 # Groundtruth oracles
-mct = plr.oracles.rewards.IdealPoint(
+mct = plr.IdealPoint(
     w     = np.array([2.0]),
     delta = 1.0,
     gamma = 1.0
 )
 W_MCT = 1.0
-mct_oracle = plr.oracles.NoisyRegressionOracle(
+mct_oracle = plr.NoisyRegressionOracle(
     reward_fn = mct,
     rng       = rng,
     noise_std = 0.0
 )
 
-sp = plr.oracles.rewards.IdealPoint(
+sp = plr.IdealPoint(
     w     = np.array([-1.5]),
     delta = 1.0,
     gamma = 1.0
 )
 W_SP = 1.0
-sp_oracle = plr.oracles.NoisyRegressionOracle(
+sp_oracle = plr.NoisyRegressionOracle(
     reward_fn = sp,
     rng       = rng,
     noise_std = 0.0,
@@ -77,9 +77,23 @@ optimizer.setup(
 optimizer.fit(method='trust-constr', options={'disp': False})
     
 ground_truth = lambda x: scalarized_reward(mct(x), sp(x))
-fig, ax = plt.subplots()
-plr.plot_gp_1d(ax, optimizer, regression, ground_truth=ground_truth)
+fig, axs = plt.subplots(ncols=3, figsize=(15,5))
+gp_ax, mct_ax, sp_ax = axs
+
+plr.plot_gp_1d(gp_ax, optimizer, regression, ground_truth=ground_truth)
+
+x = regression.action_space
+mct_ax.plot(x.ravel(), mct(x))
+mct_ax.set_title('Metabolic Cost of Transport')
+mct_ax.set_xlabel('Action')
+mct_ax.set_ylabel('Total MCT')
+
+sp_ax.plot(x.ravel(), 1 / sp(x))
+sp_ax.set_title('Walking Time')
+sp_ax.set_xlabel('Action')
+sp_ax.set_ylabel('Total Time')
+
 fig.tight_layout()
-name = 'gp_fit.pdf'
+name = 'scalarized_gp_fit.pdf'
 fig.savefig(name)
 print(f'Saved figure to {name}')

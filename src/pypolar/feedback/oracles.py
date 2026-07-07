@@ -1,5 +1,5 @@
 import numpy as np
-from pypolar.oracles import rewards
+from pypolar.feedback import rewards
 
 class PerfectOracle:
     """Simulates feedback from a perfect decider using a known objective function."""

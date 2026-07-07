@@ -38,25 +38,25 @@ sp_regression = plr.Regression(
 sampler = plr.DSTSampler(gps=[mct_optimizer, sp_optimizer], rng=rng, rho=0.05)
 
 # Groundtruth oracles
-mct = plr.oracles.rewards.IdealPoint(
+mct = plr.IdealPoint(
     w     = np.array([2.0]),
     delta = 1.0,
     gamma = 1.0
 )
 W_MCT = 1.0
-mct_oracle = plr.oracles.NoisyRegressionOracle(
+mct_oracle = plr.NoisyRegressionOracle(
     reward_fn = mct,
     rng       = rng,
     noise_std = 0.0
 )
 
-sp = plr.oracles.rewards.IdealPoint(
+sp = plr.IdealPoint(
     w     = np.array([1.0]),
     delta = 1.0,
     gamma = 1.0
 )
 W_SP = 1.0
-sp_oracle = plr.oracles.NoisyRegressionOracle(
+sp_oracle = plr.NoisyRegressionOracle(
     reward_fn = sp,
     rng       = rng,
     noise_std = 0.0,
@@ -139,6 +139,6 @@ plr.plot_gp_1d(
 )
 
 fig.tight_layout()
-name = 'gp_fit.pdf'
+name = 'mo_gp_fit.pdf'
 fig.savefig(name)   
 print(f'Saved figure to {name}')
