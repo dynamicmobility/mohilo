@@ -109,6 +109,17 @@ pareto_ax.scatter(
 
 pareto_ax.plot(mct_optimizer.mu, sp_optimizer.mu, label='GP Mean Pareto', color='green')
 
+# Uncertainty band: each action is a point (mct_mu, sp_mu) with an independent
+# std in each objective. Fill between the (mu + sigma) and (mu - sigma)
+# parametric curves to get a ribbon around the mean Pareto front.
+mct_std = mct_optimizer.std()
+sp_std = sp_optimizer.std()
+upper_x, upper_y = mct_optimizer.mu + mct_std, sp_optimizer.mu + sp_std
+lower_x, lower_y = mct_optimizer.mu - mct_std, sp_optimizer.mu - sp_std
+band_x = np.concatenate([upper_x, lower_x[::-1]])
+band_y = np.concatenate([upper_y, lower_y[::-1]])
+pareto_ax.fill(band_x, band_y, color='green', alpha=0.2, label='GP ±σ')
+
 pareto_ax.set_xlabel('Obj 1: MCT Reward')
 pareto_ax.set_ylabel('Obj 2: SP Reward')
 pareto_ax.legend()
