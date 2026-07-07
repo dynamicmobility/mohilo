@@ -3,7 +3,7 @@ os.environ["JAX_PLATFORMS"] = "cpu"
 import numpy as np
 import matplotlib.pyplot as plt
 import pypolar as plr
-from pypolar.feedback.rewards import IdealPoint, MultiObjectiveIdealPoint
+from pypolar.oracles.rewards import IdealPoint, MultiObjectiveIdealPoint
 import time
 from tqdm import tqdm
 
@@ -26,7 +26,7 @@ pbl2 = plr.PreferenceBasedLearning(
 f1 = IdealPoint(w=1.0, delta=1.0)
 f2 = IdealPoint(w=4.0, delta=1.0)
 F  = MultiObjectiveIdealPoint(ideal_point_rewards=[f1, f2])
-oracle = plr.feedback.oracles.MultiObjectiveOracle(
+oracle = plr.oracles.oracles.MultiObjectiveOracle(
     beta_boltzmann = 1.0,
     reward_fn      = F,
     rng            = rng

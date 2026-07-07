@@ -17,13 +17,13 @@ pbl = plr.PreferenceBasedLearning(
     ordinal_noise    = 0.15, # unused
 )
 
-objective = plr.feedback.rewards.IdealPoint(
+objective = plr.oracles.rewards.IdealPoint(
     w     = rng.uniform(low=0, high=6, size=(1,)),
     delta = 1.0
 )
 
 # simulates feedback according to a 1D objective function
-oracle = plr.feedback.oracles.BradleyTerryOracle(
+oracle = plr.oracles.oracles.BradleyTerryOracle(
     beta_boltzmann = 1.0,
     reward_fn      = objective,
     rng            = rng

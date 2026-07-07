@@ -2,11 +2,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def f1(x):
-    # return -(x - 2) ** 2
-    return np.sin(x)
+    return -(x - 4) ** 2
+    # return np.sin(x)
 
 def f2(x):
-    return -(x - 4) ** 2
+    return -(x - 1) ** 2
 
 fig, axs = plt.subplots(ncols=3, figsize=(12, 4))
 L, H, N = 0, 6, 100
