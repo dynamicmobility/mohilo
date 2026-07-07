@@ -51,9 +51,9 @@ sp_oracle = plr.oracles.NoisyRegressionOracle(
     noise_std = 0.0,
 )
 
-def mo_reward(mct_hat, sp_hat, w):
-    return np.dot(w, np.array([mct_hat, 1 / sp_hat])**2)
-scalarized_reward = lambda mct_hat, sp_hat: mo_reward(mct_hat, sp_hat, np.array([W_MCT, W_SP]))
+def mo_reward(mct_hat, sp_hat):
+    return np.array([mct_hat, 1 / sp_hat])**2
+scalarized_reward = lambda mct_hat, sp_hat: np.dot(np.array([W_MCT, W_SP]), mo_reward(mct_hat, sp_hat))
 
 # Run simulation
 NUM_QUERIES = 20
@@ -76,25 +76,10 @@ optimizer.setup(
 )
 optimizer.fit(method='trust-constr', options={'disp': False})
     
+ground_truth = lambda x: scalarized_reward(mct(x), sp(x))
 fig, ax = plt.subplots()
-x = regression.action_space
-y = scalarized_reward(mct(x), sp(x))
-ax.plot(x.ravel(), y, label='Ground Truth', color='blue')
-
-sampled_actions = regression.action_space[regression.feedback_data[:, 0].astype(int)]
-ax.scatter(
-    sampled_actions, 
-    scalarized_reward(mct(sampled_actions), sp(sampled_actions)), 
-    color='red', label='Feedback Data'
-)
-
-ax.plot(x.ravel(), optimizer.mu, label='GP Mean', color='green')
-ax.fill_between(x.ravel(), optimizer.mu - 1 * optimizer.std(), optimizer.mu + 1 * optimizer.std(), color='green', alpha=0.2, label='GP ±σ')
-
-ax.set_xlabel('Action')
-ax.set_ylabel('Reward')
-ax.legend()
+plr.plot_gp_1d(ax, optimizer, regression, ground_truth=ground_truth)
 fig.tight_layout()
 name = 'gp_fit.pdf'
-fig.savefig(name)   
+fig.savefig(name)
 print(f'Saved figure to {name}')
