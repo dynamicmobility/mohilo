@@ -9,6 +9,7 @@ from pypolar.feedback.rewards import (
     IdealPoint,
     NonStationaryIdealPoint,
     MultiObjectiveIdealPoint,
+    BoundedIdealPoint
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "IdealPoint",
     "NonStationaryIdealPoint",
     "MultiObjectiveIdealPoint",
+    "BoundedIdealPoint",
 ]

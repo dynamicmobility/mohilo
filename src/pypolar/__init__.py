@@ -13,6 +13,7 @@ from pypolar.feedback import (
     IdealPoint,
     NonStationaryIdealPoint,
     MultiObjectiveIdealPoint,
+    BoundedIdealPoint
 )
 
 __all__ = [
@@ -33,6 +34,7 @@ __all__ = [
     "IdealPoint",
     "NonStationaryIdealPoint",
     "MultiObjectiveIdealPoint",
+    "BoundedIdealPoint",
     # plotting
     "plot_gp_1d",
 ]

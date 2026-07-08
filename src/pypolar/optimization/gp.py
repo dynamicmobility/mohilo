@@ -18,7 +18,7 @@ class BasicGP:
         kernel="squared_exp",
         signal_variance=1,
         length_scale=1,
-        mu_init_method="random",
+        x0_init_method="random",
         rng=np.random.default_rng()
     ):
         """Approximates an unknown latent reward function using a Gaussian
@@ -32,8 +32,9 @@ class BasicGP:
         """
         self.signal_variance = signal_variance
         self.length_scale = length_scale
-        self.mu_init_method = mu_init_method
+        self.x0_init_method = x0_init_method
         self.mu = None
+        self.x0 = None
         self.f = None
         self.rng = rng
         if kernel == "squared_exp":
@@ -73,8 +74,8 @@ class BasicGP:
         """
         self.actions = action_space
         self._ensure_cov(action_space)
-        if self.mu_init_method == "random":
-            self.mu = 2 * self.rng.random(self.actions.shape[0]) - 1
+        if self.x0_init_method == "random":
+            self.x0 = 2 * self.rng.random(self.actions.shape[0]) - 1
         else:
             raise ValueError(f"Invalid mu init method: {self.mu_init_method}")
 
@@ -117,7 +118,7 @@ class BasicGP:
         """Computes the prior covariance matrix using the kernel."""
         return self.kernel(self.actions)
 
-    def fit(self, **kwargs):
+    def fit(self, set_x0=True, **kwargs):
         """Fits the Gaussian process to minimize the likelihood.
 
         Gradients and Hessians are always available via JAX autodiff.
@@ -130,11 +131,14 @@ class BasicGP:
         """
         res = minimize(
             self.objective,
-            self.mu,
+            self.x0,
             jac=self.jacobian,
             hess=self.hessian,
             **kwargs,
         )
+        if set_x0:
+            self.x0 = res.x
+        
         self.mu = res.x
         return self.mu
 
