@@ -10,7 +10,7 @@ optimizer = plr.BasicGP(
     kernel            = 'squared_exp',
     signal_variance   = 10.0,
     length_scale      = 1.0,
-    mu_init_method    = 'random',
+    x0_init_method    = 'random',
     rng               = rng
 )
 

@@ -192,3 +192,40 @@ class BasicGP:
         y_pred = model.predict(self.poly.transform(X_grid))
         self.f = lambda x: model.predict(self.poly.transform(x))
         return y_pred.reshape(len(self.actions))
+    
+
+class MultiObjectiveGP:
+    
+    def __init__(
+        self,
+        num_objs=1,
+        kernels=['squared_exp'],
+        signal_variances=[1],
+        length_scales=[1],
+        x0_init_method=['random'],
+        rng=np.random.default_rng()
+    ):
+        self.gps: list[BasicGP] = []
+        for i in range(num_objs):
+            gp = BasicGP(
+                kernel=kernels[i],
+                signal_variance=signal_variances[i],
+                length_scale=length_scales[i],
+                x0_init_method=x0_init_method[i],
+                rng=rng
+            )
+            self.gps.append(gp)
+            
+    def setup(self, action_space, likelihoods):
+        for i in range(len(self.gps)):
+            self.gps[i].setup(action_space, likelihoods[i])
+            
+    def fit(self, set_x0=True, **kwargs):
+        for gp in self.gps:
+            gp.fit(set_x0=set_x0, **kwargs)
+        
+        return [gp.mu for gp in self.gps]
+    
+    @property
+    def std(self, r=None):
+        return [gp.std(r) for gp in self.gps]

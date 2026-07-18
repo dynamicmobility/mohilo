@@ -143,5 +143,5 @@ class NoisyRegressionOracle:
     
     def query(self, x):
         r = self.reward_fn.compute(x)
-        noisy_r = r + self.rng.normal(0, self.noise_std)
+        noisy_r = r + self.rng.normal(np.zeros_like(r), self.noise_std)
         return noisy_r

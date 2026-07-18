@@ -381,7 +381,13 @@ class Regression(Likelihood):
             self.feedback_data = np.array([[idx, value]])
         else:
             self.feedback_data = np.vstack([self.feedback_data, [idx, value]])
-        
+    
+    @classmethod
+    def compute_regression_likelihood(cls, r, feedback_data, precision):
+        return precision * jnp.sum(
+            (r[feedback_data[:, 0].astype(jnp.int32)] - feedback_data[:, 1]) ** 2
+        )
+    
     def likelihood(self, r):
         """Computes the negative log-likelihood of the regression data given a latent reward function.
 
@@ -389,6 +395,73 @@ class Regression(Likelihood):
             r: the learned latent reward function
             y: the observed regression data
         """
-        return self.precision * jnp.sum(
-            (r[self.feedback_data[:, 0].astype(jnp.int32)] - self.feedback_data[:, 1]) ** 2
+        return self.compute_regression_likelihood(
+            r, self.feedback_data, self.precision
         )
+    
+class MultiObjectiveRegression(Likelihood):
+    """Many regressions that share action spaces but have different feedback 
+    data"""
+    
+    def __init__(
+        self,
+        low: list[float] | np.ndarray,
+        high: list[float] | np.ndarray,
+        action_dims: list[float] | np.ndarray,
+        num_objs: int,
+        precisions: list[float] | np.ndarray
+    ):
+        """Sets up regression based learning, useful for HILO.
+
+        Args:
+            low: the lower bound of the action parameters
+            high: the upper bound of the action parameters
+            action_dims: the dimension of each action component (discretization)
+        """
+        super().__init__(low, high, action_dims)
+        self.num_objs = num_objs
+        self.precisions = precisions
+        self.feedback_data = np.array([], dtype=float).reshape(0, self.num_objs + 1)  # shape (n, 2): [action_idx, value]
+        
+    def add_feedback(
+        self, 
+        action: list[float] | np.ndarray, 
+        values: list[float] | np.ndarray
+    ) -> None:
+        """Adds regression feedback to the class.
+
+        Args:
+            action: the action corresponding to the observed value
+            values: the observed values (regression targets)
+        """
+        idx = self.get_idx(action)
+        self.feedback_data = np.vstack([self.feedback_data, [idx, *values]])
+        
+    def likelihoods(self, r):
+        """Computes the negative log-likelihood of the regression data given a latent reward function.
+
+        Args:
+            r: the learned latent reward function
+            y: the observed regression data
+        """
+        # return [self.precisions[i] * jnp.sum(
+        #     (r[self.feedback_data[:, 0].astype(jnp.int32)] - self.feedback_data[:, i + 1]) ** 2
+        # ) for i in range(self.num_objs)]
+        
+        return self.precisions * jnp.sum(
+            (r[self.feedback_data[:, 0].astype(jnp.int32)] - self.feedback_data[:, 1:]) ** 2
+        )
+    
+    def get_likelihood_functions(self):
+
+        return [lambda r, i=i: Regression.compute_regression_likelihood(
+            r, self.feedback_data[:, [0, i + 1]], self.precisions[i]
+        ) for i in range(self.num_objs)]
+    
+
+    def get_feedback_values(self, obj=0):
+        """Zero-indexed objective"""
+        return self.feedback_data[:, obj + 1]
+
+    def get_feedback_idxs(self):
+        return self.get_feedback_values(-1).astype(np.int32)
