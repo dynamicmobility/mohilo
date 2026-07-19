@@ -3,6 +3,7 @@ os.environ["JAX_PLATFORMS"] = "cpu"
 import pypolar as plr
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 from tqdm import tqdm
 from hilo.create import create_hipexo_sim
 
@@ -31,7 +32,7 @@ def main():
     fig, axs = plt.subplots(ncols=3, figsize=(15, 5))
     pareto_ax, mct_ax, sp_ax = axs
 
-    ax = plr.plot_pareto_2d(
+    pareto_ax = plr.plot_pareto_2d(
         ax                = pareto_ax,
         optimizer         = optimizer,
         regression        = regression,
@@ -55,9 +56,9 @@ def main():
     sp_ax.set_title('Objective 2: Speed Reward')
 
     fig.tight_layout()
-    name = 'mo_gp_fit.pdf'
-    fig.savefig(name)   
-    print(f'Saved figure to {name}')
+    savepath = Path('hilo/output/mo_gp_fit.pdf')
+    fig.savefig(savepath)   
+    print(f'Saved figure to {savepath.resolve()}')
 
 if __name__ == '__main__':
     main()

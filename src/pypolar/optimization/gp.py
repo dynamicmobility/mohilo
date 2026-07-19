@@ -202,7 +202,7 @@ class MultiObjectiveGP:
         kernels=['squared_exp'],
         signal_variances=[1],
         length_scales=[1],
-        x0_init_method=['random'],
+        x0_init_methods=['random'],
         rng=np.random.default_rng()
     ):
         self.gps: list[BasicGP] = []
@@ -211,7 +211,7 @@ class MultiObjectiveGP:
                 kernel=kernels[i],
                 signal_variance=signal_variances[i],
                 length_scale=length_scales[i],
-                x0_init_method=x0_init_method[i],
+                x0_init_method=x0_init_methods[i],
                 rng=rng
             )
             self.gps.append(gp)

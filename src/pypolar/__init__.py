@@ -8,7 +8,8 @@ from pypolar.optimization.problem import (
 )
 from pypolar.optimization.gp import BasicGP, MultiObjectiveGP
 from pypolar.sampler import RandomSampler, ThompsonSampler, DSTSampler
-from pypolar.plotting import plot_gp_1d, plot_pareto_2d
+from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
+from pypolar.utils.plotting import plot_gp_1d, plot_pareto_2d
 from pypolar.feedback import (
     PerfectOracle,
     BradleyTerryOracle,
@@ -19,6 +20,7 @@ from pypolar.feedback import (
     MultiObjectiveIdealPoint,
     BoundedIdealPoint
 )
+from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
 
 __all__ = [
     # optimization
@@ -41,7 +43,15 @@ __all__ = [
     "NonStationaryIdealPoint",
     "MultiObjectiveIdealPoint",
     "BoundedIdealPoint",
+    # pareto
+    "get_pareto_statistics", 
+    "get_nondominated", 
+    "hypervolume_from_nondominated", 
+    "sparsity_from_normalized_nondominated",
     # plotting
     "plot_gp_1d",
-    "plot_pareto_2d"
+    "plot_pareto_2d",
+    # performance
+    "pareto_overlay",
+    "groundtruth_hypervolume"
 ]

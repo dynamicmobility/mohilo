@@ -1,48 +1,49 @@
 import pypolar as plr
-import numpy as np
+import config.base as config
 
-def create_hipexo_sim(rng):
+
+def create_hipexo_sim(rng, cfg: config.MOHILO):
     """
     Multi-objective problem with two objectives: Metabolic Cost of Transport
     (MCT) and Speed (SP) .
     """
+
     # Regression optimization problem
     regression = plr.MultiObjectiveRegression(
-        low           = np.array([0.0]),
-        high          = np.array([4.0]),
-        action_dims   = np.array([100]),
-        precisions    = np.array([1e1, 1e1]),
-        num_objs      = 2
+        low           = cfg.problem.action_low,
+        high          = cfg.problem.action_high,
+        action_dims   = cfg.problem.action_dims,
+        precisions    = cfg.problem.precisions,
+        num_objs      = cfg.num_objs
     )
 
     # Solver
     optimizer = plr.MultiObjectiveGP(
-        num_objs          = 2,
-        kernels           = ['squared_exp', 'squared_exp'],
-        signal_variances  = [10.0, 10.0],
-        length_scales     = [1.0, 1.0],
-        x0_init_method    = ['random', 'random'],
+        num_objs          = cfg.num_objs,
+        kernels           = cfg.optimizer.kernels,
+        signal_variances  = cfg.optimizer.signal_variances,
+        length_scales     = cfg.optimizer.length_scales,
+        x0_init_methods   = cfg.optimizer.x0_init_methods,
         rng               = rng
     )
 
     # Sampler/Acquisition function
-    sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=0.05)
+    sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(
-        w             = np.array([[2.0], [1.0]]),
-        delta         = np.array([1.0, 1.0]),
-        gamma         = np.array([0.0, 0.0]),
-        lower_bound   = np.array([0.0, 0.0]),
-        upper_bound   = np.array([8.0, 8.0])
+        w             = cfg.objective.w,
+        delta         = cfg.objective.delta,
+        gamma         = cfg.objective.gamma,
+        lower_bound   = cfg.objective.lower_bound,
+        upper_bound   = cfg.objective.upper_bound
     )
 
     # Simulated oracle with groundtruth
     oracle = plr.NoisyRegressionOracle(
         reward_fn   = groundtruth,
-        noise_std   = np.array([0.0, 0.0]),
+        noise_std   = cfg.oracle.noise_std,
         rng         = rng
     )
-
 
     return regression, optimizer, sampler, groundtruth, oracle

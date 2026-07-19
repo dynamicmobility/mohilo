@@ -12,6 +12,7 @@ dependencies = [
     "scipy",
     "scikit-learn",
     "jax[cpu]",
+    "pymoo"
 ]
 
 [project.optional-dependencies]
