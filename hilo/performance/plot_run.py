@@ -19,7 +19,7 @@ def load_run(run_dir):
     return data
 
 
-def make_gif(run_dir, savepath=None, fps=3):
+def make_gif(run_dir, savepath=None, fps=3, tol=0.0):
     """Animate a run to a gif as a 2x2 grid.
 
     Top row: the two GPs (one per objective) with mean +/- std, the groundtruth
@@ -56,8 +56,8 @@ def make_gif(run_dir, savepath=None, fps=3):
     fb_vals = feedback[:, 1:]            # (n_iters, num_objs) observed values
 
     # Per-iteration performance, computed from each iteration's GP mean
-    hvs = np.array([plr.groundtruth_hypervolume(mu[i].T, true_objs) for i in range(n_iters)])
-    overlays = np.array([plr.pareto_overlay(mu[i].T, true_objs) for i in range(n_iters)])
+    hvs = np.array([plr.groundtruth_hypervolume(mu[i].T, true_objs, tol=tol) for i in range(n_iters)])
+    overlays = np.array([plr.pareto_overlay(mu[i].T, true_objs, tol=tol) for i in range(n_iters)])
     iters = np.arange(1, n_iters + 1)
 
     fig, axs = plt.subplots(nrows=2, ncols=2, figsize=(13, 10))
@@ -148,12 +148,15 @@ def parse_args():
     parser.add_argument('--out', type=Path, default=None,
                         help='Output gif path (default: <run_dir>/gp_learning.gif).')
     parser.add_argument('--fps', type=float, default=3, help='Frames per second.')
+    parser.add_argument('--tol', type=float, default=0.0,
+                        help='Non-domination tolerance for the hv/overlay curves, as a '
+                             'fraction of each objective range (0 = strict).')
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    make_gif(args.run_dir, savepath=args.out, fps=args.fps)
+    make_gif(args.run_dir, savepath=args.out, fps=args.fps, tol=args.tol)
 
 
 if __name__ == '__main__':

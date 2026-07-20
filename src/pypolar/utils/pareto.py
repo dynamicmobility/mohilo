@@ -9,6 +9,43 @@ def get_nondominated(F, epsilon=None):
     front_indices = nds.do(-F, only_non_dominated_front=True)
     return front_indices
 
+def get_nondominated_tol(F, tol=0.0):
+    """Non-dominated front with a tolerance for "just barely" dominated points.
+
+    ``tol`` is a fraction of each objective's range (so it is scale-invariant
+    across objectives and configs). A point is dropped only when some other
+    point beats it by more than ``tol`` in *every* objective; points dominated
+    by a hair in even one objective (near-ties) are retained. This keeps
+    near-optimal actions on the front instead of excluding them for tiny
+    imperfections in the learned objectives.
+
+    With ``tol == 0`` this defers to :func:`get_nondominated` so existing
+    behavior is preserved exactly.
+
+    Args:
+        F: ``(n_points, n_objectives)`` array of objective vectors (higher is
+            better).
+        tol: tolerance as a fraction of each objective's range (e.g. ``0.02``
+            = within 2% counts as tied). ``0`` reproduces strict domination.
+
+    Returns:
+        Indices into ``F`` of the (tolerant) non-dominated points.
+    """
+    if tol <= 0:
+        return get_nondominated(F)
+
+    F = np.asarray(F, dtype=float)
+    mn = F.min(axis=0)
+    mx = F.max(axis=0)
+    rng = np.where(mx > mn, mx - mn, 1.0)
+    F_norm = (F - mn) / rng
+
+    # point j beats point i by more than tol in every objective -> i is dropped
+    diff = F_norm[None, :, :] - F_norm[:, None, :]   # (n_i, n_j, d)
+    dominated_by = np.all(diff > tol, axis=2)        # (n_i, n_j)
+    keep = ~np.any(dominated_by, axis=1)
+    return np.where(keep)[0]
+
 def hypervolume_from_nondominated(F_min):
     """Compute the hypervolume of a non-dominated front in minimization space.
 

@@ -35,8 +35,11 @@ from config.hipexo import hipexo_sim_idealized
 # --------------------------------------------------------------------------- #
 
 
-def run_experiment(seed, config, num_queries):
+def run_experiment(seed, config, num_queries, tol=0.0):
     """Run a single trial, recording the GP mean/std and feedback each iteration.
+
+    ``tol`` is the non-domination tolerance (fraction of each objective's range)
+    used for the final-iteration hv/overlay metrics.
 
     Returns a dict of numpy arrays ready to hand to ``save_run``.
     """
@@ -72,8 +75,9 @@ def run_experiment(seed, config, num_queries):
     # Final-iteration performance against the groundtruth Pareto front
     estimated_objs = mus[-1].T  # (N, num_objs)
     metrics = {
-        'hv': float(plr.groundtruth_hypervolume(estimated_objs, true_objs)),
-        'overlay': float(plr.pareto_overlay(estimated_objs, true_objs)),
+        'hv': float(plr.groundtruth_hypervolume(estimated_objs, true_objs, tol=tol)),
+        'overlay': float(plr.pareto_overlay(estimated_objs, true_objs, tol=tol)),
+        'tol': tol,
     }
 
     run_data = {
@@ -104,7 +108,7 @@ def save_run(run_dir, run_data, metrics, seed, config):
     print(f'Saved run to {run_dir.resolve()}')
 
 
-def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size):
+def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size, tol=0.0):
     """Run all trials, saving each into its own run_<idx> subfolder."""
     experiment_dir = Path(experiment_dir)
     experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -118,6 +122,7 @@ def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size):
         'n_queries': n_queries,
         'seed': seed,
         'action_size': action_size,
+        'tol': tol,
     }, indent=2))
 
     for trial in tqdm(range(n_trials)):
@@ -134,6 +139,7 @@ def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size):
             seed=trial_seed,
             config=config,
             num_queries=n_queries,
+            tol=tol,
         )
         save_run(experiment_dir / f'run_{trial:03d}', run_data, metrics, trial_seed, config)
         hvs.append(metrics['hv'])
@@ -195,6 +201,9 @@ def parse_args():
                         help='Number of queries per trial (default: 20).')
     parser.add_argument('--seed', type=int, default=95, help='Base RNG seed.')
     parser.add_argument('--action-size', type=int, default=1)
+    parser.add_argument('--tol', type=float, default=0.0,
+                        help='Non-domination tolerance for hv/overlay metrics, as a '
+                             'fraction of each objective range (0 = strict).')
     return parser.parse_args()
 
 
@@ -208,6 +217,7 @@ def main():
         n_queries=args.n_queries,
         seed=args.seed,
         action_size=args.action_size,
+        tol=args.tol,
     )
 
 
