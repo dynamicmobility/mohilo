@@ -6,14 +6,19 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from hilo.create import create_hipexo_sim
+from config.hipexo import hipexo_sim_idealized
 
 def main():
     rng = np.random.default_rng(95)
     
-    regression, optimizer, sampler, groundtruth, oracle = create_hipexo_sim(rng)
+    hipexo_sim_idealized.objective.w = np.array([[0.1], [3.9]])
+    regression, optimizer, sampler, groundtruth, oracle = create_hipexo_sim(
+        rng,
+        cfg=hipexo_sim_idealized
+    )
     
     # Run simulation
-    NUM_QUERIES = 5
+    NUM_QUERIES = 10
     for i in tqdm(range(NUM_QUERIES)):
         # Sample an action
         sample_action = sampler.sample(regression.action_space)

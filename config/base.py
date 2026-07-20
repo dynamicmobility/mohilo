@@ -1,5 +1,21 @@
+import json
+import types as _types
+import typing
+from pathlib import Path
+
 import numpy as np
 from pydantic import BaseModel, ConfigDict, model_validator
+
+
+def _annotation_types(annotation):
+    """Flatten a type annotation into its constituent types (unpacking unions)."""
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is getattr(_types, 'UnionType', ()):
+        out = []
+        for arg in typing.get_args(annotation):
+            out.extend(_annotation_types(arg))
+        return out
+    return [annotation]
 
 
 class Config(BaseModel):
@@ -15,6 +31,76 @@ class Config(BaseModel):
     def assert_equals_or_none(cls, atr, ref):
         """Asserts atr == ref OR ref is None"""
         assert (atr == ref) or (ref is None)
+
+    # ------------------------------------------------------------------ #
+    # JSON (de)serialization                                             #
+    # ------------------------------------------------------------------ #
+    def to_jsonable_dict(self):
+        """Return a JSON-safe dict (nested Configs and numpy arrays flattened)."""
+        def convert(obj):
+            if isinstance(obj, Config):
+                return {name: convert(getattr(obj, name)) for name in type(obj).model_fields}
+            if isinstance(obj, dict):
+                return {k: convert(v) for k, v in obj.items()}
+            if isinstance(obj, (list, tuple)):
+                return [convert(v) for v in obj]
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            return obj
+        return convert(self)
+
+    def to_json_string(self, **kwargs):
+        """Serialize this config to a JSON string. Extra kwargs go to json.dumps."""
+        return json.dumps(self.to_jsonable_dict(), **kwargs)
+
+    def save_json_path(self, path):
+        """Write this config to `path` as JSON. Returns the Path written."""
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(self.to_json_string(indent=2))
+        return path
+
+    @classmethod
+    def from_jsonable_dict(cls, data):
+        """Reconstruct a config from a plain dict (inverse of `to_jsonable_dict`)."""
+        kwargs = {}
+        for name, field in cls.model_fields.items():
+            if name not in data:
+                continue
+            kwargs[name] = cls._decode_field(data[name], field.annotation)
+        return cls(**kwargs)
+
+    @classmethod
+    def from_json_string(cls, s):
+        """Reconstruct a config from a JSON string."""
+        return cls.from_jsonable_dict(json.loads(s))
+
+    @classmethod
+    def load_json_path(cls, path):
+        """Load a config from a JSON file at `path`."""
+        return cls.from_jsonable_dict(json.loads(Path(path).read_text()))
+
+    @staticmethod
+    def _decode_field(value, annotation):
+        """Change a JSON value back to the type expected by a field annotation."""
+        candidates = _annotation_types(annotation)
+        # Nested Config models.
+        if isinstance(value, dict):
+            for t in candidates:
+                if isinstance(t, type) and issubclass(t, Config):
+                    return t.from_jsonable_dict(value)
+        # Lists: keep as list if a list type is expected, else rebuild ndarray.
+        if isinstance(value, list):
+            expects_list = any(
+                t is list or typing.get_origin(t) is list for t in candidates
+            )
+            if not expects_list and any(t is np.ndarray for t in candidates):
+                return np.array(value)
+        return value
 
 
 """

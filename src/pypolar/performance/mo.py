@@ -3,9 +3,11 @@ from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated
 def groundtruth_hypervolume(estimated_objs, true_objs):
     """Groundtruth hypervolume attained under the predicted Pareto-opimal action set"""
     est_nidxs = get_nondominated(estimated_objs)
+    true_nidxs = get_nondominated(true_objs)
     # est_hv = hypervolume_from_nondominated(true_objs[est_nidxs])
-    est_hv, _ = get_pareto_statistics(true_objs[est_nidxs])
-    return est_hv
+    est_hv, _  = get_pareto_statistics(true_objs[est_nidxs])
+    true_hv, _ = get_pareto_statistics(true_objs[true_nidxs])
+    return est_hv / true_hv
     
 def pareto_overlay(estimated_objs, true_objs):
     """Jaccard overlap between the estimated and true Pareto fronts.
@@ -16,6 +18,9 @@ def pareto_overlay(estimated_objs, true_objs):
     """
     est = set(get_nondominated(estimated_objs).tolist())
     true = set(get_nondominated(true_objs).tolist())
+    print(est)
+    print(true)
+    print()
     if not est:
         raise Exception('No estimated pareto front')
     return len(est & true) / len(est | true)

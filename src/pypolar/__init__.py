@@ -7,7 +7,7 @@ from pypolar.optimization.problem import (
     MultiObjectiveRegression
 )
 from pypolar.optimization.gp import BasicGP, MultiObjectiveGP
-from pypolar.sampler import RandomSampler, ThompsonSampler, DSTSampler
+from pypolar.sampler import RandomSampler, UniformSampler, ThompsonSampler, DSTSampler
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
 from pypolar.utils.plotting import plot_gp_1d, plot_pareto_2d
 from pypolar.feedback import (
@@ -31,6 +31,7 @@ __all__ = [
     "MultiObjectiveGP",
     # sampling
     "RandomSampler",
+    "UniformSampler",
     "ThompsonSampler",
     "DSTSampler",
     # feedback oracles

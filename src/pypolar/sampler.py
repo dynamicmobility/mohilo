@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.stats import qmc
 import pypolar as plr
 
 
@@ -21,7 +22,91 @@ class RandomSampler:
             A single randomly selected action.
         """
         idx = self.rng.choice(a=actions.shape[0], replace=False)
-        return idx, actions[idx]
+        return actions[idx]
+    
+    def update_posterior(self):
+        pass
+    
+class UniformSampler:
+    """Quasi-uniformly covers the action space using a Sobol sequence.
+
+    Given the total number of queries ``n``, a low-discrepancy Sobol sequence
+    is generated over the Nd bounding box of the action space and each point is
+    snapped to the nearest available discrete action. Compared to independent
+    uniform sampling, this spreads the queries far more evenly across the space
+    (lower discrepancy), which is desirable for space-filling initial designs.
+    """
+
+    def __init__(self, n: int, rng: np.random.Generator = np.random.default_rng(),
+                 scramble: bool = True, no_repeat: bool = True):
+        """
+        Args:
+            n: total number of queries the sampler will be asked to produce.
+                Used to size the Sobol sequence. Sobol's balance properties hold
+                best at powers of two, so ``2**ceil(log2(n))`` points are drawn
+                and the first ``n`` are used.
+            rng: a numpy random number generator. Used to seed the (optional)
+                Sobol scrambling for reproducibility.
+            scramble: whether to apply Owen scrambling to the Sobol sequence.
+                Scrambling breaks up the deterministic structure while keeping
+                low discrepancy, and is generally recommended.
+            no_repeat: if True, never return the same discrete action twice.
+                When a Sobol point snaps to an already-used action, the nearest
+                unused action is chosen instead.
+        """
+        self.n = int(n)
+        self.rng = rng
+        self.scramble = scramble
+        self.no_repeat = no_repeat
+        self._points = None   # (n, d) Sobol points scaled to the action bounds
+        self._cursor = 0
+        self._used = set()
+
+    def _init_points(self, actions):
+        """Lazily build the Sobol point cloud once the action dimension is known.
+
+        Args:
+            actions: array of available actions, shape (N, d).
+        """
+        d = actions.shape[1]
+        low = actions.min(axis=0)
+        high = actions.max(axis=0)
+
+        engine = qmc.Sobol(d=d, scramble=self.scramble, seed=self.rng)
+        # Draw a power-of-two number of points to preserve Sobol balance, then
+        # keep only the n we actually need.
+        m = int(np.ceil(np.log2(self.n))) if self.n > 1 else 0
+        unit = engine.random_base2(m)[:self.n]        # (n, d) in [0, 1]^d
+        self._points = qmc.scale(unit, low, high)     # scaled to the box
+
+    def sample(self, actions):
+        """Return the next Sobol point snapped to the nearest available action.
+
+        Args:
+            actions: array of available actions, shape (N, d).
+
+        Returns:
+            A single action from the action space.
+        """
+        if self._points is None:
+            self._init_points(actions)
+
+        # Wrap around if asked for more than n samples (falls back to reusing
+        # the sequence; only matters if the caller exceeds the declared n).
+        point = self._points[self._cursor % len(self._points)]
+        self._cursor += 1
+
+        # Distance from the Sobol point to every discrete action.
+        dists = np.linalg.norm(actions - point, axis=1)
+        if self.no_repeat and self._used:
+            dists = dists.copy()
+            dists[list(self._used)] = np.inf
+        idx = int(np.argmin(dists))
+        self._used.add(idx)
+        return actions[idx]
+
+    def update_posterior(self):
+        pass
 
 
 class ThompsonSampler:
