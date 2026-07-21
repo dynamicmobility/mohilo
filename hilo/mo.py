@@ -6,19 +6,19 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 from hilo.create import create_hipexo_sim
-from config.hipexo import hipexo_sim_idealized
+from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d
 
 def main():
     rng = np.random.default_rng(95)
-    
-    hipexo_sim_idealized.objective.w = np.array([[0.1], [3.9]])
+
+    config = hipexo_sim_idealized_2d
     regression, optimizer, sampler, groundtruth, oracle = create_hipexo_sim(
         rng,
-        cfg=hipexo_sim_idealized
+        cfg=config
     )
     
     # Run simulation
-    NUM_QUERIES = 10
+    NUM_QUERIES = 20
     for i in tqdm(range(NUM_QUERIES)):
         # Sample an action
         sample_action = sampler.sample(regression.action_space)
@@ -33,6 +33,19 @@ def main():
         )
         optimizer.fit(method='trust-constr', options={'disp': False})
         sampler.update_posterior()
+
+    true_objs = groundtruth(regression.action_space)
+    print(plr.groundtruth_hypervolume(
+        estimated_objs = np.array([optimizer.gps[i].mu for i in range(config.num_objs)]).T,
+        true_objs = true_objs,
+        tol=0.05
+    ))
+    print(plr.pareto_overlay(
+        estimated_objs = np.array([optimizer.gps[i].mu for i in range(config.num_objs)]).T,
+        true_objs = true_objs,
+        tol=0.05
+    ))
+    # quit()
 
     fig, axs = plt.subplots(ncols=3, figsize=(15, 5))
     pareto_ax, mct_ax, sp_ax = axs

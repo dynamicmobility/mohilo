@@ -14,25 +14,25 @@ from hilo.create import create_hipexo_sim
 from config.hipexo import hipexo_sim_idealized
 
 
-# --------------------------------------------------------------------------- #
-# Experiment folder layout                                                    #
-#                                                                             #
-#   <experiment_dir>/                                                          #
-#     experiment.json          # experiment-level metadata (args, base cfg)    #
-#     run_000/                                                                 #
-#       run.json               # seed, full config, groundtruth params         #
-#       data.npz               # mu, std, feedback, action_space, true_objs     #
-#     run_001/                                                                 #
-#     ...                                                                       #
-#                                                                             #
-# Per-run data.npz arrays:                                                     #
-#   mu           (n_queries, num_objs, N)  - GP mean per iteration/objective    #
+# ---------------------------------------------------------------------------    #
+# Experiment folder layout                                                       #
+#                                                                                #
+#   <experiment_dir>/                                                            #
+#     experiment.json          # experiment-level metadata (args, base cfg)      #
+#     run_000/                                                                   #
+#       run.json               # seed, metrics, full config (incl. groundtruth)  #
+#       data.npz               # mu, std, feedback, action_space, true_objs      #
+#     run_001/                                                                   #
+#     ...                                                                        #
+#                                                                                #
+# Per-run data.npz arrays:                                                       #
+#   mu           (n_queries, num_objs, N)  - GP mean per iteration/objective     #
 #   std          (n_queries, num_objs, N)  - GP posterior std per iter/obj       #
 #   feedback     (n_queries, num_objs + 1) - cumulative; row i = feedback added  #
 #                                            at iteration i: [action_idx, *vals] #
 #   action_space (N, d)                    - discretized action space            #
 #   true_objs    (N, num_objs)             - groundtruth objectives on the grid  #
-# --------------------------------------------------------------------------- #
+# ---------------------------------------------------------------------------    #
 
 
 def run_experiment(seed, config, num_queries, tol=0.0):
@@ -97,15 +97,14 @@ def save_run(run_dir, run_data, metrics, seed, config):
 
     np.savez(run_dir / 'data.npz', **run_data)
 
-    # (4) groundtruth objective parameters (w, delta, gamma, bounds) + full config
+    # Full config includes config.objective, i.e. the groundtruth objective
+    # parameters (w, delta, gamma, bounds) — no need to store them separately.
     meta = {
         'seed': int(seed),
         'metrics': metrics,
-        'groundtruth': config.objective.to_jsonable_dict(),
         'config': config.to_jsonable_dict(),
     }
     (run_dir / 'run.json').write_text(json.dumps(meta, indent=2))
-    print(f'Saved run to {run_dir.resolve()}')
 
 
 def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size, tol=0.0):
@@ -125,7 +124,10 @@ def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size, tol=
         'tol': tol,
     }, indent=2))
 
-    for trial in tqdm(range(n_trials)):
+    pbar = tqdm(range(n_trials), desc="Initializing")
+
+    for trial in pbar:
+        pbar.set_description(f"Running experiment {experiment_dir.name}")
         config = hipexo_sim_idealized.model_copy(deep=True)
         config.problem.action_high = np.ones(action_size) * 5.0
 
@@ -201,7 +203,7 @@ def parse_args():
                         help='Number of queries per trial (default: 20).')
     parser.add_argument('--seed', type=int, default=95, help='Base RNG seed.')
     parser.add_argument('--action-size', type=int, default=1)
-    parser.add_argument('--tol', type=float, default=0.0,
+    parser.add_argument('--tol', type=float, default=0.02,
                         help='Non-domination tolerance for hv/overlay metrics, as a '
                              'fraction of each objective range (0 = strict).')
     return parser.parse_args()

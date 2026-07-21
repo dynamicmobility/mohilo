@@ -1,4 +1,6 @@
 from scipy.optimize import minimize
+from scipy.linalg import cho_factor, cho_solve
+from numpy.linalg import LinAlgError
 import numpy as np
 import jax
 import jax.numpy as jnp
@@ -40,6 +42,11 @@ class BasicGP:
         if kernel == "squared_exp":
             self.kernel = self.squared_exp_kernel
         self._cov_key = None
+        # Closed-form fast path state (populated by setup() -> _detect_quadratic)
+        self._is_quadratic = False
+        self._quad_chol = None
+        self._quad_H = None
+        self._quad_g0 = None
 
     def _ensure_cov(self, action_space):
         """Compute (and cache) the prior covariance and its inverse.
@@ -59,7 +66,7 @@ class BasicGP:
         self.cov_inv = np.linalg.inv(self.cov)
         self._cov_key = key
 
-    def setup(self, action_space, likelihood):
+    def setup(self, action_space, likelihood, quadratic=None):
         """Initialize the GP with an action space and likelihood function.
 
         Automatically derives the Jacobian and Hessian of the full objective
@@ -71,6 +78,9 @@ class BasicGP:
             likelihood: function to minimize. accepts a reward vector over which
             the GP is defined and returns a scalar loss. Should be compatible with
             JAX (e.g. use jax.numpy instead of numpy).
+            quadratic: whether the objective is quadratic (constant Hessian),
+            enabling the closed-form ``fit()``. ``None`` (default) auto-detects;
+            pass ``True``/``False`` to force it (e.g. skip the detection cost).
         """
         self.actions = action_space
         self._ensure_cov(action_space)
@@ -97,6 +107,39 @@ class BasicGP:
         self.jacobian  = lambda r: np.asarray(self._jax_jacobian(jnp.asarray(r)))
         self.hessian   = lambda r: np.asarray(self._jax_hessian(jnp.asarray(r)))
 
+        self._detect_quadratic(quadratic)
+
+    def _detect_quadratic(self, quadratic=None):
+        """Detect whether the objective is quadratic (constant Hessian).
+
+        Args:
+            quadratic: force the detection result (True/False), or None to
+                auto-detect by checking whether the Hessian is r-independent.
+        """
+        n = self.actions.shape[0]
+        r0 = np.zeros(n)
+        H = self.hessian(r0)
+        if quadratic is None:
+            r1 = 2 * self.rng.random(n) - 1
+            quadratic = np.allclose(H, self.hessian(r1))
+
+        self._is_quadratic = bool(quadratic)
+        self._quad_chol = None
+        self._quad_H = None
+        self._quad_g0 = None
+        if not self._is_quadratic:
+            return
+
+        # Cache the constant Hessian, its Cholesky factor (reused for both the
+        # mean solve and the posterior covariance), and the linear term g0.
+        self._quad_g0 = self.jacobian(r0)   # grad(0) = g0 since grad(r) = H r + g0
+        try:
+            self._quad_chol = cho_factor(H)
+        except LinAlgError:
+            H = H + 1e-8 * np.eye(n)
+            self._quad_chol = cho_factor(H)
+        self._quad_H = H
+
     def squared_exp_kernel(self, X):
         """Computes the squared exponential kernel matrix.
 
@@ -121,14 +164,27 @@ class BasicGP:
     def fit(self, set_x0=True, **kwargs):
         """Fits the Gaussian process to minimize the likelihood.
 
-        Gradients and Hessians are always available via JAX autodiff.
+        When the objective is quadratic (regression / HILO likelihoods), the
+        minimizer has a closed form and is obtained by a single linear solve
+        ``mu = -H^{-1} g0`` reusing the cached Cholesky factor of ``H`` — exact
+        and independent of dimension. Otherwise (e.g. the sigmoid PBL
+        likelihood) it falls back to scipy's iterative solver with exact JAX
+        gradients and Hessians.
 
         Args:
-            **kwargs: passed to scipy.optimize.minimize (e.g. method, options)
+            **kwargs: passed to scipy.optimize.minimize (e.g. method, options).
+                Ignored on the closed-form path.
 
         Returns:
             The optimized mean vector.
         """
+        if self._is_quadratic:
+            # grad(r) = H r + g0 = 0  =>  r = -H^{-1} g0  (exact minimizer)
+            self.mu = cho_solve(self._quad_chol, -self._quad_g0)
+            if set_x0:
+                self.x0 = self.mu
+            return self.mu
+
         res = minimize(
             self.objective,
             self.x0,
@@ -138,7 +194,7 @@ class BasicGP:
         )
         if set_x0:
             self.x0 = res.x
-        
+
         self.mu = res.x
         return self.mu
 
@@ -157,6 +213,12 @@ class BasicGP:
         Returns:
             (N, N) posterior covariance matrix.
         """
+        # Quadratic objective: the Hessian is constant, so the Laplace posterior
+        # is exact and independent of r. Reuse the cached Cholesky factor of H
+        # rather than re-evaluating and inverting the Hessian.
+        if self._is_quadratic and self._quad_chol is not None:
+            n = self._quad_H.shape[0]
+            return cho_solve(self._quad_chol, np.eye(n))
         if r is None:
             r = self.mu
         precision = self.hessian(r)

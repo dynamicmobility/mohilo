@@ -74,7 +74,7 @@ def make_gif(run_dir, savepath=None, fps=3, tol=0.0):
         pad = 0.05 * (hi - lo + 1e-9)
         ylims.append((lo - pad, hi + pad))
 
-    w = data['meta'].get('groundtruth', {}).get('w')
+    w = data['meta'].get('config', {}).get('objective', {}).get('w')
 
     def draw_metric(ax, series, title, ylabel, color, i):
         ax.clear()
