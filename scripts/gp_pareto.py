@@ -3,7 +3,7 @@ os.environ["JAX_PLATFORMS"] = "cpu"
 import numpy as np
 import matplotlib.pyplot as plt
 import pypolar as plr
-from pypolar.oracles.rewards import IdealPoint, MultiObjectiveIdealPoint
+from pypolar import IdealPoint, MultiObjectiveIdealPoint
 import time
 from tqdm import tqdm
 
