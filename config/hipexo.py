@@ -12,7 +12,7 @@ hipexo_sim_idealized = MOHILO(
     problem = MultiObjectiveRegression(
         action_low    = np.array([0.0]),
         action_high   = np.array([4.0]),
-        action_dims   = np.array([20]),
+        action_dims   = np.array([100]),
         precisions    = np.array([1e1, 1e1]),
     ),
     optimizer = MultiObjectiveGaussianProcess(

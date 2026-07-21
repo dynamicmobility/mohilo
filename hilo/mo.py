@@ -11,7 +11,8 @@ from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d
 def main():
     rng = np.random.default_rng(95)
 
-    config = hipexo_sim_idealized_2d
+    # config = hipexo_sim_idealized_2d
+    config = hipexo_sim_idealized
     regression, optimizer, sampler, groundtruth, oracle = create_hipexo_sim(
         rng,
         cfg=config

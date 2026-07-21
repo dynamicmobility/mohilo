@@ -2,6 +2,7 @@ import os
 os.environ["JAX_PLATFORMS"] = "cpu"
 import argparse
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -32,14 +33,14 @@ from config.hipexo import hipexo_sim_idealized
 #                                            at iteration i: [action_idx, *vals] #
 #   action_space (N, d)                    - discretized action space            #
 #   true_objs    (N, num_objs)             - groundtruth objectives on the grid  #
+#   times        (n_queries,)              - wall time of each query iteration   #
+#   hvs          (n_queries,)              - groundtruth hypervolume per iter    #
+#   overlays     (n_queries,)              - pareto overlay per iteration        #
 # ---------------------------------------------------------------------------    #
 
 
-def run_experiment(seed, config, num_queries, tol=0.0):
+def run_experiment(seed, config, num_queries, tol=0.0, pbar=None):
     """Run a single trial, recording the GP mean/std and feedback each iteration.
-
-    ``tol`` is the non-domination tolerance (fraction of each objective's range)
-    used for the final-iteration hv/overlay metrics.
 
     Returns a dict of numpy arrays ready to hand to ``save_run``.
     """
@@ -50,11 +51,18 @@ def run_experiment(seed, config, num_queries, tol=0.0):
     )
 
     num_objs = len(optimizer.gps)
+    true_objs = np.asarray(groundtruth(regression.action_space))  # (N, num_objs)
 
     mus = []
     stds = []
+    times = []
+    hvs = []
+    overlays = []
 
-    for _ in tqdm(range(num_queries), disable=True):
+    for query in range(num_queries):
+        if pbar is not None:
+            pbar.set_postfix_str(f'query {query + 1}/{num_queries}')
+        start = time.time()
         # Sample an action and measure the (noisy) human performance
         sample_action = sampler.sample(regression.action_space)
         values = oracle.query(sample_action)
@@ -66,17 +74,23 @@ def run_experiment(seed, config, num_queries, tol=0.0):
         )
         optimizer.fit(method='trust-constr', options={'disp': False})
         sampler.update_posterior()
+        end = time.time()
 
         # (1) GP mean and (2) GP std per objective, this iteration
         mus.append(np.array([optimizer.gps[i].mu for i in range(num_objs)]))
         stds.append(np.array([optimizer.gps[i].std() for i in range(num_objs)]))
 
-    true_objs = np.asarray(groundtruth(regression.action_space))  # (N, num_objs)
-    # Final-iteration performance against the groundtruth Pareto front
-    estimated_objs = mus[-1].T  # (N, num_objs)
+        # Per-iteration performance against the groundtruth Pareto front. Timed
+        # separately from the query loop so metric cost isn't charged to `times`.
+        estimated_objs = mus[-1].T  # (N, num_objs)
+        times.append(end - start)
+        hvs.append(float(plr.groundtruth_hypervolume(estimated_objs, true_objs, tol=tol)))
+        overlays.append(float(plr.pareto_overlay(estimated_objs, true_objs, tol=tol)))
+
+    # Headline metrics are the final iteration's
     metrics = {
-        'hv': float(plr.groundtruth_hypervolume(estimated_objs, true_objs, tol=tol)),
-        'overlay': float(plr.pareto_overlay(estimated_objs, true_objs, tol=tol)),
+        'hv': hvs[-1],
+        'overlay': overlays[-1],
         'tol': tol,
     }
 
@@ -86,6 +100,9 @@ def run_experiment(seed, config, num_queries, tol=0.0):
         'feedback': np.asarray(regression.feedback_data),  # (n_queries, num_objs+1)
         'action_space': np.asarray(regression.action_space),   # (N, d)
         'true_objs': true_objs,
+        'times': np.asarray(times),                    # (n_queries,)
+        'hvs': np.asarray(hvs),                        # (n_queries,)
+        'overlays': np.asarray(overlays),              # (n_queries,)
     }
     return run_data, metrics
 
@@ -142,6 +159,7 @@ def run_experiments(experiment_dir, n_trials, n_queries, seed, action_size, tol=
             config=config,
             num_queries=n_queries,
             tol=tol,
+            pbar=pbar,
         )
         save_run(experiment_dir / f'run_{trial:03d}', run_data, metrics, trial_seed, config)
         hvs.append(metrics['hv'])
