@@ -28,9 +28,9 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
     )
 
     # Sampler/Acquisition function
-    sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
+    # sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
     # sampler = plr.RandomSampler(rng)
-    # sampler = plr.UniformSampler(n=20, rng=rng)
+    sampler = plr.UniformSampler(n=40, rng=rng)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(

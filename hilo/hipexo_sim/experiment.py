@@ -70,9 +70,9 @@ def run_experiment(seed, config, num_queries, tol=0.0, pbar=None):
         regression.add_feedback(sample_action, values)
         optimizer.setup(
             action_space=regression.action_space,
-            likelihoods=regression.get_likelihood_functions(),
+            regressions=regression.get_regression_data(),
         )
-        optimizer.fit(method='trust-constr', options={'disp': False})
+        optimizer.fit()
         sampler.update_posterior()
         end = time.time()
 

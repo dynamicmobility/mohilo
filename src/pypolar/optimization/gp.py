@@ -15,6 +15,9 @@ class BasicGP:
     exact gradients and Hessians to scipy.optimize.minimize.
     """
 
+    # Added to the prior covariance diagonal for numerical stability.
+    JITTER = 1e-5
+
     def __init__(
         self,
         kernel="squared_exp",
@@ -39,6 +42,7 @@ class BasicGP:
         self.x0 = None
         self.f = None
         self.rng = rng
+        self.kernel_name = kernel
         if kernel == "squared_exp":
             self.kernel = self.squared_exp_kernel
         self._cov_key = None
@@ -47,6 +51,8 @@ class BasicGP:
         self._quad_chol = None
         self._quad_H = None
         self._quad_g0 = None
+        # Woodbury fast path state (populated by setup(regression=...))
+        self._woodbury = None
 
     def _ensure_cov(self, action_space):
         """Compute (and cache) the prior covariance and its inverse.
@@ -62,11 +68,11 @@ class BasicGP:
             return
         self.actions = action_space
         self.cov = self.prior_cov()
-        np.fill_diagonal(self.cov, np.diagonal(self.cov) + 1e-5)
+        np.fill_diagonal(self.cov, np.diagonal(self.cov) + self.JITTER)
         self.cov_inv = np.linalg.inv(self.cov)
         self._cov_key = key
 
-    def setup(self, action_space, likelihood, quadratic=None):
+    def setup(self, action_space, likelihood=None, quadratic=None, regression=None):
         """Initialize the GP with an action space and likelihood function.
 
         Automatically derives the Jacobian and Hessian of the full objective
@@ -81,8 +87,17 @@ class BasicGP:
             quadratic: whether the objective is quadratic (constant Hessian),
             enabling the closed-form ``fit()``. ``None`` (default) auto-detects;
             pass ``True``/``False`` to force it (e.g. skip the detection cost).
+            regression: optional ``(idx, y, precision)`` for regression feedback.
+            When given, takes the Woodbury fast path (see ``_setup_woodbury``),
+            which never builds an N x N matrix and ignores ``likelihood``.
+            Required for large action spaces; ``likelihood`` is the fallback.
         """
         self.actions = action_space
+        if regression is not None:
+            self._setup_woodbury(action_space, regression)
+            return
+
+        self._woodbury = None
         self._ensure_cov(action_space)
         if self.x0_init_method == "random":
             self.x0 = 2 * self.rng.random(self.actions.shape[0]) - 1
@@ -157,9 +172,67 @@ class BasicGP:
         K = self.signal_variance**2 * np.exp(-0.5 * sqdist / self.length_scale**2)
         return K
 
+    def kernel_cross(self, A, B):
+        """Cross-covariance k(A, B) for an (n, d) and (m, d) set of points."""
+        if self.kernel_name != "squared_exp":
+            raise ValueError(f"No cross-kernel for kernel: {self.kernel_name}")
+        sqdist = (
+            np.sum(A**2, axis=1)[:, None]
+            + np.sum(B**2, axis=1)
+            - 2 * np.dot(A, B.T)
+        )
+        return self.signal_variance**2 * np.exp(-0.5 * sqdist / self.length_scale**2)
+
+    def prior_var(self):
+        """Prior variance k(x, x) + jitter, identical for every action."""
+        return self.signal_variance**2 + self.JITTER
+
     def prior_cov(self):
         """Computes the prior covariance matrix using the kernel."""
         return self.kernel(self.actions)
+
+    def _setup_woodbury(self, action_space, regression):
+        """Set up the data-space (Woodbury) fast path for regression feedback.
+
+        With a Gaussian prior and a Gaussian (sum-of-squares) likelihood the
+        posterior has the standard GP form, which can be evaluated in *data*
+        space: the only system solved is ``G = K_XX + sigma^2 I``, of size
+        M x M where M is the number of feedback points. This avoids ever
+        forming, inverting, or factorizing an N x N matrix, taking the fit from
+        O(N^3) to O(N M^2) and the memory from O(N^2) to O(N M).
+
+        Args:
+            action_space: (N, d) array of discretized actions.
+            regression: ``(idx, y, precision)`` — the fed-back action indices,
+                their observed values, and the likelihood precision ``lambda``.
+        """
+        idx, y, precision = regression
+        idx = np.asarray(idx, dtype=int)
+        y = np.asarray(y, dtype=float)
+        M = idx.shape[0]
+
+        X = action_space
+        eps = self.JITTER
+        # Cross/train blocks of the jittered prior covariance, without ever
+        # materializing it: Sigma = K + eps*I, so eps lands only where indices
+        # coincide.
+        K_sX = self.kernel_cross(X, X[idx])                  # (N, M)
+        K_XX = self.kernel_cross(X[idx], X[idx])             # (M, M)
+        if M:
+            K_sX[idx, np.arange(M)] += eps
+            K_XX += eps * (idx[:, None] == idx[None, :])
+
+        # Observation noise implied by the likelihood: L = lambda*||Sr-y||^2
+        # is a Gaussian NLL with sigma^2 = 1/(2*lambda).
+        sigma2 = 1.0 / (2.0 * precision)
+        G = K_XX + sigma2 * np.eye(M)
+
+        self._woodbury = {
+            "K_sX": K_sX,
+            "y": y,
+            "chol": cho_factor(G) if M else None,
+            "prior_var": self.prior_var(),
+        }
 
     def fit(self, set_x0=True, **kwargs):
         """Fits the Gaussian process to minimize the likelihood.
@@ -178,6 +251,17 @@ class BasicGP:
         Returns:
             The optimized mean vector.
         """
+        if self._woodbury is not None:
+            # Standard GP posterior mean: mu = K_sX (K_XX + sigma^2 I)^-1 y
+            w = self._woodbury
+            if w["chol"] is None:
+                self.mu = np.zeros(self.actions.shape[0])
+            else:
+                self.mu = w["K_sX"] @ cho_solve(w["chol"], w["y"])
+            if set_x0:
+                self.x0 = self.mu
+            return self.mu
+
         if self._is_quadratic:
             # grad(r) = H r + g0 = 0  =>  r = -H^{-1} g0  (exact minimizer)
             self.mu = cho_solve(self._quad_chol, -self._quad_g0)
@@ -213,6 +297,16 @@ class BasicGP:
         Returns:
             (N, N) posterior covariance matrix.
         """
+        # Woodbury path: Sigma_post = Sigma - K_sX G^-1 K_sX^T. Materializing it
+        # is O(N^2) memory — prefer std() when only the diagonal is needed.
+        if self._woodbury is not None:
+            w = self._woodbury
+            Sigma = self.kernel_cross(self.actions, self.actions)
+            np.fill_diagonal(Sigma, np.diagonal(Sigma) + self.JITTER)
+            if w["chol"] is None:
+                return Sigma
+            return Sigma - w["K_sX"] @ cho_solve(w["chol"], w["K_sX"].T)
+
         # Quadratic objective: the Hessian is constant, so the Laplace posterior
         # is exact and independent of r. Reuse the cached Cholesky factor of H
         # rather than re-evaluating and inverting the Hessian.
@@ -233,6 +327,16 @@ class BasicGP:
         Returns:
             Length-N array of standard deviations, one per action.
         """
+        # Woodbury path: get the variance diagonal directly, in O(N M^2), rather
+        # than building the full N x N posterior covariance to take its diagonal.
+        if self._woodbury is not None:
+            w = self._woodbury
+            if w["chol"] is None:
+                return np.full(self.actions.shape[0], np.sqrt(w["prior_var"]))
+            V = cho_solve(w["chol"], w["K_sX"].T)                    # (M, N)
+            var = w["prior_var"] - np.einsum("ij,ji->i", w["K_sX"], V)
+            return np.sqrt(np.clip(var, 0, None))
+
         var = np.diag(self.posterior_cov(r))
         return np.sqrt(np.clip(var, 0, None))
 
@@ -278,9 +382,19 @@ class MultiObjectiveGP:
             )
             self.gps.append(gp)
             
-    def setup(self, action_space, likelihoods):
-        for i in range(len(self.gps)):
-            self.gps[i].setup(action_space, likelihoods[i])
+    def setup(self, action_space, likelihoods=None, regressions=None):
+        """Set up each per-objective GP.
+
+        Pass ``regressions`` (a list of ``(idx, y, precision)``, e.g. from
+        ``MultiObjectiveRegression.get_regression_data()``) to take the Woodbury
+        fast path; otherwise ``likelihoods`` uses the autodiff path.
+        """
+        for i, gp in enumerate(self.gps):
+            gp.setup(
+                action_space,
+                likelihood=None if likelihoods is None else likelihoods[i],
+                regression=None if regressions is None else regressions[i],
+            )
             
     def fit(self, set_x0=True, **kwargs):
         for gp in self.gps:

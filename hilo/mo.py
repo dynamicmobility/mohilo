@@ -30,9 +30,9 @@ def main():
         regression.add_feedback(sample_action, [mct_hat, sp_hat])
         optimizer.setup(
             action_space = regression.action_space,
-            likelihoods  = regression.get_likelihood_functions()
+            regressions  = regression.get_regression_data()
         )
-        optimizer.fit(method='trust-constr', options={'disp': False})
+        optimizer.fit()
         sampler.update_posterior()
 
     true_objs = groundtruth(regression.action_space)
@@ -75,7 +75,7 @@ def main():
     sp_ax.set_title('Objective 2: Speed Reward')
 
     fig.tight_layout()
-    savepath = Path('hilo/output/mo_gp_fit.pdf')
+    savepath = Path('hilo/output/mo_gp_fit.svg')
     fig.savefig(savepath)   
     print(f'Saved figure to {savepath.resolve()}')
 

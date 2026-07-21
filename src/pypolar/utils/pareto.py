@@ -9,7 +9,7 @@ def get_nondominated(F, epsilon=None):
     front_indices = nds.do(-F, only_non_dominated_front=True)
     return front_indices
 
-def get_nondominated_tol(F, tol=0.0):
+def get_nondominated_tol(F, tol=0.0, block=512):
     """Non-dominated front with a tolerance for "just barely" dominated points.
 
     ``tol`` is a fraction of each objective's range (so it is scale-invariant
@@ -39,11 +39,18 @@ def get_nondominated_tol(F, tol=0.0):
     mx = F.max(axis=0)
     rng = np.where(mx > mn, mx - mn, 1.0)
     F_norm = (F - mn) / rng
+    n, d = F_norm.shape
 
-    # point j beats point i by more than tol in every objective -> i is dropped
-    diff = F_norm[None, :, :] - F_norm[:, None, :]   # (n_i, n_j, d)
-    dominated_by = np.all(diff > tol, axis=2)        # (n_i, n_j)
-    keep = ~np.any(dominated_by, axis=1)
+    # Point j beats point i by more than tol in every objective -> i is dropped.
+    # Blocked over i and accumulated per objective so peak memory is
+    # O(block * n) rather than O(n^2 * d).
+    keep = np.empty(n, dtype=bool)
+    for start in range(0, n, block):
+        stop = min(start + block, n)
+        dominated = np.ones((stop - start, n), dtype=bool)
+        for k in range(d):
+            dominated &= (F_norm[None, :, k] - F_norm[start:stop, None, k]) > tol
+        keep[start:stop] = ~dominated.any(axis=1)
     return np.where(keep)[0]
 
 def hypervolume_from_nondominated(F_min):

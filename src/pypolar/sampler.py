@@ -136,8 +136,7 @@ class ThompsonSampler:
         The Laplace approximation gives posterior precision = Hessian of the
         negative log-posterior at the MAP. The posterior covariance is its inverse.
         """
-        H = self.gp.hessian(self.gp.mu)
-        self._posterior_cov = np.linalg.inv(H)
+        self._posterior_cov = self.gp.posterior_cov()
         # Cholesky for efficient sampling; regularize if needed
         eigvals = np.linalg.eigvalsh(self._posterior_cov)
         if eigvals.min() < 0:
@@ -194,8 +193,7 @@ class DSTSampler:
         self._posterior_covs = []
         self._posterior_Ls = []
         for gp in self.gps:
-            H = gp.hessian(gp.mu)
-            self._posterior_covs.append(np.linalg.inv(H))
+            self._posterior_covs.append(gp.posterior_cov())
             # Cholesky for efficient sampling; regularize if needed
             eigvals = np.linalg.eigvalsh(self._posterior_covs[-1])
             if eigvals.min() < 0:

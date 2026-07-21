@@ -29,9 +29,13 @@ class Likelihood:
         for _start, _stop, _num in zip(self.low, self.high, self.action_dims):
             action_dims.append(np.linspace(start=_start, stop=_stop, num=_num))
 
-        # Generate the grid
-        action_space = np.array(np.meshgrid(*action_dims))
-        self.action_space = action_space.reshape(len(action_space), -1).T
+        # Generate the grid. Use 'ij' indexing and ravel in Fortran order so the
+        # first component varies fastest -- this is the layout get_idx assumes
+        # (index = sum_k i_k * prod(action_dims[:k])). numpy's default 'xy'
+        # indexing only transposes the first two axes, so it happens to agree
+        # for d <= 2 but disagrees for d >= 3.
+        grids = np.meshgrid(*action_dims, indexing='ij')
+        self.action_space = np.stack([g.ravel(order='F') for g in grids], axis=1)
         
     def get_idx(self, action) -> int:
         """Gets the closest index corresponding to a particular action in the
@@ -458,6 +462,18 @@ class MultiObjectiveRegression(Likelihood):
             r, self.feedback_data[:, [0, i + 1]], self.precisions[i]
         ) for i in range(self.num_objs)]
     
+
+    def get_regression_data(self):
+        """Per-objective ``(action_idx, values, precision)`` for the GP fast path.
+
+        Pass to ``MultiObjectiveGP.setup(regressions=...)`` to use the Woodbury
+        (data-space) solve instead of building the likelihood in JAX.
+        """
+        idx = self.feedback_data[:, 0].astype(np.int32)
+        return [
+            (idx, self.feedback_data[:, i + 1], self.precisions[i])
+            for i in range(self.num_objs)
+        ]
 
     def get_feedback_values(self, obj=0):
         """Zero-indexed objective"""
