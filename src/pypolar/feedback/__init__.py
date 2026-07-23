@@ -1,5 +1,4 @@
 from pypolar.feedback.oracles import (
-    PerfectOracle,
     BradleyTerryOracle,
     MultiObjectiveOracle,
     NoisyRegressionOracle,
@@ -13,7 +12,6 @@ from pypolar.feedback.rewards import (
 )
 
 __all__ = [
-    "PerfectOracle",
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
     "NoisyRegressionOracle",

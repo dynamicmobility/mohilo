@@ -4,13 +4,20 @@ from pypolar.optimization.problem import (
     Regression,
     MultiObjectiveRegression
 )
-from pypolar.optimization.gp import BasicGP, MultiObjectiveGP
+from pypolar.optimization.gp import (
+    GPModel,
+    ConjugateGP,
+    LaplaceGP,
+    MultiObjectiveGP
+)
 
 __all__ = [
     "Likelihood",
     "PreferenceBasedLearning",
     "Regression",
     "MultiObjectiveRegression",
-    "BasicGP",
+    "GPModel",
+    "ConjugateGP",
+    "LaplaceGP",
     "MultiObjectiveGP"
 ]

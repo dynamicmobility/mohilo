@@ -15,7 +15,7 @@ def plot_gp_1d(
 
     Args:
         ax: a ``matplotlib.axes.Axes`` to draw on.
-        gp: a fitted ``BasicGP`` (uses ``gp.mu`` and ``gp.std()``).
+        gp: a fitted ``GPModel`` (uses ``gp.mu`` and ``gp.std()``).
         regression: a ``Regression`` holding the action space and feedback data.
         ground_truth: optional callable mapping the action space ``(N, d)`` to a
             length-``N`` array of rewards, drawn as a reference curve.

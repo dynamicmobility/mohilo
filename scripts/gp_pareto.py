@@ -32,23 +32,19 @@ oracle = plr.MultiObjectiveOracle(
     rng            = rng
 )
 
-gp_f1   = plr.BasicGP(lengthscale=2.5, signal_var=2, rng=rng)
-gp_f2   = plr.BasicGP(lengthscale=2.5, signal_var=2, rng=rng)
+gp_f1   = plr.LaplaceGP(length_scale=2.5, signal_variance=2, rng=rng)
+gp_f2   = plr.LaplaceGP(length_scale=2.5, signal_variance=2, rng=rng)
 sampler = plr.RandomSampler(rng)
 sampler = plr.DSTSampler(gps=[gp_f1, gp_f2], rng=rng, rho=0.05)
 
 epochs = 1000  # number of pairwise comparisons to collect
-gp_f1.setup(
-    action_space  = pbl1.action_space,
-    likelihood    = pbl1.likelihood_from_data,
-    feedback_data = pbl1.feedback_data(),
-)
+def _likelihood(pbl):
+    """Bind the feedback collected so far into a single-argument likelihood."""
+    data = pbl.feedback_data()
+    return lambda r: pbl.likelihood_from_data(r, data)
 
-gp_f2.setup(
-    action_space  = pbl2.action_space,
-    likelihood    = pbl2.likelihood_from_data,
-    feedback_data = pbl2.feedback_data(),
-)
+gp_f1.set_data(pbl1.action_space, _likelihood(pbl1))
+gp_f2.set_data(pbl2.action_space, _likelihood(pbl2))
 
 train_preferences = []
 t = time.time()
@@ -65,9 +61,9 @@ for idx in tqdm(range(epochs)):
     train_preferences.append((two, one, p1, p2))
     sampler.update_posterior()
 
-    gp_f1.set_feedback(pbl1.feedback_data())
+    gp_f1.set_data(pbl1.action_space, _likelihood(pbl1))
     gp_f1.fit(method='trust-constr', options={'disp': False})
-    gp_f2.set_feedback(pbl2.feedback_data())
+    gp_f2.set_data(pbl2.action_space, _likelihood(pbl2))
     gp_f2.fit(method='trust-constr', options={'disp': False})
 print(f'Total time: {time.time() - t:.2f}s')
 

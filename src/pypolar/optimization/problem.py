@@ -252,8 +252,8 @@ class PreferenceBasedLearning(Likelihood):
         argument to a JIT-compiled likelihood avoids recompilation until a
         feedback type outgrows its current capacity.
 
-        Pass the result to ``likelihood_from_data`` and to ``BasicGP.setup`` /
-        ``BasicGP.set_feedback``.
+        Pass the result to ``likelihood_from_data`` to obtain a
+        single-argument likelihood for ``LaplaceGP.set_data``.
         """
         data = {}
 
@@ -466,7 +466,7 @@ class MultiObjectiveRegression(Likelihood):
     def get_regression_data(self):
         """Per-objective ``(action_idx, values, precision)`` for the GP fast path.
 
-        Pass to ``MultiObjectiveGP.setup(regressions=...)`` to use the Woodbury
+        Pass to ``MultiObjectiveGP.setup(regressions=...)`` to use the ConjugateGP
         (data-space) solve instead of building the likelihood in JAX.
         """
         idx = self.feedback_data[:, 0].astype(np.int32)

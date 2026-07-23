@@ -120,28 +120,23 @@ class ThompsonSampler:
     def __init__(self, gp, rng: np.random.Generator = np.random.default_rng()):
         """
         Args:
-            gp: a BasicGP instance. Must have been fit (via gp.fit()) before
+            gp: a GPModel instance (ConjugateGP or LaplaceGP). Must have been fit (via gp.fit()) before
                 Thompson sampling can be used. Before fitting, sample() falls
                 back to uniform random.
         """
         self.gp = gp
         self.rng = rng
-        self._posterior_cov = None
-        self._posterior_L = None
+        self._ready = False
 
     def update_posterior(self):
-        """Recompute the posterior covariance from the GP's Hessian at the
-        current MAP estimate. Call this after each gp.fit().
+        """Prepare the GP for posterior sampling. Call this after each gp.fit().
 
-        The Laplace approximation gives posterior precision = Hessian of the
-        negative log-posterior at the MAP. The posterior covariance is its inverse.
+        On the regression (Woodbury) path this is essentially free after the
+        first call; on the Laplace path it refactorizes the posterior covariance,
+        whose Hessian at the MAP is the posterior precision.
         """
-        self._posterior_cov = self.gp.posterior_cov()
-        # Cholesky for efficient sampling; regularize if needed
-        eigvals = np.linalg.eigvalsh(self._posterior_cov)
-        if eigvals.min() < 0:
-            self._posterior_cov += (abs(eigvals.min()) + 1e-6) * np.eye(len(self.gp.mu))
-        self._posterior_L = np.linalg.cholesky(self._posterior_cov)
+        self.gp.prepare_sampling()
+        self._ready = True
 
     def sample(self, actions):
         """Sample an action by drawing from the GP posterior and picking the
@@ -155,20 +150,19 @@ class ThompsonSampler:
         Returns:
             A single action from the action space.
         """
-        if self.gp.mu is None or self._posterior_L is None:
+        if self.gp.mu is None or not self._ready:
             idx = self.rng.choice(a=actions.shape[0], replace=False)
             return actions[idx]
 
         # Draw a sample from the posterior: r ~ N(mu, posterior_cov)
-        z = self.rng.standard_normal(len(self.gp.mu))
-        r_sample = self.gp.mu + self._posterior_L @ z
+        r_sample = self.gp.sample_posterior(self.rng)
         return actions[np.argmax(r_sample)]
 
 
 class DSTSampler:
     def __init__(
         self, 
-        gps: list[plr.BasicGP], 
+        gps: list[plr.GPModel],
         rng: np.random.Generator = np.random.default_rng(),
         rho=0.05
     ):
@@ -176,29 +170,21 @@ class DSTSampler:
         Dueling Scalarized Thompson Sampling (DST) as a multi-objective 
         acquisition function.
         Args:
-            gps: a list of BasicGP instances. Must have been fit (via gp.fit()) before
+            gps: a list of GPModel instances. Must have been fit (via gp.fit()) before
                 Thompson sampling can be used. Before fitting, sample() falls
                 back to uniform random.
         """
         self.gps = gps
         self.rng = rng
-        self._posterior_covs = None
-        self._posterior_Ls = None
+        self._ready = False
         self.rho = rho
-        
+
     def update_posterior(self):
-        """Recompute the posterior covariance from the GPs' Hessian at the
-        current MAP estimate. Call this after each gp.fit().
+        """Prepare each GP for posterior sampling. Call this after each gp.fit().
         """
-        self._posterior_covs = []
-        self._posterior_Ls = []
         for gp in self.gps:
-            self._posterior_covs.append(gp.posterior_cov())
-            # Cholesky for efficient sampling; regularize if needed
-            eigvals = np.linalg.eigvalsh(self._posterior_covs[-1])
-            if eigvals.min() < 0:
-                self._posterior_covs[-1] += (abs(eigvals.min()) + 1e-6) * np.eye(len(gp.mu))
-            self._posterior_Ls.append(np.linalg.cholesky(self._posterior_covs[-1]))
+            gp.prepare_sampling()
+        self._ready = True
 
     def sample(self, actions):
         """Sample an action by drawing from the GP posterior and picking the
@@ -213,19 +199,23 @@ class DSTSampler:
         Returns:
             A single action from the action space.
         """
-        if self.gps[0].mu is None or self._posterior_Ls is None:
+        if self.gps[0].mu is None or not self._ready:
             idx = self.rng.choice(a=actions.shape[0], replace=False)
             return actions[idx]
 
-        # Draw a sample from the posterior: r ~ N(mu, posterior_cov)
-        f_sample = []
-        for i, gp in enumerate(self.gps):
-            z = self.rng.standard_normal(len(gp.mu))
-            r_sample = gp.mu + self._posterior_Ls[i] @ z
-            f_sample.append(r_sample)
-        f_sample = np.array(f_sample)
-        
+        # One independent posterior draw per objective
+        f_sample = np.array([gp.sample_posterior(self.rng) for gp in self.gps])
+
+        # Normalize objectives
+        lo = f_sample.min(axis=1, keepdims=True)
+        hi = f_sample.max(axis=1, keepdims=True)
+        rng_ = hi - lo
+        flat = rng_ <= 1e-12
+        f_norm = np.where(flat, 0.0, (f_sample - lo) / np.where(flat, 1.0, rng_))
+
+        # Draw a sample
         theta = self.rng.dirichlet(alpha=np.ones(len(self.gps)))
-        r_sample = np.min(f_sample.T * theta) + self.rho * np.sum(f_sample.T * theta, axis=1)
-        
+        weighted = f_norm.T * theta
+        r_sample = weighted.min(axis=1) + self.rho * weighted.sum(axis=1)
+
         return actions[np.argmax(r_sample)]

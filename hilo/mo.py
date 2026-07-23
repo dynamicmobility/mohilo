@@ -19,7 +19,7 @@ def main():
     )
     
     # Run simulation
-    NUM_QUERIES = 20
+    NUM_QUERIES = 200
     for i in tqdm(range(NUM_QUERIES)):
         # Sample an action
         sample_action = sampler.sample(regression.action_space)

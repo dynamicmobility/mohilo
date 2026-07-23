@@ -30,16 +30,20 @@ oracle = plr.BradleyTerryOracle(
 )
 
 # setup the GP and Thompson sampler
-gp                = plr.BasicGP(lengthscale=1.5, signal_var=1, rng=rng)
+gp                = plr.LaplaceGP(length_scale=1.5, signal_variance=1, rng=rng)
 sampler           = plr.ThompsonSampler(gp, rng=rng)
 # sampler           = plr.RandomSampler()
 
 epochs = 20  # number of pairwise comparisons to collect
 prev = sampler.sample(pbl.action_space)
-gp.setup(
-    action_space  = pbl.action_space,
-    likelihood    = pbl.likelihood_from_data,
-    feedback_data = pbl.feedback_data(),
+def _likelihood():
+    """Bind the feedback collected so far into a single-argument likelihood."""
+    data = pbl.feedback_data()
+    return lambda r: pbl.likelihood_from_data(r, data)
+
+gp.set_data(
+    action_space = pbl.action_space,
+    likelihood   = _likelihood(),
 )
 
 train_preferences = []
@@ -55,7 +59,7 @@ for idx in range(epochs):
     train_preferences.append((curr, prev, preference))
     prev = curr
 
-    gp.set_feedback(pbl.feedback_data())
+    gp.set_data(pbl.action_space, _likelihood())
     gp.fit(method='trust-constr', options={'disp': False})
     sampler.update_posterior()
 

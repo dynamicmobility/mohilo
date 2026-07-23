@@ -36,5 +36,5 @@ python -m pytest tests/ -v
 1. Define a discretized action space with `PreferenceBasedLearning`
 2. Collect pairwise preference feedback (simulated or real)
 3. Call `pbl.compile()` to convert feedback into JAX arrays
-4. Fit a `BasicGP` to learn the latent reward — gradients and Hessians are computed automatically via JAX
+4. Fit a GP to learn the latent reward — `ConjugateGP` (closed form, for regression feedback) or `LaplaceGP` (gradients and Hessians computed automatically via JAX)
 5. Use `ThompsonSampler` to actively select the next query, or `pbl.predict()` / `pbl.optimal_action()` to use the learned reward

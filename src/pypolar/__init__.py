@@ -6,12 +6,16 @@ from pypolar.optimization.problem import (
     Regression,
     MultiObjectiveRegression
 )
-from pypolar.optimization.gp import BasicGP, MultiObjectiveGP
+from pypolar.optimization.gp import (
+    GPModel,
+    ConjugateGP,
+    LaplaceGP,
+    MultiObjectiveGP
+)
 from pypolar.sampler import RandomSampler, UniformSampler, ThompsonSampler, DSTSampler
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
 from pypolar.utils.plotting import plot_gp_1d, plot_pareto_2d
 from pypolar.feedback import (
-    PerfectOracle,
     BradleyTerryOracle,
     MultiObjectiveOracle,
     NoisyRegressionOracle,
@@ -27,7 +31,9 @@ __all__ = [
     "PreferenceBasedLearning",
     "Regression",
     "MultiObjectiveRegression",
-    "BasicGP",
+    "GPModel",
+    "ConjugateGP",
+    "LaplaceGP",
     "MultiObjectiveGP",
     # sampling
     "RandomSampler",
@@ -35,7 +41,6 @@ __all__ = [
     "ThompsonSampler",
     "DSTSampler",
     # feedback oracles
-    "PerfectOracle",
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
     "NoisyRegressionOracle",

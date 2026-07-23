@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 rng = np.random.default_rng(95)
 
 # GP Regression
-optimizer = plr.BasicGP(
+optimizer = plr.LaplaceGP(
     kernel            = 'squared_exp',
     signal_variance   = 10.0,
     length_scale      = 1.0,
@@ -70,7 +70,7 @@ for i in range(NUM_QUERIES):
     reward = scalarized_reward(mct_hat, sp_hat)
     
     regression.add_feedback(sample_action, reward)
-optimizer.setup(
+optimizer.set_data(
     action_space = regression.action_space,
     likelihood   = regression.likelihood
 )
