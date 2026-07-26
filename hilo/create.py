@@ -2,6 +2,23 @@ import pypolar as plr
 import config.base as config
 
 
+def _make_sampler(cfg_sampler, gp, rng):
+    """Build the sampler named by a sampling config."""
+    if isinstance(cfg_sampler, config.RandomSampling):
+        return plr.RandomSampler(rng)
+    if isinstance(cfg_sampler, config.ThompsonSampling):
+        return plr.ThompsonSampler(gp, rng)
+    if isinstance(cfg_sampler, config.ExpectedImprovement):
+        return plr.ExpectedImprovementSampler(gp, rng, xi=cfg_sampler.xi)
+    if isinstance(cfg_sampler, config.KnowledgeGradient):
+        return plr.KnowledgeGradientSampler(
+            gp, rng, num_candidates=cfg_sampler.num_candidates
+        )
+    if isinstance(cfg_sampler, config.MaxValueEntropy):
+        return plr.MaxValueEntropySampler(gp, rng, num_maxima=cfg_sampler.num_maxima)
+    raise ValueError(f'{type(cfg_sampler).__name__} is not a valid sampling config')
+
+
 def create_hipexo_sim(rng, cfg: config.MOHILO):
     """
     Multi-objective problem with two objectives: Metabolic Cost of Transport
@@ -55,8 +72,8 @@ def create_1d_sim(
     rng, cfg: config.HILO
 ) -> tuple[
     plr.Regression, 
-    plr.ConjugateGP, 
-    plr.ThompsonSampler | plr.RandomSampler, 
+    plr.ConjugateGP,
+    plr.RandomSampler | plr.ThompsonSampler | plr.AcquisitionSampler,
     plr.BoundedIdealPoint, 
     plr.NoisyRegressionOracle
 ]:
@@ -94,10 +111,7 @@ def create_1d_sim(
         raise Exception(f'{cfg.optimizer.gptype} is not a valid GP class in pyPolar')
 
     # Sampler/Acquisition function
-    # sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
-    # sampler = None
-    sampler = plr.RandomSampler(rng)
-    # sampler = plr.UniformSampler(n=40, rng=rng)
+    sampler = _make_sampler(cfg.sampler, optimizer, rng)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(

@@ -99,6 +99,27 @@ class ConjugateGP(GPModel):
             return Sigma
         return Sigma - self.K_sX @ cho_solve(self._gram_chol, self.K_sX.T)
 
+    def posterior_cov_cross(self, idx):
+        """Posterior covariance between every action and ``actions[idx]``, (N, C).
+
+        Evaluated in data space, in O(N M C), without forming the N x N
+        posterior covariance.
+
+        Args:
+            idx: length-C array of action indices.
+
+        Returns:
+            (N, C) block of the posterior covariance.
+        """
+        idx = np.asarray(idx, dtype=int)
+        K_sc = self.kernel_cross(self.actions, self.actions[idx])
+        K_sc[idx, np.arange(idx.shape[0])] += self.JITTER
+        if self._gram_chol is None:
+            return K_sc
+        K_Xc = self.kernel_cross(self.actions[self.idx], self.actions[idx])
+        K_Xc += self.JITTER * (self.idx[:, None] == idx[None, :])
+        return K_sc - self.K_sX @ cho_solve(self._gram_chol, K_Xc)
+
     def std(self, r=None):
         """Per-action posterior standard deviation, in O(N M^2).
 

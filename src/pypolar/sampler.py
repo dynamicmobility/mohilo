@@ -1,6 +1,75 @@
 import numpy as np
-from scipy.stats import qmc
+from scipy.stats import norm, qmc
 import pypolar as plr
+
+
+def expected_max_of_lines(a, b):
+    """``E_Z[max_i (a_i + b_i Z)]`` for ``Z ~ N(0, 1)``.
+
+    The maximum over ``i`` is the upper envelope of a set of lines in ``Z``, so
+    the expectation is exact: keep only the lines that attain the envelope
+    somewhere, and integrate each over the interval of ``Z`` on which it is on
+    top.
+
+    Args:
+        a: length-n array of intercepts.
+        b: length-n array of slopes.
+
+    Returns:
+        The expectation, a float.
+    """
+    order = np.lexsort((a, b))
+    a, b = a[order], b[order]
+
+    # Among equal slopes only the largest intercept can ever be on top.
+    keep = np.append(np.diff(b) > 0, True)
+    a, b = a[keep], b[keep]
+
+    # Sweep in order of increasing slope, popping lines whose crossing point
+    # with the incoming line falls below the previous crossing.
+    idx = [0]
+    z = [-np.inf]
+    for i in range(1, len(b)):
+        while True:
+            crossing = (a[idx[-1]] - a[i]) / (b[i] - b[idx[-1]])
+            if crossing > z[-1]:
+                break
+            idx.pop()
+            z.pop()
+        idx.append(i)
+        z.append(crossing)
+
+    a, b = a[idx], b[idx]
+    z = np.append(z, np.inf)
+    cdf, pdf = norm.cdf(z), norm.pdf(z)
+    return float(np.sum(a * np.diff(cdf) + b * -np.diff(pdf)))
+
+
+def _observation_noise(gp, noise_var):
+    """``noise_var``, or the GP's own observation noise variance."""
+    if noise_var is not None:
+        return noise_var
+    sigma2 = getattr(gp, "sigma2", None)
+    if sigma2 is None:
+        raise AttributeError(
+            f"{type(gp).__name__} does not expose an observation noise variance; "
+            "pass noise_var explicitly."
+        )
+    return sigma2
+
+
+def knowledge_gradient(mu, sigma_tilde):
+    """Expected increase in ``max(mu)`` from one observation.
+
+    Args:
+        mu: length-n posterior mean.
+        sigma_tilde: length-n direction the mean moves in, per unit standard
+            normal deviate of the observation.
+
+    Returns:
+        A non-negative float.
+    """
+    return max(expected_max_of_lines(mu, sigma_tilde) - mu.max(), 0.0)
 
 
 class RandomSampler:
@@ -157,6 +226,188 @@ class ThompsonSampler:
         # Draw a sample from the posterior: r ~ N(mu, posterior_cov)
         r_sample = self.gp.sample_posterior(self.rng)
         return actions[np.argmax(r_sample)]
+
+
+class AcquisitionSampler:
+    """Base for samplers that score every action and take the argmax.
+
+    Subclasses implement ``acquisition(actions)``. Until the GP has been fit and
+    ``update_posterior()`` called -- and for the first ``n_warmup`` queries --
+    ``sample()`` falls back to uniform random.
+    """
+
+    def __init__(self, gp, rng: np.random.Generator = np.random.default_rng(),
+                 n_warmup: int = 1):
+        """
+        Args:
+            gp: a GPModel instance.
+            rng: a numpy random number generator.
+            n_warmup: number of leading queries drawn uniformly at random.
+        """
+        self.gp = gp
+        self.rng = rng
+        self.n_warmup = n_warmup
+        self._ready = False
+        self._num_queries = 0
+
+    def update_posterior(self):
+        """Mark the posterior as usable. Call this after each gp.fit()."""
+        self._ready = True
+
+    def acquisition(self, actions):
+        """Score every action. Higher is better.
+
+        Args:
+            actions: array of available actions, shape (N, d).
+
+        Returns:
+            Length-N array of scores.
+        """
+        raise NotImplementedError
+
+    def sample(self, actions):
+        """Return the action with the highest acquisition score.
+
+        Ties are broken uniformly at random.
+
+        Args:
+            actions: array of available actions, shape (N, d).
+
+        Returns:
+            A single action from the action space.
+        """
+        self._num_queries += 1
+        if (self.gp.mu is None or not self._ready
+                or self._num_queries <= self.n_warmup):
+            return actions[self.rng.choice(actions.shape[0])]
+
+        scores = self.acquisition(actions)
+        best = np.flatnonzero(scores >= scores.max() - 1e-12)
+        return actions[self.rng.choice(best)]
+
+
+class ExpectedImprovementSampler(AcquisitionSampler):
+    """Selects actions by expected improvement over the best posterior mean.
+
+        EI(x) = s(x) * (z Phi(z) + phi(z)),   z = (mu(x) - max(mu) - xi) / s(x)
+
+    The incumbent is the best posterior *mean* rather than the best observed
+    value, which under noisy observations is biased upward. The same action can
+    be returned more than once; repeat observations average the noise down.
+    """
+
+    def __init__(self, gp, rng: np.random.Generator = np.random.default_rng(),
+                 xi: float = 0.0, n_warmup: int = 1):
+        """
+        Args:
+            gp: a GPModel instance.
+            rng: a numpy random number generator.
+            xi: improvement threshold. Larger values explore more.
+            n_warmup: number of leading queries drawn uniformly at random.
+        """
+        super().__init__(gp, rng, n_warmup)
+        self.xi = xi
+
+    def acquisition(self, actions):
+        mu, std = self.gp.mu, self.gp.std()
+        safe = np.where(std > 0, std, 1.0)
+        z = (mu - mu.max() - self.xi) / safe
+        return np.where(std > 0, std * (z * norm.cdf(z) + norm.pdf(z)), 0.0)
+
+
+class KnowledgeGradientSampler(AcquisitionSampler):
+    """Selects actions by the expected increase in the best posterior mean.
+
+    Observing action ``c`` moves the whole posterior mean along a fixed
+    direction scaled by one standard normal deviate,
+
+        sigma_tilde = Sigma[:, c] / sqrt(noise_var + Sigma[c, c]),
+
+    so ``KG(c) = E_Z[max(mu + sigma_tilde Z)] - max(mu)`` is available in closed
+    form. Costs O(C N log N) for C candidates over N actions. The same action
+    can be returned more than once.
+    """
+
+    def __init__(self, gp, rng: np.random.Generator = np.random.default_rng(),
+                 noise_var: float = None, num_candidates: int = None,
+                 n_warmup: int = 1):
+        """
+        Args:
+            gp: a GPModel instance.
+            rng: a numpy random number generator.
+            noise_var: observation noise variance. Defaults to the GP's own
+                ``sigma2``, which only the ConjugateGP backend defines.
+            num_candidates: number of actions to score, drawn uniformly without
+                replacement. None scores every action.
+            n_warmup: number of leading queries drawn uniformly at random.
+        """
+        super().__init__(gp, rng, n_warmup)
+        self.noise_var = noise_var
+        self.num_candidates = num_candidates
+
+    def acquisition(self, actions):
+        n = actions.shape[0]
+        if self.num_candidates is None or self.num_candidates >= n:
+            idx = np.arange(n)
+        else:
+            idx = self.rng.choice(n, size=self.num_candidates, replace=False)
+
+        mu = self.gp.mu
+        cov = self.gp.posterior_cov_cross(idx)                       # (N, C)
+        noise_var = _observation_noise(self.gp, self.noise_var)
+        denom = np.sqrt(noise_var + cov[idx, np.arange(idx.shape[0])])
+
+        scores = np.full(n, -np.inf)
+        for j, c in enumerate(idx):
+            scores[c] = knowledge_gradient(mu, cov[:, j] / denom[j])
+        return scores
+
+
+class MaxValueEntropySampler(AcquisitionSampler):
+    """Selects actions by mutual information with the maximum reward value.
+
+    The maxima of joint posterior samples serve as samples of ``f*``, and the
+    information gain about ``f*`` from observing ``x`` has the closed form
+
+        g   = (f* - mu(x)) / sqrt(s(x)^2 + noise_var)
+        MES = mean over f* of [ g phi(g) / (2 Phi(g)) - log Phi(g) ].
+    """
+
+    def __init__(self, gp, rng: np.random.Generator = np.random.default_rng(),
+                 num_maxima: int = 32, noise_var: float = None,
+                 n_warmup: int = 1):
+        """
+        Args:
+            gp: a GPModel instance.
+            rng: a numpy random number generator.
+            num_maxima: number of posterior samples of ``f*``.
+            noise_var: observation noise variance. Defaults to the GP's own
+                ``sigma2``, which only the ConjugateGP backend defines.
+            n_warmup: number of leading queries drawn uniformly at random.
+        """
+        super().__init__(gp, rng, n_warmup)
+        self.num_maxima = num_maxima
+        self.noise_var = noise_var
+        self._maxima = None
+
+    def update_posterior(self):
+        """Redraw the samples of ``f*``. Call this after each gp.fit()."""
+        self.gp.prepare_sampling()
+        self._maxima = np.array([
+            self.gp.sample_posterior(self.rng).max()
+            for _ in range(self.num_maxima)
+        ])
+        self._ready = True
+
+    def acquisition(self, actions):
+        mu = self.gp.mu
+        noise_var = _observation_noise(self.gp, self.noise_var)
+        denom = np.sqrt(self.gp.std() ** 2 + noise_var)
+        maxima = np.maximum(self._maxima, mu.max())
+
+        g = (maxima[:, None] - mu[None, :]) / denom[None, :]
+        cdf = np.clip(norm.cdf(g), 1e-12, None)
+        return (g * norm.pdf(g) / (2 * cdf) - np.log(cdf)).mean(axis=0)
 
 
 class DSTSampler:

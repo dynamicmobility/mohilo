@@ -102,5 +102,5 @@ class BoundedIdealPoint(InternalReward):
 
     def compute(self, x):
         reward = self._ideal_point(x)
-        normed = sigmoid(reward)
+        normed = 2 * (sigmoid(reward) - 0.5 * (self.delta < 0))
         return (self.upper_bound - self.lower_bound) * normed + self.lower_bound

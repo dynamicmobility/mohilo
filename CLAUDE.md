@@ -17,17 +17,16 @@ pypolar/
 │   │   ├── laplace.py          # LaplaceGP - JAX autodiff + scipy for other likelihoods
 │   │   └── multi.py            # MultiObjectiveGP
 │   ├── feedback.py             # SimulatedFeedback, SimulatedObjective - feedback simulation
-│   └── sampler.py              # RandomSampler - action sampling
+│   └── sampler.py              # Action sampling and acquisition functions
 ├── examples/                   # Runnable example scripts
 │   ├── example_1d.py           # 1D preference learning (verification script)
 │   ├── example_2d.py           # 2D preference learning with 3D plots
 │   └── example_3d.py           # 3D (RGB color) preference learning
 ├── scripts/                    # Scratch/experimentation files (not part of package)
 └── tests/                      # pytest test suite
-    ├── test_pbl.py             # Tests for PreferenceBasedLearning + JAX compatibility
-    ├── test_gp.py              # Tests for the GP models
-    ├── test_feedback.py        # Tests for SimulatedFeedback/SimulatedObjective
-    └── test_sampler.py         # Tests for RandomSampler
+    ├── test_public_api.py            # Tests that every __all__ name imports
+    ├── test_no_stale_references.py   # Tests for dangling references
+    └── test_acquisition.py           # Tests for the acquisition functions
 ```
 
 ## Environment setup
@@ -46,7 +45,7 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-47 tests covering action space generation, index mapping, sigmoid functions, feedback collection, likelihood computation, JAX grad/jit compatibility, GP kernel/fitting, and sampling.
+101 tests covering the public API surface, dangling references, the acquisition functions and their closed forms, and the posterior cross-covariance.
 
 ## How to run examples
 
@@ -108,8 +107,13 @@ value = jitted_likelihood(jnp.array(r))
 
 The GP is split by **posterior representation**. Both backends implement the same
 contract, so samplers and plotting are backend-agnostic:
-`set_data(...)` -> `fit()` / `std()` / `posterior_cov()` / `prepare_sampling()` /
-`sample_posterior(rng)`.
+`set_data(...)` -> `fit()` / `std()` / `posterior_cov()` / `posterior_cov_cross(idx)` /
+`prepare_sampling()` / `sample_posterior(rng)`.
+
+`posterior_cov_cross(idx)` returns the (N, C) block of the posterior covariance between
+every action and `actions[idx]`. The base implementation slices `posterior_cov()`;
+`ConjugateGP` overrides it with an O(N M C) data-space form that never builds the N x N
+matrix.
 
 - `gp/kernels.py` - `SquaredExponential`, `make_kernel`
 - `gp/base.py` - `GPModel` ABC: kernel algebra, cached prior Cholesky, `functionalize`
@@ -204,12 +208,40 @@ Callable objective function for testing. Supports multiple built-in functions.
 
 **Usage:** call the instance directly: `objective(action)` or `objective(batch_of_actions)`
 
-### RandomSampler (`sampler.py`)
+### Samplers (`sampler.py`)
 
-Samples actions uniformly at random from the action space.
+Every sampler implements `sample(actions)` -> a single action, and
+`update_posterior()`, called after each `gp.fit()`.
 
-**Key method:**
-- `sample(actions)` - returns a single randomly chosen action from the array
+- `RandomSampler(rng)` - uniform random.
+- `UniformSampler(n, rng, ...)` - Sobol sequence snapped to the discrete actions.
+- `ThompsonSampler(gp, rng)` - argmax of a posterior draw.
+- `DSTSampler(gps, rng, rho)` - dueling scalarized Thompson sampling, multi-objective.
+
+`AcquisitionSampler` is the base for samplers that score every action and take the
+argmax, with uniform tie-breaking. Until the GP is fit and `update_posterior()` has been
+called -- and for the first `n_warmup` queries -- they fall back to uniform random.
+Subclasses implement `acquisition(actions)` -> length-N scores:
+
+- `ExpectedImprovementSampler(gp, rng, xi=0.0)` - improvement over the best posterior
+  mean. `xi` trades off exploration.
+- `KnowledgeGradientSampler(gp, rng, noise_var=None, num_candidates=None)` - exact
+  discrete KG, the expected increase in `max(mu)` from one observation. Costs
+  O(C N log N); use `num_candidates` to subsample on large action spaces. `noise_var`
+  defaults to `gp.sigma2`, which only `ConjugateGP` defines.
+- `MaxValueEntropySampler(gp, rng, num_maxima=32, noise_var=None)` - mutual information
+  with the maximum reward value, using posterior-sample maxima as samples of `f*`.
+
+EI and KG may return the same action more than once; repeat observations average the
+noise down.
+
+Module-level helpers: `expected_max_of_lines(a, b)` (exact `E_Z[max_i(a_i + b_i Z)]`) and
+`knowledge_gradient(mu, sigma_tilde)`.
+
+**Note:** every GP here has a zero prior mean. On an objective that is not centered near
+zero, the posterior mean over unexplored actions sits far below the sampled `f*`, which
+drives `MaxValueEntropySampler` to exploit the known peak and never explore. Center the
+feedback values before fitting if you want MES to behave.
 
 ## Typical workflow
 

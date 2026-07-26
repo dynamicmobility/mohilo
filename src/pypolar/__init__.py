@@ -12,9 +12,21 @@ from pypolar.optimization.gp import (
     LaplaceGP,
     MultiObjectiveGP
 )
-from pypolar.sampler import RandomSampler, UniformSampler, ThompsonSampler, DSTSampler
+from pypolar.sampler import (
+    RandomSampler,
+    UniformSampler,
+    ThompsonSampler,
+    DSTSampler,
+    AcquisitionSampler,
+    ExpectedImprovementSampler,
+    KnowledgeGradientSampler,
+    MaxValueEntropySampler,
+    expected_max_of_lines,
+    knowledge_gradient
+)
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
 from pypolar.utils.plotting import plot_gp_1d, plot_pareto_2d
+from pypolar.utils.gp import derive_gp_hyperparams, derive_lengthscale, derive_precision, derive_prior_variance
 from pypolar.feedback import (
     BradleyTerryOracle,
     MultiObjectiveOracle,
@@ -40,6 +52,12 @@ __all__ = [
     "UniformSampler",
     "ThompsonSampler",
     "DSTSampler",
+    "AcquisitionSampler",
+    "ExpectedImprovementSampler",
+    "KnowledgeGradientSampler",
+    "MaxValueEntropySampler",
+    "expected_max_of_lines",
+    "knowledge_gradient",
     # feedback oracles
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
@@ -60,5 +78,10 @@ __all__ = [
     "plot_pareto_2d",
     # performance
     "pareto_overlay",
-    "groundtruth_hypervolume"
+    "groundtruth_hypervolume",
+    # utils.gp
+    "derive_gp_hyperparams", 
+    "derive_lengthscale", 
+    "derive_precision", 
+    "derive_prior_variance"
 ]

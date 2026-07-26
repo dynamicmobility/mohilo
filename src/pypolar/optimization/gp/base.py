@@ -133,6 +133,17 @@ class GPModel(ABC):
     def std(self, r=None):
         """Length-N array of per-action posterior standard deviations."""
 
+    def posterior_cov_cross(self, idx):
+        """Posterior covariance between every action and ``actions[idx]``, (N, C).
+
+        Args:
+            idx: length-C array of action indices.
+
+        Returns:
+            (N, C) block of the posterior covariance.
+        """
+        return self.posterior_cov()[:, np.asarray(idx, dtype=int)]
+
     @abstractmethod
     def prepare_sampling(self):
         """Prepare the state needed by ``sample_posterior()``. Call after fit."""

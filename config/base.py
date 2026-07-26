@@ -180,6 +180,16 @@ class DSTS(Config):
     def validate(self):
         assert 0 < self.rho < 1
         return self
+class ExpectedImprovement(Config):
+    xi: float = 0.0
+class KnowledgeGradient(Config):
+    num_candidates: int | None = None
+class MaxValueEntropy(Config):
+    num_maxima: int = 32
+
+    def validate(self):
+        assert self.num_maxima > 0
+        return self
 
 
 """
@@ -233,7 +243,8 @@ class MOHILO(Config):
 class HILO(Config):
     problem:    Regression
     optimizer:  GaussianProcess
-    sampler:    ThompsonSampling | RandomSampling
+    sampler:    (ThompsonSampling | RandomSampling | ExpectedImprovement
+                 | KnowledgeGradient | MaxValueEntropy)
     objective:  BoundedIdealPoint
     oracle:     NoisyRegressionOracle
     save_dir:   str
