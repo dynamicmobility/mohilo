@@ -381,10 +381,7 @@ class Regression(Likelihood):
             value: the observed value (regression target)
         """
         idx = self.get_idx(action)
-        if self.feedback_data.size == 0:
-            self.feedback_data = np.array([[idx, value]])
-        else:
-            self.feedback_data = np.vstack([self.feedback_data, [idx, value]])
+        self.feedback_data = np.vstack([self.feedback_data, [idx, value]])
     
     @classmethod
     def compute_regression_likelihood(cls, r, feedback_data, precision):
@@ -402,6 +399,13 @@ class Regression(Likelihood):
         return self.compute_regression_likelihood(
             r, self.feedback_data, self.precision
         )
+    
+    def get_feedback_values(self):
+        """Zero-indexed objective"""
+        return self.feedback_data[:, 1]
+
+    def get_feedback_idxs(self):
+        return self.feedback_data[:, 0].astype(np.int32)
     
 class MultiObjectiveRegression(Likelihood):
     """Many regressions that share action spaces but have different feedback 
@@ -478,6 +482,6 @@ class MultiObjectiveRegression(Likelihood):
     def get_feedback_values(self, obj=0):
         """Zero-indexed objective"""
         return self.feedback_data[:, obj + 1]
-
+    
     def get_feedback_idxs(self):
         return self.get_feedback_values(-1).astype(np.int32)

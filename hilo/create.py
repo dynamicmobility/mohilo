@@ -49,3 +49,70 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
     )
 
     return regression, optimizer, sampler, groundtruth, oracle
+
+
+def create_1d_sim(
+    rng, cfg: config.HILO
+) -> tuple[
+    plr.Regression, 
+    plr.ConjugateGP, 
+    plr.ThompsonSampler | plr.RandomSampler, 
+    plr.BoundedIdealPoint, 
+    plr.NoisyRegressionOracle
+]:
+    """
+    Single-objective problem with one objective: Metabolic Cost of Transport
+    (MCT) .
+    """
+
+    # Regression optimization problem
+    regression = plr.Regression(
+        low           = cfg.problem.action_low,
+        high          = cfg.problem.action_high,
+        action_dims   = cfg.problem.action_dims,
+        precision     = cfg.problem.precision
+    )
+
+    # Solver
+    if cfg.optimizer.gptype == 'LaplaceGP':
+        optimizer = plr.LaplaceGP(
+            kernel           = cfg.optimizer.kernel,
+            signal_variance  = cfg.optimizer.signal_variance,
+            length_scale     = cfg.optimizer.length_scale,
+            x0_init_method   = cfg.optimizer.x0_init_method,
+            rng              = rng
+        )
+    elif cfg.optimizer.gptype == 'ConjugateGP':
+        optimizer = plr.ConjugateGP(
+            kernel           = cfg.optimizer.kernel,
+            signal_variance  = cfg.optimizer.signal_variance,
+            length_scale     = cfg.optimizer.length_scale,
+            # x0_init_method   = cfg.optimizer.x0_init_method,
+            rng              = rng
+        )
+    else:
+        raise Exception(f'{cfg.optimizer.gptype} is not a valid GP class in pyPolar')
+
+    # Sampler/Acquisition function
+    # sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
+    # sampler = None
+    sampler = plr.RandomSampler(rng)
+    # sampler = plr.UniformSampler(n=40, rng=rng)
+
+    # Groundtruth objectives
+    groundtruth = plr.BoundedIdealPoint(
+        w             = cfg.objective.w,
+        delta         = cfg.objective.delta,
+        gamma         = cfg.objective.gamma,
+        lower_bound   = cfg.objective.lower_bound,
+        upper_bound   = cfg.objective.upper_bound
+    )
+
+    # Simulated oracle with groundtruth
+    oracle = plr.NoisyRegressionOracle(
+        reward_fn   = groundtruth,
+        noise_std   = cfg.oracle.noise_std,
+        rng         = rng
+    )
+
+    return regression, optimizer, sampler, groundtruth, oracle

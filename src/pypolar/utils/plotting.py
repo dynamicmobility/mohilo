@@ -27,7 +27,7 @@ def plot_gp_1d(
     # x = regression.action_space
     if action_space.shape[1] != 1:
         raise ValueError(
-            f"plot_gp_1d only supports 1D action spaces, got shape {x.shape}"
+            f"plot_gp_1d only supports 1D action spaces, got shape {action_space.shape}"
         )
 
     xs = action_space.ravel()

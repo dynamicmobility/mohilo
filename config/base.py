@@ -2,6 +2,7 @@ import json
 import types as _types
 import typing
 from pathlib import Path
+import pypolar as plr
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, model_validator
@@ -141,6 +142,7 @@ class PBLConfig(Config):
 OPTIMIZATION CONFIGURATIONS
 """
 class GaussianProcess(Config):
+    gptype:           str = 'ConjugateGP'
     signal_variance:  float
     length_scale:     float
     kernel:           str = 'squared_exp'
@@ -168,6 +170,10 @@ class MultiObjectiveGaussianProcess(Config):
 """
 SAMPLING CONFIGURATIONS
 """
+class RandomSampling(Config):
+    pass
+class ThompsonSampling(Config):
+    pass  # TODO
 class DSTS(Config):
     rho: float = 0.5
 
@@ -221,4 +227,16 @@ class MOHILO(Config):
         assert self.num_objs > 0
         self.assert_equals_or_none(self.num_objs, self.problem.num_objs)
         self.assert_equals_or_none(self.num_objs, self.optimizer.num_objs)
+        return self
+
+
+class HILO(Config):
+    problem:    Regression
+    optimizer:  GaussianProcess
+    sampler:    ThompsonSampling | RandomSampling
+    objective:  BoundedIdealPoint
+    oracle:     NoisyRegressionOracle
+    save_dir:   str
+
+    def validate(self):
         return self
