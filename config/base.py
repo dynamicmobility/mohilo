@@ -134,7 +134,7 @@ class MultiObjectiveRegression(Config):
     action_high: np.ndarray
     action_dims: np.ndarray
     precisions:  float | np.ndarray
-    num_objs:    int = 2
+    num_objs:    int | None = None
 
     def validate(self):
         assert np.all(self.action_high > self.action_low)
@@ -176,7 +176,7 @@ class MultiObjectiveGaussianProcess(Config):
     signal_variances:  list[float] | np.ndarray
     length_scales:     list[float] | np.ndarray
     gptype:            str = 'ConjugateGP'
-    num_objs:          int = 2
+    num_objs:          int | None = None
     # BoTorchGP only; None means off for every objective.
     fit_hypers:        list[bool] | None = None
     ard:               list[bool] | None = None

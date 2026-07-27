@@ -8,7 +8,7 @@ from pathlib import Path
 from tqdm import tqdm
 from hilo.create import create_hipexo_sim
 from config.base import RandomSampling, DSTS, QNEHVI
-from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d
+from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d, hipexo_sim_idealized_3d
 
 CONFIG = hipexo_sim_idealized_2d
 SAMPLERS = {
@@ -25,7 +25,7 @@ TOL = 0.02
 # hypervolume within a few queries and the comparison says nothing. qNEHVI is a
 # noisy-observation acquisition, so the oracle gets noise and the GP
 # hyperparameters are derived from it, as in aq_1d.py.
-NOISE_STD = 0.3
+NOISE_STD = 1.0
 # qNEHVI is built from BoTorch models, so every arm runs on the same backend
 # and the comparison isolates the acquisition rather than the GP.
 GPTYPE = 'BoTorchGP'
