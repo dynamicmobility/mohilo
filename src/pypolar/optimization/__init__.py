@@ -6,6 +6,7 @@ from pypolar.optimization.problem import (
 )
 from pypolar.optimization.gp import (
     GPModel,
+    BoTorchGP,
     ConjugateGP,
     LaplaceGP,
     MultiObjectiveGP
@@ -17,6 +18,7 @@ __all__ = [
     "Regression",
     "MultiObjectiveRegression",
     "GPModel",
+    "BoTorchGP",
     "ConjugateGP",
     "LaplaceGP",
     "MultiObjectiveGP"

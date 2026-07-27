@@ -1,5 +1,6 @@
 import numpy as np
 
+from pypolar.optimization.gp.botorch_gp import BoTorchGP
 from pypolar.optimization.gp.conjugate import ConjugateGP
 from pypolar.optimization.gp.laplace import LaplaceGP
 
@@ -9,11 +10,18 @@ class MultiObjectiveGP:
 
     Each objective gets its own GP with its own kernel hyperparameters. The
     backend follows the feedback passed to ``setup()``: ``regressions`` selects
-    the exact ``ConjugateGP`` path, ``likelihoods`` the autodiff ``LaplaceGP``
-    path.
+    the exact path named at construction (``ConjugateGP`` or ``BoTorchGP``),
+    ``likelihoods`` the autodiff ``LaplaceGP`` path.
     """
 
-    BACKENDS = {"conjugate": ConjugateGP, "laplace": LaplaceGP}
+    BACKENDS = {
+        "conjugate": ConjugateGP,
+        "botorch": BoTorchGP,
+        "laplace": LaplaceGP,
+    }
+
+    # Backends that consume ``(idx, y, precision)`` regression feedback.
+    REGRESSION_BACKENDS = ("conjugate", "botorch")
 
     def __init__(
         self,
@@ -23,7 +31,9 @@ class MultiObjectiveGP:
         length_scales=[1],
         x0_init_methods=['random'],
         rng=np.random.default_rng(),
-        backend="conjugate"
+        backend="conjugate",
+        fit_hypers=None,
+        ard=None
     ):
         """
         Args:
@@ -34,17 +44,27 @@ class MultiObjectiveGP:
             x0_init_methods: per-objective optimizer initialization (Laplace
                 backend only)
             rng: numpy random Generator, shared by all objectives
-            backend: which GP to build up front, ``'conjugate'`` or
-                ``'laplace'``. ``setup()`` switches this to match the feedback
-                it is given, so it only matters if you inspect ``gps`` before
-                the first ``setup()``.
+            backend: which GP to build, ``'conjugate'``, ``'botorch'`` or
+                ``'laplace'``. ``setup()`` switches between the regression and
+                likelihood paths to match the feedback it is given; whichever of
+                ``'conjugate'``/``'botorch'`` is named here is the one the
+                regression path uses.
+            fit_hypers: per-objective marginal-likelihood hyperparameter fitting
+                (BoTorch backend only). None means off for every objective.
+            ard: per-objective anisotropic length scales (BoTorch backend only).
+                None means off for every objective.
         """
         self.num_objs = num_objs
         self.kernels = kernels
         self.signal_variances = signal_variances
         self.length_scales = length_scales
         self.x0_init_methods = x0_init_methods
+        self.fit_hypers = fit_hypers or [False] * num_objs
+        self.ard = ard or [False] * num_objs
         self.rng = rng
+        self.regression_backend = self.BACKENDS[
+            backend if backend in self.REGRESSION_BACKENDS else "conjugate"
+        ]
         # Built eagerly so that `len(optimizer.gps)` and samplers constructed
         # with `gps=optimizer.gps` are valid before the first setup().
         self.gps: list = []
@@ -67,6 +87,9 @@ class MultiObjectiveGP:
             )
             if backend is LaplaceGP:
                 kwargs["x0_init_method"] = self.x0_init_methods[i]
+            if backend is BoTorchGP:
+                kwargs["fit_hypers"] = self.fit_hypers[i]
+                kwargs["ard"] = self.ard[i]
             self.gps.append(backend(**kwargs))
 
     def setup(self, action_space, likelihoods=None, regressions=None):
@@ -78,15 +101,15 @@ class MultiObjectiveGP:
                 selecting the ``LaplaceGP`` backend.
             regressions: per-objective ``(idx, y, precision)`` tuples (e.g. from
                 ``MultiObjectiveRegression.get_regression_data()``), selecting
-                the exact ``ConjugateGP`` backend. Preferred when applicable —
-                it never builds an N x N matrix.
+                the exact backend named at construction. Preferred when
+                applicable — it never builds an N x N matrix.
         """
         if (likelihoods is None) == (regressions is None):
             raise ValueError(
                 "Pass exactly one of `likelihoods` or `regressions`."
             )
 
-        backend = ConjugateGP if regressions is not None else LaplaceGP
+        backend = self.regression_backend if regressions is not None else LaplaceGP
         if type(self.gps[0]) is not backend:
             self._build(backend)
 

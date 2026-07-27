@@ -2,6 +2,14 @@ import pypolar as plr
 import config.base as config
 
 
+# Backend key expected by MultiObjectiveGP for each single-objective GP class.
+BACKENDS = {
+    'ConjugateGP': 'conjugate',
+    'BoTorchGP':   'botorch',
+    'LaplaceGP':   'laplace',
+}
+
+
 def _make_sampler(cfg_sampler, gp, rng):
     """Build the sampler named by a sampling config."""
     if isinstance(cfg_sampler, config.RandomSampling):
@@ -41,6 +49,9 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
         signal_variances  = cfg.optimizer.signal_variances,
         length_scales     = cfg.optimizer.length_scales,
         x0_init_methods   = cfg.optimizer.x0_init_methods,
+        backend           = BACKENDS[cfg.optimizer.gptype],
+        fit_hypers        = cfg.optimizer.fit_hypers,
+        ard               = cfg.optimizer.ard,
         rng               = rng
     )
 
@@ -71,8 +82,8 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
 def create_1d_sim(
     rng, cfg: config.HILO
 ) -> tuple[
-    plr.Regression, 
-    plr.ConjugateGP,
+    plr.Regression,
+    plr.ConjugateGP | plr.BoTorchGP | plr.LaplaceGP,
     plr.RandomSampler | plr.ThompsonSampler | plr.AcquisitionSampler,
     plr.BoundedIdealPoint, 
     plr.NoisyRegressionOracle
@@ -105,6 +116,15 @@ def create_1d_sim(
             signal_variance  = cfg.optimizer.signal_variance,
             length_scale     = cfg.optimizer.length_scale,
             # x0_init_method   = cfg.optimizer.x0_init_method,
+            rng              = rng
+        )
+    elif cfg.optimizer.gptype == 'BoTorchGP':
+        optimizer = plr.BoTorchGP(
+            kernel           = cfg.optimizer.kernel,
+            signal_variance  = cfg.optimizer.signal_variance,
+            length_scale     = cfg.optimizer.length_scale,
+            fit_hypers       = cfg.optimizer.fit_hypers,
+            ard              = cfg.optimizer.ard,
             rng              = rng
         )
     else:

@@ -6,25 +6,32 @@ import pypolar as plr
 from pypolar.sampler import _observation_noise
 
 
+@pytest.fixture(params=[plr.ConjugateGP, plr.BoTorchGP],
+                ids=["conjugate", "botorch"])
+def backend(request):
+    """Each regression backend, so every acquisition is exercised on both."""
+    return request.param
+
+
 @pytest.fixture
-def gp():
-    """A ConjugateGP fit to a handful of noisy samples of a 1D sinusoid."""
+def gp(backend):
+    """A GP fit to a handful of noisy samples of a 1D sinusoid."""
     rng = np.random.default_rng(0)
     actions = np.linspace(0, 4, 60).reshape(-1, 1)
     idx = np.array([3, 17, 28, 41, 55])
     y = np.sin(actions[idx].ravel()) + 0.05 * rng.standard_normal(idx.shape[0])
 
-    model = plr.ConjugateGP(signal_variance=1.0, length_scale=0.8, rng=rng)
+    model = backend(signal_variance=1.0, length_scale=0.8, rng=rng)
     model.set_data(actions, idx, y, precision=50.0)
     model.fit()
     return model
 
 
 @pytest.fixture
-def unfit_gp():
+def unfit_gp(backend):
     rng = np.random.default_rng(1)
     actions = np.linspace(0, 4, 60).reshape(-1, 1)
-    return plr.ConjugateGP(signal_variance=1.0, length_scale=0.8, rng=rng), actions
+    return backend(signal_variance=1.0, length_scale=0.8, rng=rng), actions
 
 
 class TestExpectedMaxOfLines:

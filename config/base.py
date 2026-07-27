@@ -141,14 +141,21 @@ class PBLConfig(Config):
 """
 OPTIMIZATION CONFIGURATIONS
 """
+GPTYPES = ('ConjugateGP', 'BoTorchGP', 'LaplaceGP')
+
+
 class GaussianProcess(Config):
     gptype:           str = 'ConjugateGP'
     signal_variance:  float
     length_scale:     float
     kernel:           str = 'squared_exp'
     x0_init_method:   str = 'random'
+    # BoTorchGP only.
+    fit_hypers:       bool = False
+    ard:              bool = False
 
     def validate(self):
+        assert self.gptype in GPTYPES
         assert self.signal_variance > 0
         assert self.length_scale > 0
         return self
@@ -159,9 +166,14 @@ class MultiObjectiveGaussianProcess(Config):
     x0_init_methods:   list[str]
     signal_variances:  list[float] | np.ndarray
     length_scales:     list[float] | np.ndarray
+    gptype:            str = 'ConjugateGP'
     num_objs:          int = 2
+    # BoTorchGP only; None means off for every objective.
+    fit_hypers:        list[bool] | None = None
+    ard:               list[bool] | None = None
 
     def validate(self):
+        assert self.gptype in GPTYPES
         assert np.all(np.asarray(self.signal_variances) > 0)
         assert np.all(np.asarray(self.length_scales) > 0)
         return self
