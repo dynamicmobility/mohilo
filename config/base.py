@@ -89,11 +89,20 @@ class Config(BaseModel):
     def _decode_field(value, annotation):
         """Change a JSON value back to the type expected by a field annotation."""
         candidates = _annotation_types(annotation)
-        # Nested Config models.
+        # Nested Config models. A union is resolved by matching the encoded keys
+        # against each member's fields -- preferring an exact match, then the
+        # largest overlap -- so that e.g. `sampler` decodes back to the sampler
+        # it was saved from rather than to whichever member is listed first.
+        # Members with identical field sets stay ambiguous; the first wins.
         if isinstance(value, dict):
-            for t in candidates:
-                if isinstance(t, type) and issubclass(t, Config):
-                    return t.from_jsonable_dict(value)
+            configs = [t for t in candidates
+                       if isinstance(t, type) and issubclass(t, Config)]
+            if configs:
+                keys = set(value)
+                best = max(configs, key=lambda t: (
+                    set(t.model_fields) == keys, len(keys & set(t.model_fields))
+                ))
+                return best.from_jsonable_dict(value)
         # Lists: keep as list if a list type is expected, else rebuild ndarray.
         if isinstance(value, list):
             expects_list = any(
@@ -192,6 +201,13 @@ class DSTS(Config):
     def validate(self):
         assert 0 < self.rho < 1
         return self
+class QNEHVI(Config):
+    num_samples:  int = 128
+    ref_point:    list[float] | np.ndarray | None = None
+
+    def validate(self):
+        assert self.num_samples > 0
+        return self
 class ExpectedImprovement(Config):
     xi: float = 0.0
 class KnowledgeGradient(Config):
@@ -239,7 +255,7 @@ HIGH-LEVEL CONFIGURATIONS
 class MOHILO(Config):
     problem:    MultiObjectiveRegression
     optimizer:  MultiObjectiveGaussianProcess
-    sampler:    DSTS
+    sampler:    DSTS | QNEHVI | RandomSampling
     objective:  BoundedIdealPoint
     oracle:     NoisyRegressionOracle
     num_objs:   int

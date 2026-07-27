@@ -1,4 +1,12 @@
 import numpy as np
+import torch
+from botorch.acquisition.multi_objective.logei import (
+    qLogNoisyExpectedHypervolumeImprovement
+)
+from botorch.models.model_list_gp_regression import ModelListGP
+from botorch.optim import optimize_acqf_discrete
+from botorch.sampling.normal import SobolQMCNormalSampler
+from botorch.utils.multi_objective.hypervolume import infer_reference_point
 from scipy.stats import norm, qmc
 import pypolar as plr
 
@@ -470,3 +478,112 @@ class DSTSampler:
         r_sample = weighted.min(axis=1) + self.rho * weighted.sum(axis=1)
 
         return actions[np.argmax(r_sample)]
+
+
+class QNEHVISampler:
+    """Selects actions by noisy expected hypervolume improvement, multi-objective.
+
+    Scores each action by how much it is expected to grow the hypervolume
+    dominated by the Pareto front, under the joint posterior over all
+    objectives and marginalizing over the noise in the observations collected so
+    far. Unlike ``DSTSampler`` this reasons about the front directly rather than
+    about one scalarization at a time.
+
+    The acquisition is BoTorch's ``qLogNoisyExpectedHypervolumeImprovement``
+    evaluated by enumeration over the discrete action space, so it needs
+    ``BoTorchGP`` models -- the other backends expose no BoTorch model to build
+    it from.
+    """
+
+    def __init__(
+        self,
+        gps: list,
+        rng: np.random.Generator = np.random.default_rng(),
+        ref_point=None,
+        num_samples: int = 128,
+        max_batch_size: int = 1024,
+        n_warmup: int = 1
+    ):
+        """
+        Args:
+            gps: a list of ``BoTorchGP`` instances, one per objective. Must have
+                been fit before ``update_posterior()`` is called; until then
+                ``sample()`` falls back to uniform random.
+            rng: a numpy random number generator.
+            ref_point: per-objective reward below which an outcome contributes
+                no hypervolume. None infers it from the feedback collected so
+                far, which is the usual choice when the objective scale is not
+                known up front.
+            num_samples: number of quasi-Monte-Carlo samples used to estimate
+                the acquisition.
+            max_batch_size: number of actions scored per forward pass. Bounds
+                peak memory on large action spaces.
+            n_warmup: number of leading queries drawn uniformly at random.
+        """
+        self.gps = gps
+        self.rng = rng
+        self.ref_point = ref_point
+        self.num_samples = num_samples
+        self.max_batch_size = max_batch_size
+        self.n_warmup = n_warmup
+        self._acqf = None
+        self._num_queries = 0
+
+    def _reference_point(self):
+        """Per-objective reference point, as a list."""
+        if self.ref_point is not None:
+            return list(np.asarray(self.ref_point, dtype=float).ravel())
+        observed = torch.as_tensor(
+            np.stack([gp.y for gp in self.gps], axis=-1), dtype=torch.float64
+        )
+        return infer_reference_point(observed).tolist()
+
+    def update_posterior(self):
+        """Rebuild the acquisition around the current posteriors.
+
+        Call this after each ``fit()``: the acquisition holds the models and the
+        set of already-queried actions, both of which change every iteration.
+        """
+        missing = [gp for gp in self.gps if getattr(gp, "model", None) is None]
+        if missing or self.gps[0].mu is None:
+            self._acqf = None
+            return
+
+        anchor = self.gps[0]
+        self._acqf = qLogNoisyExpectedHypervolumeImprovement(
+            model=ModelListGP(*[gp.model for gp in self.gps]),
+            ref_point=self._reference_point(),
+            X_baseline=torch.as_tensor(
+                anchor.actions[anchor.idx], dtype=torch.float64
+            ),
+            sampler=SobolQMCNormalSampler(
+                sample_shape=torch.Size([self.num_samples]),
+                seed=int(self.rng.integers(2 ** 32)),
+            ),
+            prune_baseline=True,
+        )
+
+    def sample(self, actions):
+        """Return the action with the highest acquisition score.
+
+        Falls back to uniform random sampling before the GPs have been fit and
+        for the first ``n_warmup`` queries.
+
+        Args:
+            actions: array of available actions, shape (N, d).
+
+        Returns:
+            A single action from the action space.
+        """
+        self._num_queries += 1
+        if self._acqf is None or self._num_queries <= self.n_warmup:
+            return actions[self.rng.choice(actions.shape[0])]
+
+        with torch.no_grad():
+            candidate, _ = optimize_acqf_discrete(
+                self._acqf,
+                q=1,
+                choices=torch.as_tensor(actions, dtype=torch.float64),
+                max_batch_size=self.max_batch_size,
+            )
+        return candidate.reshape(-1).numpy()

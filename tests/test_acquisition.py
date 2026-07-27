@@ -159,6 +159,53 @@ class TestSampling:
         assert np.any(np.all(actions == action, axis=1))
 
 
+class TestQNEHVISampler:
+
+    @pytest.fixture
+    def gps(self):
+        """Two BoTorchGPs over a shared action space, fit to opposing objectives."""
+        rng = np.random.default_rng(0)
+        actions = np.linspace(0, 4, 40).reshape(-1, 1)
+        idx = np.array([3, 11, 20, 29, 37])
+        models = []
+        for sign in (1.0, -1.0):
+            model = plr.BoTorchGP(signal_variance=1.0, length_scale=0.8, rng=rng)
+            model.set_data(actions, idx, sign * np.sin(actions[idx].ravel()),
+                           precision=50.0)
+            model.fit()
+            models.append(model)
+        return models, actions
+
+    def test_returns_an_action(self, gps):
+        models, actions = gps
+        sampler = plr.QNEHVISampler(models, np.random.default_rng(0),
+                                    num_samples=16, n_warmup=0)
+        sampler.update_posterior()
+
+        action = sampler.sample(actions)
+        assert action.shape == (actions.shape[1],)
+        assert np.any(np.all(actions == action, axis=1))
+
+    def test_falls_back_before_fit(self, gps):
+        _, actions = gps
+        unfit = [plr.BoTorchGP(signal_variance=1.0, length_scale=0.8)
+                 for _ in range(2)]
+        for model in unfit:
+            model.set_data(actions, np.array([], dtype=int), np.array([]),
+                           precision=1.0)
+        sampler = plr.QNEHVISampler(unfit, np.random.default_rng(0), num_samples=16)
+        sampler.update_posterior()
+
+        action = sampler.sample(actions)
+        assert np.any(np.all(actions == action, axis=1))
+
+    def test_explicit_reference_point_is_used(self, gps):
+        models, actions = gps
+        sampler = plr.QNEHVISampler(models, np.random.default_rng(0),
+                                    ref_point=[-2.0, -2.0], num_samples=16)
+        assert sampler._reference_point() == [-2.0, -2.0]
+
+
 class TestObservationNoise:
 
     def test_defaults_to_the_gp(self, gp):

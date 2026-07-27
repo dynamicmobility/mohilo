@@ -10,6 +10,20 @@ BACKENDS = {
 }
 
 
+def _make_mo_sampler(cfg_sampler, gps, rng):
+    """Build the multi-objective sampler named by a sampling config."""
+    if isinstance(cfg_sampler, config.RandomSampling):
+        return plr.RandomSampler(rng)
+    if isinstance(cfg_sampler, config.DSTS):
+        return plr.DSTSampler(gps=gps, rng=rng, rho=cfg_sampler.rho)
+    if isinstance(cfg_sampler, config.QNEHVI):
+        return plr.QNEHVISampler(
+            gps=gps, rng=rng, ref_point=cfg_sampler.ref_point,
+            num_samples=cfg_sampler.num_samples
+        )
+    raise ValueError(f'{type(cfg_sampler).__name__} is not a valid sampling config')
+
+
 def _make_sampler(cfg_sampler, gp, rng):
     """Build the sampler named by a sampling config."""
     if isinstance(cfg_sampler, config.RandomSampling):
@@ -56,9 +70,7 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
     )
 
     # Sampler/Acquisition function
-    sampler = plr.DSTSampler(gps=optimizer.gps, rng=rng, rho=cfg.sampler.rho)
-    # sampler = plr.RandomSampler(rng)
-    # sampler = plr.UniformSampler(n=40, rng=rng)
+    sampler = _make_mo_sampler(cfg.sampler, optimizer.gps, rng)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(
