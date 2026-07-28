@@ -10,7 +10,7 @@ BACKENDS = {
 }
 
 
-def _make_mo_sampler(cfg_sampler, gps, rng):
+def make_mo_sampler(cfg_sampler, gps, rng):
     """Build the multi-objective sampler named by a sampling config."""
     if isinstance(cfg_sampler, config.RandomSampling):
         return plr.RandomSampler(rng)
@@ -24,7 +24,7 @@ def _make_mo_sampler(cfg_sampler, gps, rng):
     raise ValueError(f'{type(cfg_sampler).__name__} is not a valid sampling config')
 
 
-def _make_sampler(cfg_sampler, gp, rng):
+def make_sampler(cfg_sampler, gp, rng):
     """Build the sampler named by a sampling config."""
     if isinstance(cfg_sampler, config.RandomSampling):
         return plr.RandomSampler(rng)
@@ -70,7 +70,7 @@ def create_hipexo_sim(rng, cfg: config.MOHILO):
     )
 
     # Sampler/Acquisition function
-    sampler = _make_mo_sampler(cfg.sampler, optimizer.gps, rng)
+    sampler = make_mo_sampler(cfg.sampler, optimizer.gps, rng)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(
@@ -143,7 +143,7 @@ def create_1d_sim(
         raise Exception(f'{cfg.optimizer.gptype} is not a valid GP class in pyPolar')
 
     # Sampler/Acquisition function
-    sampler = _make_sampler(cfg.sampler, optimizer, rng)
+    sampler = make_sampler(cfg.sampler, optimizer, rng)
 
     # Groundtruth objectives
     groundtruth = plr.BoundedIdealPoint(
@@ -162,3 +162,33 @@ def create_1d_sim(
     )
 
     return regression, optimizer, sampler, groundtruth, oracle
+
+
+def create_pilot_regression(rng, cfg: config.MOHILO):
+    """
+    Multi-objective problem with two objectives: Metabolic Cost of Transport
+    (MCT) and Speed (SP) .
+    """
+
+    # Regression optimization problem
+    regression = plr.MultiObjectiveRegression(
+        low           = cfg.problem.action_low,
+        high          = cfg.problem.action_high,
+        action_dims   = cfg.problem.action_dims,
+        precisions    = cfg.problem.precisions,
+        num_objs      = cfg.num_objs
+    )
+
+    # Solver
+    optimizer = plr.MultiObjectiveGP(
+        num_objs          = cfg.num_objs,
+        kernels           = cfg.optimizer.kernels,
+        signal_variances  = cfg.optimizer.signal_variances,
+        length_scales     = cfg.optimizer.length_scales,
+        x0_init_methods   = cfg.optimizer.x0_init_methods,
+        backend           = BACKENDS[cfg.optimizer.gptype],
+        fit_hypers        = cfg.optimizer.fit_hypers,
+        ard               = cfg.optimizer.ard,
+        rng               = rng
+    )
+    return regression, optimizer

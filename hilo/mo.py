@@ -10,16 +10,27 @@ from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d
 
 def main():
     rng = np.random.default_rng(95)
-
-    # config = hipexo_sim_idealized_2d
     config = hipexo_sim_idealized
+
+    lengthscale, signal_var, precision = plr.derive_gp_hyperparams(
+        domain_size       = float(np.max(config.problem.action_high
+                                            - config.problem.action_low)),
+        expected_range    = float(np.max(config.objective.upper_bound
+                                            - config.objective.lower_bound)),
+        noise_var         = config.oracle.noise_std ** 2
+    )
+    config.problem.precisions           = np.full(config.num_objs, precision)
+    config.optimizer.signal_variances   = [signal_var] * config.num_objs
+    config.optimizer.length_scales      = [lengthscale] * config.num_objs
+    
+    
     regression, optimizer, sampler, groundtruth, oracle = create_hipexo_sim(
         rng,
         cfg=config
     )
     
     # Run simulation
-    NUM_QUERIES = 200
+    NUM_QUERIES = 15
     for i in tqdm(range(NUM_QUERIES)):
         # Sample an action
         sample_action = sampler.sample(regression.action_space)
@@ -57,8 +68,8 @@ def main():
         regression        = regression,
         mo_ground_truth   = groundtruth
     )
-    pareto_ax.set_xlabel('Obj 1: MCT Reward')
-    pareto_ax.set_ylabel('Obj 2: SP Reward')
+    pareto_ax.set_xlabel('Obj 1: Metabolic Cost Reward')
+    pareto_ax.set_ylabel('Obj 2: Comfort Reward')
 
     for i in range(2):
         plr.plot_gp_1d(
@@ -71,8 +82,8 @@ def main():
             ground_truth    = lambda x: (groundtruth(x)[:, i])
         )
     
-    mct_ax.set_title('Objective 1: MCT Reward')
-    sp_ax.set_title('Objective 2: Speed Reward')
+    mct_ax.set_title('Objective 1: Metabolic Cost Reward')
+    sp_ax.set_title('Objective 2: Comfort Reward')
 
     fig.tight_layout()
     savepath = Path('hilo/output/mo_gp_fit.svg')

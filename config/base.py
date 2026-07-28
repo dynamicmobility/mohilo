@@ -266,6 +266,19 @@ class MOHILO(Config):
         self.assert_equals_or_none(self.num_objs, self.problem.num_objs)
         self.assert_equals_or_none(self.num_objs, self.optimizer.num_objs)
         return self
+    
+class MOHILOStudy(Config):
+    problem:    MultiObjectiveRegression
+    optimizer:  MultiObjectiveGaussianProcess
+    sampler:    DSTS | QNEHVI | RandomSampling
+    num_objs:   int
+    save_dir:   str
+
+    def validate(self):
+        assert self.num_objs > 0
+        self.assert_equals_or_none(self.num_objs, self.problem.num_objs)
+        self.assert_equals_or_none(self.num_objs, self.optimizer.num_objs)
+        return self
 
 
 class HILO(Config):

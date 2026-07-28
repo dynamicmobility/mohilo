@@ -10,7 +10,7 @@ from hilo.create import create_hipexo_sim
 from config.base import RandomSampling, DSTS, QNEHVI
 from config.hipexo import hipexo_sim_idealized, hipexo_sim_idealized_2d, hipexo_sim_idealized_3d
 
-CONFIG = hipexo_sim_idealized_2d
+CONFIG = hipexo_sim_idealized_3d
 SAMPLERS = {
     'Random': RandomSampling(),
     'DSTS':   DSTS(rho=0.01),
@@ -20,7 +20,7 @@ SEEDS = range(10)
 NUM_QUERIES = 50
 # Fraction of each objective's range within which points count as tied when
 # extracting a Pareto front; matches hipexo_sim/experiment.py.
-TOL = 0.02
+TOL = 0.00
 # The shipped hipexo configs are noiseless, where every sampler saturates the
 # hypervolume within a few queries and the comparison says nothing. qNEHVI is a
 # noisy-observation acquisition, so the oracle gets noise and the GP
@@ -31,13 +31,16 @@ NOISE_STD = 1.0
 GPTYPE = 'BoTorchGP'
 
 
-def run(sampler_cfg, seed, num_queries):
+def run(sampler_cfg, seed, num_queries, progress=None):
     """Run one multi-objective HILO simulation.
 
     Args:
         sampler_cfg: a sampling config, e.g. ``QNEHVI()``.
         seed: seed for the oracle noise and the sampler.
         num_queries: number of oracle queries.
+        progress: optional tqdm bar to report the in-flight query on. Seeds are
+            slow enough under qNEHVI that the seed-level bar alone does not show
+            whether a run is progressing.
 
     Returns:
         A dict with the per-iteration ``hv``, ``overlay``, ``query_idx`` and
@@ -70,8 +73,10 @@ def run(sampler_cfg, seed, num_queries):
     true_objs = np.asarray(groundtruth(regression.action_space))
     hv, overlay, query_idx, times = [], [], [], []
 
-    for _ in range(num_queries):
+    for idx in range(num_queries):
         start = time.time()
+        if progress is not None:
+            progress.set_postfix_str(f'query {idx + 1}/{num_queries}')
         sample_action = sampler.sample(regression.action_space)
         values = oracle.query(sample_action)
 
@@ -209,10 +214,11 @@ def print_summary(results):
 def main():
     results = {}
     for name, sampler_cfg in SAMPLERS.items():
-        results[name] = [
-            run(sampler_cfg, seed, NUM_QUERIES)
-            for seed in tqdm(SEEDS, desc=name)
-        ]
+        with tqdm(SEEDS, desc=name) as bar:
+            results[name] = [
+                run(sampler_cfg, seed, NUM_QUERIES, progress=bar)
+                for seed in bar
+            ]
 
     outdir = Path(CONFIG.save_dir)
     plot_metrics(results, outdir / 'acquisition_mo_metrics.svg')
