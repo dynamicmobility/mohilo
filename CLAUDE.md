@@ -5,6 +5,8 @@ When possible, source code from highly used, verified libraries (like scipy, sci
 
 When explaining things, do not assume knowledge. Explain via deduction and don't gloss over details. It should be clear from an outside observer, who may not be completely familiar with this repository, what you changed and why it is scientifically/mathematically justified.
 
+Always ask how much code the user wants you to edit. Do not edit more than they ask you to without asking them first. Always pose this question before you implement something.
+
 # pypolar
 
 Preference- and regression-based Bayesian optimization for human-in-the-loop

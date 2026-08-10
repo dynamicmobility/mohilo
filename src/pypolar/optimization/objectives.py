@@ -94,6 +94,16 @@ class Objective:
             xdata       = df[action_columns].to_numpy(dtype=float),
             column      = column
         )
+    
+    @classmethod
+    def from_data(cls, actions, values, maximize, name=None):
+        return cls(
+            name        = name,
+            maximize    = maximize,
+            ydata       = values,
+            xdata       = actions,
+            column      = None
+        )
 
 
 def _is_single(objs):
