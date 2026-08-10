@@ -1,3 +1,10 @@
+# Overall rules
+Comment code as it is, not why it was put there or what it replaced. This applies to variable names as well. Keep comments very brief (max two sentences of description. You may allot more space for denoting variables/return types). If a section of code took 200 lines, but could be written in 50, replace it. Keep the style of the rest of the repository.
+
+When possible, source code from highly used, verified libraries (like scipy, scikit-learn, etc) instead of writing your own code. 
+
+When explaining things, do not assume knowledge. Explain via deduction and don't gloss over details. It should be clear from an outside observer, who may not be completely familiar with this repository, what you changed and why it is scientifically/mathematically justified.
+
 # pypolar
 
 Preference- and regression-based Bayesian optimization for human-in-the-loop
@@ -71,9 +78,10 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-152 tests: public API surface (49), dangling references (24), acquisition
+169 tests: public API surface (49), dangling references (25), acquisition
 functions and the posterior cross-covariance (51, parametrized over both
-regression backends), BoTorchGP (19), config round-trips (9).
+regression backends), BoTorchGP (35, including off-grid `mu_at`/`std_at`), config
+round-trips (9).
 
 ## How to run experiments
 
@@ -174,6 +182,28 @@ between every action and `actions[idx]`. The base implementation slices
 `posterior_cov()`; both regression backends override it with an O(N M C)
 data-space form that never builds the N x N matrix.
 `KnowledgeGradientSampler` calls it on every query.
+
+`mu_at(X)` (regression backends and `MultiObjectiveGP`, not `LaplaceGP`) is the
+posterior mean at **arbitrary** points, on or off the grid: `mu(x) = k(x, X_obs)
+(K_XX + sigma^2 I)^-1 y`, reusing the Gram factor from `set_data`, so it involves
+no refit and costs O(n M d). The discretized action space is only where `fit()`
+samples this function, so use `mu_at` for anything continuous — interpolating
+between buckets, or handing the objective to a continuous optimizer. It
+reproduces `mu` exactly on grid points, except that `ConjugateGP` differs at the
+*fed-back* actions by `JITTER * alpha_m` (~1e-5), since `set_data` adds the
+nugget where test and train indices coincide and the continuous form omits it.
+
+`std_at(X)` (same backends) is the matching posterior standard deviation,
+`sigma^2(x) = k(x, x) - k(x, X_obs) (K_XX + sigma^2 I)^-1 k(X_obs, x)`, off the
+same Gram factor, in O(n M^2). It likewise omits `JITTER`, which `std()` carries
+in the prior variance, so the two differ by `JITTER` in variance (~5e-5 in
+standard deviation) at *every* action rather than only at fed-back ones.
+`BoTorchGP` applies no jitter at all, so there it reproduces `std()` exactly.
+
+Together `mu_at` and `std_at` make any posterior-based acquisition a continuous,
+differentiable function of the action, so it can be maximized off grid — the
+usual two-stage scheme is a quasi-random scan to locate the basins followed by
+box-constrained L-BFGS-B, which is what `scratch/bo_continuous_2d.py` does.
 
 **Shared constructor args:** `kernel` (str or kernel object, currently only
 `'squared_exp'`), `signal_variance` (float), `length_scale` (float), `rng`.

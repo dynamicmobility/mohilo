@@ -11,6 +11,11 @@ from pypolar.optimization.gp import (
     LaplaceGP,
     MultiObjectiveGP
 )
+from pypolar.optimization.objectives import (
+    AffineTransform,
+    Objective,
+    DecoupledObjectives
+)
 
 __all__ = [
     "Likelihood",
@@ -21,5 +26,8 @@ __all__ = [
     "BoTorchGP",
     "ConjugateGP",
     "LaplaceGP",
-    "MultiObjectiveGP"
+    "MultiObjectiveGP",
+    "AffineTransform",
+    "Objective",
+    "DecoupledObjectives"
 ]

@@ -1,148 +1,207 @@
-import os
-os.environ["JAX_PLATFORMS"] = "cpu"
-import pypolar as plr
-import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
-from dataclasses import dataclass
-from tqdm import tqdm
-from hilo.create import create_pilot_regression
-from config.hipexo import hipexo_pilot
 import pandas as pd
-
-NUM_QUERIES = 15
-SEED        = 95
-NOISE_FRAC  = 0.25   # noise_var as a fraction of the mean objective range
-
-
-@dataclass
-class Objective:
-    """One metric column of the pilot data, and which direction is better."""
-    name:     str    # label used when printing
-    column:   str    # column in the metrics CSV
-    maximize: bool   # True if larger is better
-
-
-@dataclass
-class PilotRun:
-    """Everything one fit produced, for reporting."""
-    objectives:   list
-    regression:   object
-    optimizer:    object
-    best_idxs:    list    # action index of the optimum, per objective
-    means:        list    # mean subtracted from each objective before fitting
-    max_distance: float   # action space diagonal
+import numpy as np
+from config.hipexo import hipexo_pilot
+import pypolar as plr
+from pypolar.optimization.objectives import (
+    AffineTransform,
+    Objective,
+    DecoupledObjectives
+)
+from hilo.create import create_pilot_regression
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import minimize
+from scipy.stats import norm, qmc
 
 
-def load_pilot_data(num_queries=NUM_QUERIES):
-    """Metric values and the actions that produced them, first num_queries runs."""
-    metrics_df = pd.read_csv('human_data/pilot_mohilo.csv', index_col='Run')
-    actions_df = pd.read_csv('human_data/MH01_walk.csv', index_col='trial_name')
 
-    actions = actions_df.to_numpy(dtype=float)[:num_queries, :-1]
-    actions[:, 2] /= 160
-    return metrics_df.iloc[:num_queries], actions
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+from botorch.acquisition.multi_objective import (
+    qLogNoisyExpectedHypervolumeImprovement,
+)
+from botorch.models import ModelListGP, SingleTaskGP
+from botorch.optim import optimize_acqf
+from botorch.sampling.normal import SobolQMCNormalSampler
+from botorch.utils.multi_objective.box_decompositions.dominated import (
+    DominatedPartitioning,
+)
+from botorch.utils.multi_objective.pareto import is_non_dominated
+from botorch.utils.sampling import draw_sobol_samples
+from gpytorch.kernels import RBFKernel, ScaleKernel
+from gpytorch.means import ZeroMean
+
+ACTIONS         = ['h_flex_torque_scale', 'h_ext_torque_scale', 'hip_delay_idx']
+OBJS_PATH       = Path('human_data/pilot_mohilo.csv')
+ACTIONS_PATH    = Path('human_data/MH01_walk.csv')
+
+NOISE_STD       = 0.05
+RAW_SAMPLES     = 512                       # stage-1 Sobol samples per query
+NUM_RESTARTS    = 8                         # stage-2 L-BFGS-B starting points
+XI              = 0.01                      # EI improvement threshold
+CONTOUR_RES     = 200                       # plotting only
+SEED            = 95
+DTYPE           = torch.float64
+
+def build_so_model(
+    X             : np.ndarray | torch.Tensor,
+    Y             : np.ndarray | torch.Tensor,
+    sigma2        : float,
+    signal_var    : float,
+    length_scale  : float
+): 
+    """Builds a fixed hyperparameter exact (closed form) GP over the observations"""
+    # Convert data into torch tensors
+    train_X = torch.as_tensor(X, dtype=DTYPE)
+    train_Y = torch.as_tensor(Y, dtype=DTYPE)
+
+    # Setup the prior covariance matrix/kernel
+    prior_covar = ScaleKernel(RBFKernel()).to(DTYPE) # why do we need a ScaleKernel here?
+    prior_covar.base_kernel.lengthscale = torch.tensor(length_scale, dtype=DTYPE)
+    prior_covar.outputscale = torch.tensor(signal_var ** 2, dtype=DTYPE)
+
+    model = SingleTaskGP(
+        train_X             = train_X,
+        train_Y             = train_Y,
+        train_Yvar          = torch.full_like(train_Y, sigma2),
+        covar_module        = prior_covar,
+        mean_model          = ZeroMean(),
+        outcome_transform   = None,
+        input_transform     = None
+    )
+    return model
 
 
-def run_pilot(objectives, metrics_df, actions, seed=SEED, noise_frac=NOISE_FRAC):
-    """Fit one MultiObjectiveGP over the given objectives and locate each optimum.
+def build_mo_model(
+    X             : np.ndarray,
+    Y             : np.ndarray,
+    sigma2s       : np.ndarray,
+    signal_vars   : np.ndarray,
+    length_scales : np.ndarray
+):
+    train_X = torch.as_tensor(X, dtype=DTYPE)
+    train_Y = torch.as_tensor(Y, dtype=DTYPE)
 
-    Objectives are centered before the hyperparameters are derived: the GPs have
-    a zero prior mean, so on uncentered data the posterior decays toward 0 away
-    from the observations and the argmin/argmax lands on the least-explored
-    corner rather than the best action.
-    """
-    rng = np.random.default_rng(seed)
-    cfg = hipexo_pilot.model_copy(deep=True)   # each run gets its own config
+    models = []
+    for j, (sv, ls, sg2) in enumerate(zip(signal_vars, length_scales, sigma2s)):
+        models.append(build_so_model(
+            X             = train_X,
+            Y             = train_Y[:, j].reshape(-1, 1),
+            sigma2        = sg2,
+            signal_var    = sv,
+            length_scale  = ls
+        ))
+    
+    return ModelListGP(*models).eval()
 
-    values, means = [], []
-    for obj in objectives:
-        raw  = metrics_df[obj.column].to_numpy(dtype=float)
-        mean = raw.mean()
-        values.append(raw - mean)
-        means.append(mean)
 
-    mean_range = float(np.mean([v.max() - v.min() for v in values]))
+def maximize(acqf, bounds):
+    """Maximize an acquisition function over a hypercube"""
+    candidate, val = optimize_acqf(
+        acq_function    = acqf,
+        bounds          = bounds,
+        q               = 1,     # one action per query, not batched
+        num_restarts    = NUM_RESTARTS,
+        raw_samples     = RAW_SAMPLES,
+    )
+    return candidate.squeeze(0).detach().numpy()
+
+def compute_hypervolume(Y, ref=None):
+    """Finds the hypervolume dominated by Y in reference to ref"""
+    Y = torch.as_tensor(np.atleast_2d(Y), dtype=DTYPE)
+    ref = ref if ref is not None else torch.zeros((Y.shape[1],))
+    return DominatedPartitioning(ref_point=ref, Y=Y).compute_hypervolume().item()
+
+def posterior_mu_at(model: ModelListGP, X, chunk=2048):
+    """Per-objective posterior mean at X. Vectorized evaluation in sizes of chunk"""
+    X = torch.as_tensor(np.atleast_2d(X), dtype=DTYPE).unsqueeze(1)
+    with torch.no_grad():
+        out = [model.posterior(X[i:i+chunk]).mean.squeeze(1) for i in range(0, X.shape[0], chunk)]
+    
+    return torch.cat(out).numpy()
+
+def pilot_config(objectives, values, noise_frac=0.15):
+    """A copy of the pilot config with GP hyperparameters matched to the data's scale."""
+    cfg = hipexo_pilot.model_copy(deep=True)   # each fit gets its own config
+    objective_range = float(np.mean([v.max() - v.min() for v in values]))
 
     lengthscale, signal_var, precision = plr.derive_gp_hyperparams(
-        domain_size       = float(np.max(cfg.problem.action_high
-                                            - cfg.problem.action_low)),
-        expected_range    = mean_range,
-        noise_var         = mean_range * noise_frac
+        domain_size    = float(np.max(cfg.problem.action_high
+                                         - cfg.problem.action_low)),
+        expected_range = objective_range,
+        noise_var      = objective_range * noise_frac
     )
-    cfg.num_objs                        = len(objectives)
-    cfg.problem.precisions              = np.full(cfg.num_objs, precision)
-    cfg.optimizer.signal_variances      = [signal_var] * cfg.num_objs
-    cfg.optimizer.length_scales         = [lengthscale] * cfg.num_objs
+    cfg.num_objs                   = len(objectives)
+    cfg.problem.precisions         = np.full(cfg.num_objs, precision)
+    cfg.optimizer.signal_variances = [signal_var] * cfg.num_objs
+    cfg.optimizer.length_scales    = [lengthscale] * cfg.num_objs
+    return cfg
 
-    regression, optimizer = create_pilot_regression(rng, cfg=cfg)
-
-    label = ' + '.join(obj.name for obj in objectives)
-    for i in tqdm(range(len(actions)), desc=label):
-        regression.add_feedback(actions[i], [v[i] for v in values])
-
-    optimizer.setup(
-        action_space = regression.action_space,
-        regressions  = regression.get_regression_data()
+def read_data(objs_path: Path, actions_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, Objectives]:
+    objs_df = pd.read_csv(objs_path)
+    actions_df = pd.read_csv(actions_path)
+    
+    objectives = Objectives.from_df(
+        df = objs_df,
+        columns = [
+            'Cost', 
+            'Speed', 
+            'Comfort Treadmill', 
+            'Comfort Floor'
+        ],
+        maximize = [False, False, True, True],
+        names = [
+            'Metabolic Cost', 
+            '10m walk time', 
+            'Comfort on Treadmill', 
+            'Comfort on Floor'
+        ]
     )
-    optimizer.fit()
-
-    best_idxs = [
-        int(np.argmax(gp.mu) if obj.maximize else np.argmin(gp.mu))
-        for obj, gp in zip(objectives, optimizer.gps)
-    ]
-    max_distance = float(np.linalg.norm(cfg.problem.action_high
-                                            - cfg.problem.action_low))
-
-    return PilotRun(objectives, regression, optimizer,
-                    best_idxs, means, max_distance)
+    
+    return objs_df, actions_df, objectives
 
 
-def report(run):
-    """Print the optimum for each objective and how far apart the optima are."""
-    actions = [run.regression.action_space[i] for i in run.best_idxs]
-    label   = ' + '.join(obj.name for obj in run.objectives)
-    width   = max(len(obj.name) for obj in run.objectives)
+def get_mogp_hyperparameters(objectives: Objectives, actions_df: pd.DataFrame):
+    action_set = actions_df[ACTIONS].to_numpy().min(axis=0)
+    ls, sv, sg = [[]] * len(objectives)
 
-    print(f'\n=== {label} ===')
-    print(f'action space: {run.regression.action_space.shape}')
-
-    # prior std is k(x, x) + jitter, the same for every action, so it is the
-    # baseline std() decays from as data comes in
-    for obj, gp in zip(run.objectives, run.optimizer.gps):
-        print(f'  prior std {obj.name:<{width}} = {np.sqrt(gp.prior_var()):.4f}')
-
-    for obj, gp, idx, action, mean in zip(run.objectives, run.optimizer.gps,
-                                          run.best_idxs, actions, run.means):
-        direction = 'max' if obj.maximize else 'min'
-        print(f'  best {obj.name:<{width}} ({direction}): {action} '
-              f'(mu = {gp.mu[idx] + mean:.4f}, std = {gp.std()[idx]:.4f})')
-
-    # how far apart the optima are, relative to the box diagonal (the furthest
-    # two points in the action space can possibly be)
-    for i in range(len(actions)):
-        for j in range(i + 1, len(actions)):
-            separation = float(np.linalg.norm(actions[i] - actions[j]))
-            pair = f'{run.objectives[i].name} <-> {run.objectives[j].name}'
-            print(f'  separation {pair}: {separation:.4f} / {run.max_distance:.4f} '
-                  f'= {100 * separation / run.max_distance:.2f}% of the diagonal')
-
+    # domain_highs = actions_df[ACTIONS].to_numpy().min(axis=0),
+    # domain_lows  = actions_df[ACTIONS].to_numpy().max(axis=0),
+    
+    for i in range(num_objs):
+        lengthscale, signal_var, _ = plr.derive_gp_hyperparams(
+            domain_size = objectives.d,
+            expected_range=objectives.max() - objectives.min()
+        )
+    
 
 def main():
-    metrics_df, actions = load_pilot_data()
+    # read in the data
+    objs_df, actions_df, objectives = read_data(
+        actions_path    = ACTIONS_PATH,
+        objs_path       = OBJS_PATH
+    )
+    
+    print(actions_df[ACTIONS].to_numpy().min(axis=0),)
+    quit()
+    # create the MO GP
+    mogp = create_mogp(
+        domain_highs = actions_df[ACTIONS].to_numpy().min(axis=0),
+        domain_lows  = actions_df[ACTIONS].to_numpy().max(axis=0),
+        objective_highs = [metabolics.max(), comfort_treadmill.max()],
+        objective_lows  = [metabolics.min(), comfort_treadmill.min()],
+    )
 
-    metabolic_comfort = [
-        Objective('metabolic cost',   'Cost',              maximize=False),
-        Objective('treadmill comfort', 'Comfort Treadmill', maximize=True),
-    ]
-    speed_comfort = [
-        Objective('speed',         'Speed',         maximize=False),
-        Objective('floor comfort', 'Comfort Floor', maximize=True),
-    ]
+    # fit the GPs
+    mogp = fit_gp()
 
-    for objectives in (metabolic_comfort, speed_comfort):
-        report(run_pilot(objectives, metrics_df, actions))
+    # build the front
 
+    # plot them
 
 if __name__ == '__main__':
     main()

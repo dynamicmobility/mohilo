@@ -5,17 +5,8 @@ from pypolar.optimization.gp.base import GPModel
 
 
 class ConjugateGP(GPModel):
-    """Exact GP posterior for Gaussian (regression) feedback.
-
-    With a Gaussian prior and a Gaussian (sum-of-squares) likelihood the
-    posterior is available in closed form and can be evaluated in *data* space:
-    the only system solved is ``G = K_XX + sigma^2 I``, of size M x M where M is
-    the number of feedback points. This avoids ever forming, inverting, or
-    factorizing an N x N matrix, taking the fit from O(N^3) to O(N M^2) and the
-    memory from O(N^2) to O(N M) — which is what makes large action spaces
-    tractable.
-
-    No optimizer, no autodiff: ``fit()`` is a single triangular solve.
+    """Computes the exact GP posterior for regression problems. Feedback is 
+    expected to be samples of a noisy function f(x) which the GP will fit to.
     """
 
     def __init__(self, *args, **kwargs):
@@ -80,6 +71,70 @@ class ConjugateGP(GPModel):
         else:
             self.mu = self.K_sX @ cho_solve(self._gram_chol, self.y)
         return self.mu
+
+    def mu_at(self, X):
+        """Posterior mean at arbitrary points, on or off the discretized grid.
+
+        ``fit()`` evaluates the posterior at every action in ``action_space``;
+        this is the continuous function underneath that vector,
+
+            mu(x) = k(x, X_obs) (K_XX + sigma^2 I)^-1 y
+
+        so no refit is involved — the Gram factor built by ``set_data`` is
+        reused, and each call costs O(n M d) for n query points and M
+        observations. On a grid point it reproduces the matching entry of ``mu``
+        exactly, with one exception: at a *fed-back* action ``mu`` also carries
+        the ``JITTER`` nugget that ``set_data`` adds where test and train indices
+        coincide, so the two differ there by ``JITTER * alpha_m`` (~1e-5 times a
+        weight). The jitter is a numerical device, not part of the model, so the
+        continuous form deliberately omits it.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            Length-``n`` array of posterior means.
+        """
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if self._gram_chol is None:
+            # No observations yet: the posterior mean is the (zero) prior mean.
+            return np.zeros(X.shape[0])
+        return self.kernel_cross(X, self.actions[self.idx]) @ cho_solve(
+            self._gram_chol, self.y
+        )
+
+    def std_at(self, X):
+        """Posterior standard deviation at arbitrary points, on or off the grid.
+
+        The continuous counterpart of ``std()``, the square root of
+
+            sigma^2(x) = k(x, x) - k(x, X_obs) (K_XX + sigma^2 I)^-1 k(X_obs, x)
+
+        reusing the Gram factor built by ``set_data``, so it costs O(n M^2) for n
+        query points and involves no refit. Like ``mu_at`` it omits ``JITTER``:
+        the nugget is a numerical device, not part of the model. ``std()`` does
+        carry it in the prior variance, so the two differ by ``JITTER`` in
+        variance (~5e-5 in standard deviation) at every action.
+
+        Together with ``mu_at`` this makes any posterior-based acquisition a
+        continuous function of the action, optimizable off grid.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            Length-``n`` array of standard deviations.
+        """
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if self._gram_chol is None:
+            # No observations yet: the posterior variance is the prior variance.
+            return np.full(X.shape[0], np.sqrt(self.kernel.diag_var()))
+
+        K_sX = self.kernel_cross(X, self.actions[self.idx])          # (n, M)
+        var = self.kernel.diag_var() - np.einsum(
+            "ij,ji->i", K_sX, cho_solve(self._gram_chol, K_sX.T)
+        )
+        return np.sqrt(np.clip(var, 0, None))
 
     def posterior_cov(self, r=None):
         """Full posterior covariance ``Sigma - K_sX G^-1 K_sX^T``.

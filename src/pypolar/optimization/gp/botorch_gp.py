@@ -169,6 +169,67 @@ class BoTorchGP(GPModel):
         self.mu = K_sX @ cho_solve(gram_chol, self.y)
         return self.mu
 
+    def mu_at(self, X):
+        """Posterior mean at arbitrary points, on or off the discretized grid.
+
+        The continuous function underneath the ``mu`` vector,
+
+            mu(x) = k(x, X_obs) (K_XX + sigma^2 I)^-1 y
+
+        evaluated through the same data-space blocks ``fit()`` uses, so it needs
+        no refit and never touches ``model.posterior`` (which would materialize
+        the N x N test-test block). This backend applies no jitter, so on a grid
+        point it reproduces the matching entry of ``mu`` exactly, fed-back
+        actions included.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            Length-``n`` array of posterior means.
+        """
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if self.model is None:
+            return np.zeros(X.shape[0])
+
+        _, gram_chol = self._data_blocks()
+        K_sX = self._kernel_block(torch.as_tensor(X, dtype=self.DTYPE),
+                                  self._grid_tensor()[self.idx])
+        return K_sX @ cho_solve(gram_chol, self.y)
+
+    def std_at(self, X):
+        """Posterior standard deviation at arbitrary points, on or off the grid.
+
+        The continuous counterpart of ``std()``, the square root of
+
+            sigma^2(x) = k(x, x) - k(x, X_obs) (K_XX + sigma^2 I)^-1 k(X_obs, x)
+
+        evaluated through the same data-space blocks, so it needs no refit and
+        never touches ``model.posterior``. This backend applies no jitter, so on
+        a grid point it reproduces the matching entry of ``std()`` exactly.
+
+        Together with ``mu_at`` this makes any posterior-based acquisition a
+        continuous function of the action, optimizable off grid.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            Length-``n`` array of standard deviations.
+        """
+        X = np.atleast_2d(np.asarray(X, dtype=float))
+        if self.model is None:
+            return np.full(X.shape[0], np.sqrt(self.prior_var()))
+
+        _, gram_chol = self._data_blocks()
+        K_sX = self._kernel_block(torch.as_tensor(X, dtype=self.DTYPE),
+                                  self._grid_tensor()[self.idx])
+        prior_var = self.model.covar_module.outputscale.detach().item()
+        var = prior_var - np.einsum(
+            "ij,ji->i", K_sX, cho_solve(gram_chol, K_sX.T)
+        )
+        return np.sqrt(np.clip(var, 0, None))
+
     def posterior_cov(self, r=None):
         """Full (N, N) posterior covariance, straight from the model.
 

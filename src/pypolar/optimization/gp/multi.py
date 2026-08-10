@@ -3,15 +3,12 @@ import numpy as np
 from pypolar.optimization.gp.botorch_gp import BoTorchGP
 from pypolar.optimization.gp.conjugate import ConjugateGP
 from pypolar.optimization.gp.laplace import LaplaceGP
+from pypolar.utils.pareto import get_nondominated
 
 
 class MultiObjectiveGP:
-    """A collection of independent single-objective GPs sharing an action space.
-
-    Each objective gets its own GP with its own kernel hyperparameters. The
-    backend follows the feedback passed to ``setup()``: ``regressions`` selects
-    the exact path named at construction (``ConjugateGP`` or ``BoTorchGP``),
-    ``likelihoods`` the autodiff ``LaplaceGP`` path.
+    """A collection of independent single-objective GPs sharing a feedback
+    dataset.
     """
 
     BACKENDS = {
@@ -125,7 +122,44 @@ class MultiObjectiveGP:
             gp.fit(set_x0=set_x0, **kwargs)
 
         return [gp.mu for gp in self.gps]
+    
+    def set_data(self, X, q, y_vec):
+        if self.regression_backend != 'conjugate':
+            raise Exception('Add data currently only works for conjugate')
+        
+        for gp, y in zip(self.gps, y_vec, strict=True):
+            gp: ConjugateGP = gp
+            gp.set_data(X, q, y)
 
     def std(self, r=None):
         """Per-objective posterior standard deviations."""
         return [gp.std(r) for gp in self.gps]
+
+    def mu_at(self, X):
+        """Per-objective posterior means at arbitrary points.
+
+        The continuous counterpart of ``fit()``: it evaluates each objective's
+        posterior between the discretized actions, without refitting. Regression
+        backends only — ``LaplaceGP`` has no off-grid form.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            One length-``n`` array of posterior means per objective.
+        """
+        return [gp.mu_at(X) for gp in self.gps]
+
+    def std_at(self, X):
+        """Per-objective posterior standard deviations at arbitrary points.
+
+        The continuous counterpart of ``std()``. Regression backends only --
+        ``LaplaceGP`` has no off-grid form.
+
+        Args:
+            X: a single ``(d,)`` action or an ``(n, d)`` array of actions.
+
+        Returns:
+            One length-``n`` array of standard deviations per objective.
+        """
+        return [gp.std_at(X) for gp in self.gps]

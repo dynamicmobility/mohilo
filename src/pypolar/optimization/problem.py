@@ -1,5 +1,8 @@
 import numpy as np
 import jax.numpy as jnp
+from pypolar.utils.pareto import get_nondominated_tol
+from scipy.interpolate import CubicSpline, make_smoothing_spline
+
 
 class Likelihood:
     def __init__(
@@ -417,6 +420,7 @@ class MultiObjectiveRegression(Likelihood):
         high: list[float] | np.ndarray,
         action_dims: list[float] | np.ndarray,
         num_objs: int,
+        direction: list[str],
         precisions: list[float] | np.ndarray
     ):
         """Sets up regression based learning, useful for HILO.
@@ -425,12 +429,16 @@ class MultiObjectiveRegression(Likelihood):
             low: the lower bound of the action parameters
             high: the upper bound of the action parameters
             action_dims: the dimension of each action component (discretization)
+            num_objs: the number of objectives
+            direction: whether to maximize or minimize each objective (['max', 'min'])
+            precisions: noise-level of the measurement
         """
         super().__init__(low, high, action_dims)
         self.num_objs = num_objs
         self.precisions = precisions
         self.feedback_data = np.array([], dtype=float).reshape(0, self.num_objs + 1)  # shape (n, 2): [action_idx, value]
-        
+        self.direction = np.array([(d == 'max') * 2 - 1 for d in direction])
+
     def add_feedback(
         self, 
         action: list[float] | np.ndarray, 
@@ -485,3 +493,23 @@ class MultiObjectiveRegression(Likelihood):
     
     def get_feedback_idxs(self):
         return self.get_feedback_values(-1).astype(np.int32)
+    
+    def build_slider(self, predicted_objectives, smoothing=0.0, tol=0.0, num_cubics=300):
+        """Builds a slider for each pair of objectives s(a) = F_a, where a is an
+        action in the Pareto set and F_a is the corresponding set of objectives 
+        on the front."""
+        if predicted_objectives.shape[0] != 2: raise Exception('More than 2 obj not implemented yet')
+        predicted_objectives = (self.direction * predicted_objectives.T).T
+        nd_idxs = get_nondominated_tol(predicted_objectives, tol)
+
+        # increasing f1, ties broken by decreasing f2
+        order      = np.lexsort((
+           -predicted_objectives[nd_idxs, 1], 
+            predicted_objectives[nd_idxs, 0]
+        ))
+        slider_idxs = nd_idxs[order]
+        slider_objs = predicted_objectives[slider_idxs]
+
+        if len(slider_idxs) < 5:
+            raise Exception('Pareto front too small')
+        

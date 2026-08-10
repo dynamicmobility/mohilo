@@ -108,6 +108,118 @@ class TestPosteriorCovCross:
         )
 
 
+class TestMuAt:
+    """``mu_at`` is the continuous posterior mean the ``mu`` vector samples."""
+
+    OFF_GRID = np.array([[0.11], [1.37], [2.94], [3.88]])   # between grid points
+
+    @pytest.mark.parametrize("cls", [plr.ConjugateGP, plr.BoTorchGP])
+    def test_reproduces_mu_away_from_feedback(self, cls):
+        model = _fitted(cls)
+        keep = ~np.isin(np.arange(ACTIONS.shape[0]), IDX)
+        np.testing.assert_allclose(
+            model.mu_at(ACTIONS)[keep], model.mu[keep], rtol=1e-10, atol=1e-12
+        )
+
+    def test_jitter_is_the_only_gap_at_fed_back_actions(self):
+        """``set_data`` adds JITTER where test and train indices coincide."""
+        conjugate = _fitted(plr.ConjugateGP)
+        gap = np.abs(conjugate.mu_at(ACTIONS)[IDX] - conjugate.mu[IDX])
+        assert gap.max() > 0                      # the nugget really is there
+        assert gap.max() < 10 * GPModel.JITTER    # and it is only the nugget
+
+        # BoTorchGP applies no jitter, so it matches everywhere
+        botorch = _fitted(plr.BoTorchGP)
+        np.testing.assert_allclose(
+            botorch.mu_at(ACTIONS)[IDX], botorch.mu[IDX], rtol=1e-10, atol=1e-12
+        )
+
+    def test_backends_agree_off_grid(self, monkeypatch):
+        """JITTER also perturbs the Gram matrix, so zero it to compare exactly.
+
+        With the jitter left on the two backends differ off grid by ~1e-5, the
+        same scale as the on-grid gap ``TestParityWithConjugate`` allows for.
+        """
+        monkeypatch.setattr(GPModel, "JITTER", 0.0)
+        np.testing.assert_allclose(
+            _fitted(plr.BoTorchGP).mu_at(self.OFF_GRID),
+            _fitted(plr.ConjugateGP).mu_at(self.OFF_GRID),
+            rtol=1e-6, atol=1e-8
+        )
+
+    @pytest.mark.parametrize("cls", [plr.ConjugateGP, plr.BoTorchGP])
+    def test_accepts_a_single_action(self, cls):
+        model = _fitted(cls)
+        np.testing.assert_allclose(
+            model.mu_at(self.OFF_GRID[1]), model.mu_at(self.OFF_GRID[1:2]),
+            rtol=1e-12
+        )
+
+    def test_zero_without_feedback(self, empty_gp):
+        np.testing.assert_array_equal(
+            empty_gp.mu_at(self.OFF_GRID), np.zeros(len(self.OFF_GRID))
+        )
+
+
+class TestStdAt:
+    """``std_at`` is the continuous posterior std the ``std()`` vector samples."""
+
+    OFF_GRID = np.array([[0.11], [1.37], [2.94], [3.88]])   # between grid points
+
+    def test_reproduces_std_on_grid(self, gp):
+        """BoTorchGP applies no jitter, so the two forms coincide exactly."""
+        np.testing.assert_allclose(
+            gp.std_at(ACTIONS), gp.std(), rtol=1e-10, atol=1e-12
+        )
+
+    def test_agrees_with_the_model_posterior(self, gp):
+        """gpytorch's own prediction path is the independent check on the einsum."""
+        np.testing.assert_allclose(
+            gp.std_at(ACTIONS) ** 2, np.diag(gp.posterior_cov()),
+            rtol=1e-8, atol=1e-10
+        )
+
+    def test_jitter_is_the_only_gap_for_conjugate(self):
+        """``std()`` carries JITTER in the prior variance; ``std_at`` omits it."""
+        conjugate = _fitted(plr.ConjugateGP)
+        gap = np.abs(conjugate.std_at(ACTIONS) ** 2 - conjugate.std() ** 2)
+        assert gap.max() > 0                      # the nugget really is there
+        assert gap.max() < 10 * GPModel.JITTER    # and it is only the nugget
+
+    def test_backends_agree_off_grid(self, monkeypatch):
+        """JITTER also perturbs the Gram matrix, so zero it to compare exactly."""
+        monkeypatch.setattr(GPModel, "JITTER", 0.0)
+        np.testing.assert_allclose(
+            _fitted(plr.BoTorchGP).std_at(self.OFF_GRID),
+            _fitted(plr.ConjugateGP).std_at(self.OFF_GRID),
+            rtol=1e-6, atol=1e-8
+        )
+
+    @pytest.mark.parametrize("cls", [plr.ConjugateGP, plr.BoTorchGP])
+    def test_feedback_reduces_uncertainty(self, cls):
+        """Off grid, the posterior is tighter at the data than far from it."""
+        model = _fitted(cls)
+        prior = np.sqrt(model.kernel.diag_var())
+        near = model.std_at(ACTIONS[IDX] + 1e-3)
+        assert near.max() < prior
+        # ACTIONS spans [0, 4] and the length scale is 0.8, so 20 is far away.
+        np.testing.assert_allclose(model.std_at([[20.0]]), prior, rtol=1e-6)
+
+    @pytest.mark.parametrize("cls", [plr.ConjugateGP, plr.BoTorchGP])
+    def test_accepts_a_single_action(self, cls):
+        model = _fitted(cls)
+        np.testing.assert_allclose(
+            model.std_at(self.OFF_GRID[1]), model.std_at(self.OFF_GRID[1:2]),
+            rtol=1e-12
+        )
+
+    def test_prior_without_feedback(self, empty_gp):
+        np.testing.assert_allclose(
+            empty_gp.std_at(self.OFF_GRID), empty_gp.std()[:len(self.OFF_GRID)],
+            rtol=1e-12
+        )
+
+
 class TestWithoutFeedback:
 
     def test_mean_is_zero(self, empty_gp):

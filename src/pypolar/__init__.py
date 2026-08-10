@@ -13,6 +13,11 @@ from pypolar.optimization.gp import (
     LaplaceGP,
     MultiObjectiveGP
 )
+from pypolar.optimization.objectives import (
+    AffineTransform,
+    Objective,
+    DecoupledObjectives
+)
 from pypolar.sampler import (
     RandomSampler,
     UniformSampler,
@@ -50,6 +55,10 @@ __all__ = [
     "ConjugateGP",
     "LaplaceGP",
     "MultiObjectiveGP",
+    # objectives
+    "AffineTransform",
+    "Objective",
+    "DecoupledObjectives",
     # sampling
     "RandomSampler",
     "UniformSampler",
