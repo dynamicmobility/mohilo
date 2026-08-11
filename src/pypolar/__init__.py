@@ -1,39 +1,11 @@
-import jax
-jax.config.update("jax_enable_x64", True)
-
-from pypolar.optimization.problem import (
-    PreferenceBasedLearning, 
-    Regression,
-    MultiObjectiveRegression
-)
-from pypolar.optimization.gp import (
-    GPModel,
-    BoTorchGP,
-    ConjugateGP,
-    LaplaceGP,
-    MultiObjectiveGP
-)
+from pypolar.optimization.gp import DecoupledMOGP
 from pypolar.optimization.objectives import (
     AffineTransform,
     Objective,
     DecoupledObjectives
 )
-from pypolar.sampler import (
-    RandomSampler,
-    UniformSampler,
-    ThompsonSampler,
-    DSTSampler,
-    QNEHVISampler,
-    AcquisitionSampler,
-    ExpectedImprovementSampler,
-    KnowledgeGradientSampler,
-    MaxValueEntropySampler,
-    expected_max_of_lines,
-    knowledge_gradient
-)
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
-from pypolar.utils.plotting import plot_gp_1d, plot_pareto_2d
-from pypolar.utils.gp import derive_gp_hyperparams, derive_lengthscale, derive_precision, derive_prior_variance
+from pypolar.utils.plotting import plot_gp_1d
 from pypolar.feedback import (
     BradleyTerryOracle,
     MultiObjectiveOracle,
@@ -47,30 +19,11 @@ from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
 
 __all__ = [
     # optimization
-    "PreferenceBasedLearning",
-    "Regression",
-    "MultiObjectiveRegression",
-    "GPModel",
-    "BoTorchGP",
-    "ConjugateGP",
-    "LaplaceGP",
-    "MultiObjectiveGP",
+    "DecoupledMOGP",
     # objectives
     "AffineTransform",
     "Objective",
     "DecoupledObjectives",
-    # sampling
-    "RandomSampler",
-    "UniformSampler",
-    "ThompsonSampler",
-    "DSTSampler",
-    "QNEHVISampler",
-    "AcquisitionSampler",
-    "ExpectedImprovementSampler",
-    "KnowledgeGradientSampler",
-    "MaxValueEntropySampler",
-    "expected_max_of_lines",
-    "knowledge_gradient",
     # feedback oracles
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
@@ -88,13 +41,7 @@ __all__ = [
     "sparsity_from_normalized_nondominated",
     # plotting
     "plot_gp_1d",
-    "plot_pareto_2d",
     # performance
     "pareto_overlay",
-    "groundtruth_hypervolume",
-    # utils.gp
-    "derive_gp_hyperparams", 
-    "derive_lengthscale", 
-    "derive_precision", 
-    "derive_prior_variance"
+    "groundtruth_hypervolume"
 ]
