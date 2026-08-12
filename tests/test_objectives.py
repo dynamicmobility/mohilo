@@ -16,6 +16,7 @@ from pypolar.optimization.objectives import (
     AffineTransform,
     DecoupledObjectives,
     Objective,
+    sample_actions,
 )
 
 
@@ -61,6 +62,77 @@ def ragged(y, x):
         Objective(name='cost',    maximize=False, ydata=y.copy(),           xdata=x.copy()),
         Objective(name='comfort', maximize=True,  ydata=y[:3].copy() * 2.0, xdata=x[:3].copy()),
     ])
+
+
+# ---- sample_actions --------------------------------------------------------
+
+class TestSampleActions:
+    """`bounds` is a (2, d) torch tensor of [lower; upper] rows, as BoTorch
+    states them."""
+
+    @pytest.fixture
+    def bounds(self):
+        """A box whose two dimensions have different ranges, 10 and 2."""
+        return torch.tensor([[-5.0, 0.0], [5.0, 2.0]], dtype=torch.float64)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    @pytest.mark.parametrize('dim', [1, 2, 3])
+    def test_shape_is_n_by_dim(self, kind, dim):
+        bounds = torch.stack([torch.zeros(dim, dtype=torch.float64),
+                              torch.ones(dim, dtype=torch.float64)])
+        assert sample_actions(bounds, 7, kind, 0).shape == (7, dim)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_actions_are_float64(self, bounds, kind):
+        assert sample_actions(bounds, 5, kind, 0).dtype == np.float64
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_actions_stay_inside_the_box(self, bounds, kind):
+        actions = sample_actions(bounds, 256, kind, 0)
+        lo, hi = bounds.numpy()
+        assert np.all(actions >= lo) and np.all(actions <= hi)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_each_dimension_gets_its_own_range(self, bounds, kind):
+        # a box of 10 x 2, so ignoring the per-dimension bounds would overshoot
+        actions = sample_actions(bounds, 256, kind, 0)
+        assert actions[:, 0].min() < 0.0 < actions[:, 0].max()
+        assert actions[:, 1].max() <= 2.0
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_the_same_seed_gives_the_same_actions(self, bounds, kind):
+        assert sample_actions(bounds, 8, kind, 5) == pytest.approx(
+            sample_actions(bounds, 8, kind, 5))
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_a_different_seed_gives_different_actions(self, bounds, kind):
+        assert not np.allclose(sample_actions(bounds, 8, kind, 5),
+                               sample_actions(bounds, 8, kind, 6))
+
+    def test_the_two_designs_differ(self, bounds):
+        assert not np.allclose(sample_actions(bounds, 8, 'sobol', 0),
+                               sample_actions(bounds, 8, 'uniform', 0))
+
+    @pytest.mark.parametrize('n', [8, 16, 32])
+    def test_sobol_is_space_filling(self, bounds, n):
+        """A Sobol sequence of 2^k points splits every axis exactly in half;
+        that stratification is what "space-filling" buys over iid sampling."""
+        actions = sample_actions(bounds, n, 'sobol', 3)
+        midpoint = bounds.numpy().mean(axis=0)
+        below = (actions < midpoint).sum(axis=0)
+        assert below == pytest.approx(np.full(2, n // 2))
+
+    @pytest.mark.parametrize('kind', ['not a design', 'sobal', 'Sobol', '', None])
+    def test_an_unknown_kind_raises(self, bounds, kind):
+        # the branch is a whitelist, so a typo cannot silently return a
+        # different design than the one asked for
+        with pytest.raises(ValueError):
+            sample_actions(bounds, 6, kind, 1)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_bounds_must_be_a_torch_tensor(self, bounds, kind):
+        with pytest.raises((AttributeError, TypeError)):
+            sample_actions(bounds.numpy(), 4, kind, 0)
 
 
 # ---- AffineTransform -------------------------------------------------------

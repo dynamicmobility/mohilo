@@ -7,7 +7,18 @@ import numpy as np
 import torch
 
 from botorch.test_functions import SyntheticTestFunction
+from botorch.utils.sampling import draw_sobol_samples
 
+def sample_actions(bounds, n, kind, seed):
+    """n actions over the box: Sobol is space-filling, uniform is iid."""
+    if kind == 'sobol':
+        return draw_sobol_samples(bounds=bounds, n=n, q=1, seed=seed).squeeze(1).numpy()
+
+    if kind == 'uniform':
+        lo, hi = bounds.numpy()
+        return np.random.default_rng(seed).uniform(lo, hi, size=(n, len(lo)))
+
+    raise ValueError(f"kind must be 'sobol' or 'uniform', got {kind!r}")
 
 @dataclass
 class AffineTransform:

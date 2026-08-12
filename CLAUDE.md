@@ -67,7 +67,7 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-235 tests: public API surface (29), dangling references (3), objectives (104),
+264 tests: public API surface (31), dangling references (3), objectives (131),
 `BoTorchGP` (62), `DecoupledMOGP` (37).
 
 ## How to run experiments
@@ -92,20 +92,31 @@ fit's hyperparameters, which it reads with `BoTorchGP.get_fitted_hyperparameters
 ## Package API
 
 ```python
-from pypolar import DecoupledMOGP, DecoupledObjectives, Objective, AffineTransform
-from pypolar.optimization.gp import BoTorchGP    # not re-exported from pypolar
+from pypolar import DecoupledMOGP, BoTorchGP, DecoupledObjectives, Objective, AffineTransform
+from pypolar import sample_actions
 ```
 
 Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is the
 boundary in both directions: every public method takes and returns numpy arrays,
-and torch never escapes the module. The one non-array argument that crosses it is
-`Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
-subclass; it is evaluated internally and only numpy comes back out.
+and torch never escapes the module. Two arguments are the exception, both inputs
+only: `Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
+subclass, and `sample_actions`'s `bounds`, a torch tensor. Both are consumed
+internally and only numpy comes back out.
 
 ### Objectives (`optimization/objectives.py`)
 
 The bookkeeping layer. It owns the two coordinate changes that the GP assumes
 have already happened, so nothing downstream has to think about units or signs.
+
+**`sample_actions(bounds, n, kind, seed)`** — `n` actions over a box, returned
+`(n, d)`. `bounds` is a `(2, d)` **torch tensor** of `[lower; upper]` rows, the
+form BoTorch states bounds in; a numpy array raises. `kind='sobol'` draws a
+space-filling Sobol sequence and `kind='uniform'` draws iid uniform points; the
+branch is a whitelist, so any other value raises `ValueError` rather than
+silently returning a design you did not ask for. Sobol is the default worth
+reaching for because a 2^k-point sequence splits every axis exactly in half,
+where an iid design leaves clumps and gaps at the sample sizes these experiments
+run at.
 
 **`AffineTransform(scale, shift)`** — `x -> (x + shift) * scale`, with `inv()`.
 Three constructors: `make_standardized(data, sign=1.0)` (zero mean, unit
