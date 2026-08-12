@@ -9,6 +9,8 @@ over one shared action frame.
 
 import numpy as np
 import pytest
+import torch
+from botorch.test_functions import Levy, StyblinskiTang
 
 from pypolar.optimization.objectives import (
     AffineTransform,
@@ -366,6 +368,117 @@ class TestObjectiveFromDataFrame:
     def test_source_column_is_kept_when_the_name_differs(self, df):
         obj = Objective.from_df(df, 'Cost', ['a0', 'a1', 'a2'], False, name='Metabolic Cost')
         assert obj.column == 'Cost'
+
+
+class TestObjectiveFromSynthetic:
+    """`bounds` is the subtle part: BoTorch wants one (low, high) pair per
+    dimension, rejects actions outside them, and requires custom bounds to
+    contain a known optimizer. Spanning both the data and the function's own
+    default box satisfies all three."""
+
+    @staticmethod
+    def truth(function, actions):
+        """The function evaluated directly, as the reference for the noiseless case."""
+        with torch.no_grad():
+            return function(dim=np.atleast_2d(actions).shape[1])(
+                torch.as_tensor(actions, dtype=torch.float64), noise=False
+            ).numpy()
+
+    @pytest.mark.parametrize('dim', [1, 2, 3])
+    def test_every_action_dimension_is_supported(self, dim):
+        actions = np.linspace(-4.0, 4.0, 6 * dim).reshape(6, dim)
+        obj = Objective.from_synthetic(Levy, actions, maximize=False,
+                                       rel_noise_std=0.1, seed=0)
+        assert obj.xdata.shape == (6, dim)
+        assert obj.ydata.shape == (6,)
+        assert np.all(np.isfinite(obj.ydata))
+
+    def test_one_dimensional_actions_gain_a_column(self):
+        obj = Objective.from_synthetic(Levy, np.linspace(-5.0, 5.0, 7),
+                                       maximize=False, rel_noise_std=0.0, seed=0)
+        assert obj.xdata.shape == (7, 1)
+
+    def test_actions_are_kept_as_given(self):
+        actions = np.linspace(-4.0, 4.0, 10).reshape(5, 2)
+        obj = Objective.from_synthetic(Levy, actions, maximize=False,
+                                       rel_noise_std=0.3, seed=0)
+        assert obj.xdata == pytest.approx(actions)
+
+    def test_zero_noise_reproduces_the_function(self):
+        actions = np.linspace(-4.0, 4.0, 10).reshape(5, 2)
+        obj = Objective.from_synthetic(Levy, actions, maximize=False,
+                                       rel_noise_std=0.0, seed=0)
+        assert obj.ydata == pytest.approx(self.truth(Levy, actions))
+
+    def test_integer_actions_keep_full_precision(self):
+        # float32 evaluation would agree only to ~1e-7
+        actions = np.array([[-4, -2], [0, 1], [2, 3], [4, 4]])
+        obj = Objective.from_synthetic(Levy, actions, maximize=False,
+                                       rel_noise_std=0.0, seed=0)
+        assert obj.ydata == pytest.approx(self.truth(Levy, actions.astype(float)),
+                                          rel=1e-12)
+
+    def test_the_same_seed_gives_the_same_measurements(self):
+        actions = np.linspace(-4.0, 4.0, 12).reshape(6, 2)
+        kwargs = dict(maximize=False, rel_noise_std=0.2)
+        a = Objective.from_synthetic(Levy, actions, seed=7, **kwargs)
+        b = Objective.from_synthetic(Levy, actions, seed=7, **kwargs)
+        assert a.ydata == pytest.approx(b.ydata)
+
+    def test_a_different_seed_gives_different_measurements(self):
+        actions = np.linspace(-4.0, 4.0, 12).reshape(6, 2)
+        kwargs = dict(maximize=False, rel_noise_std=0.2)
+        a = Objective.from_synthetic(Levy, actions, seed=7, **kwargs)
+        b = Objective.from_synthetic(Levy, actions, seed=8, **kwargs)
+        assert not np.allclose(a.ydata, b.ydata)
+
+    def test_noise_is_a_fraction_of_the_truths_spread(self):
+        actions = np.linspace(-4.0, 4.0, 200).reshape(100, 2)
+        truth = self.truth(Levy, actions)
+        residuals = [
+            Objective.from_synthetic(Levy, actions, maximize=False,
+                                     rel_noise_std=rel, seed=3).ydata - truth
+            for rel in (0.1, 0.4)
+        ]
+        # the same draw scaled by rel, so the ratio of spreads is the ratio of rels
+        assert residuals[1].std() / residuals[0].std() == pytest.approx(4.0, rel=1e-9)
+
+        # exactly rel * spread * the draw that seed 3 produces
+        draw = np.random.default_rng(3).standard_normal(truth.shape)
+        assert residuals[0] == pytest.approx(0.1 * truth.std() * draw, rel=1e-9)
+
+    def test_maximize_sets_the_direction(self):
+        actions = np.linspace(-4.0, 4.0, 10).reshape(5, 2)
+        kwargs = dict(rel_noise_std=0.0, seed=0)
+        lo = Objective.from_synthetic(Levy, actions, maximize=False, **kwargs)
+        hi = Objective.from_synthetic(Levy, actions, maximize=True, **kwargs)
+
+        assert (lo.sign, hi.sign) == (-1.0, 1.0)
+        assert lo.ydata == pytest.approx(hi.ydata)          # same measurements
+        assert lo.standard_y == pytest.approx(-hi.standard_y)
+        # standard_y is larger-is-better, so minimizing peaks at the smallest value
+        assert np.argmax(lo.standard_y) == np.argmin(lo.ydata)
+
+    def test_a_design_that_misses_the_optimum_still_builds(self):
+        # Levy's optimum is at (1, ..., 1), strictly outside this box
+        actions = np.linspace(3.0, 5.0, 10).reshape(5, 2)
+        obj = Objective.from_synthetic(Levy, actions, maximize=False,
+                                       rel_noise_std=0.1, seed=0)
+        assert np.all(np.isfinite(obj.ydata))
+
+    def test_actions_outside_the_default_box_still_build(self):
+        # StyblinskiTang's default box is [-5, 5]
+        actions = np.linspace(-8.0, 8.0, 10).reshape(5, 2)
+        obj = Objective.from_synthetic(StyblinskiTang, actions, maximize=False,
+                                       rel_noise_std=0.0, seed=0)
+        assert np.all(np.isfinite(obj.ydata))
+
+    def test_name_is_passed_through(self):
+        obj = Objective.from_synthetic(Levy, np.linspace(-4.0, 4.0, 6).reshape(3, 2),
+                                       maximize=False, rel_noise_std=0.0, seed=0,
+                                       name='Levy cost')
+        assert obj.name == 'Levy cost'
+        assert obj.column is None
 
 
 # ---- DecoupledObjectives ---------------------------------------------------

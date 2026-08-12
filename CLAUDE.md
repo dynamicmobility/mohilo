@@ -12,7 +12,9 @@ Always ask how much code the user wants you to edit. Do not edit more than they 
 Multi-objective Bayesian optimization for human-in-the-loop robotics. The GP
 layer is **BoTorch and nothing else** — there is no hand-written kernel algebra,
 no custom posterior solver, and no custom acquisition code in the package. One
-class, `DecoupledMOGP`, wraps a BoTorch `ModelListGP`.
+factory, `build_botorch_gp`, configures every `SingleTaskGP` in the repo, and two
+wrappers use it: `BoTorchGP` (one objective, one `SingleTaskGP`) and
+`DecoupledMOGP` (many objectives, a `ModelListGP`).
 
 ## Project structure
 
@@ -23,7 +25,7 @@ pyPolar/
 │   ├── __init__.py                 # Public API
 │   ├── optimization/
 │   │   ├── objectives.py           # AffineTransform, Objective, DecoupledObjectives
-│   │   └── gp.py                   # DecoupledMOGP - the only GP in the repo
+│   │   └── gp.py                   # build_botorch_gp, gp_hyperparameters, BoTorchGP, DecoupledMOGP
 │   ├── feedback/
 │   │   ├── rewards.py              # InternalReward hierarchy (groundtruth objectives)
 │   │   └── oracles.py              # Simulated humans: Bradley-Terry, noisy regression
@@ -31,13 +33,17 @@ pyPolar/
 │   └── utils/                      # pareto.py, plotting.py
 ├── hilo/
 │   ├── plot_pilot.py               # The one live experiment: pilot data -> fronts + optima
+│   ├── gp_diagnostics.py           # Leave-one-out R^2 and calibration on a synthetic objective
 │   └── output/                     # Figures and recorded runs
-├── scripts/                        # Scratch/experimentation files (not maintained)
+├── scratch/                        # Scratch/experimentation files (not maintained)
+├── docs/                           # LaTeX writeup and handoff record from the pre-BoTorch GP
+├── tablet/                         # iPad control panel (panel.py + index.html), no pypolar import
 ├── human_data/                     # Pilot CSVs consumed by plot_pilot.py
 └── tests/                          # pytest test suite
     ├── test_public_api.py          # Every __all__ name imports
     ├── test_no_stale_references.py # No dangling references in scripts/hilo
     ├── test_objectives.py          # AffineTransform, Objective, DecoupledObjectives
+    ├── test_botorch_gp.py          # build_botorch_gp, gp_hyperparameters, BoTorchGP behaviour
     └── test_decoupled_mogp.py      # DecoupledMOGP behaviour
 ```
 
@@ -61,15 +67,17 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-135 tests: public API surface (29), dangling references (1), objectives (76),
-`DecoupledMOGP` (29).
+235 tests: public API surface (29), dangling references (3), objectives (104),
+`BoTorchGP` (62), `DecoupledMOGP` (37).
 
 ## How to run experiments
 
 ```bash
 conda activate pypolar
-python -m hilo.plot_pilot   # fits the pilot data, writes hilo/output/test.png,
-                            # prints the best action per objective
+python -m hilo.plot_pilot        # fits the pilot data, writes hilo/output/test.png,
+                                 # prints the best action per objective
+python -m hilo.gp_diagnostics    # leave-one-out R^2 and calibration on a synthetic
+                                 # objective, writes hilo/output/gp_diagnostics.png
 ```
 
 `plot_pilot.py` needs `pandas`, which is not a package dependency (it is an
@@ -77,15 +85,22 @@ experiment-only import). `optimize_acqf` seeds its restarts from torch's global
 state, which the script does not set, so the reported optima wobble in the third
 or fourth decimal between runs.
 
+`gp_diagnostics.py` needs `scikit-learn` and `matplotlib`, also experiment-only.
+Unless `--refit-folds` is passed, every leave-one-out fold freezes the full-data
+fit's hyperparameters, which it reads with `BoTorchGP.get_fitted_hyperparameters()`.
+
 ## Package API
 
 ```python
 from pypolar import DecoupledMOGP, DecoupledObjectives, Objective, AffineTransform
+from pypolar.optimization.gp import BoTorchGP    # not re-exported from pypolar
 ```
 
 Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is the
 boundary in both directions: every public method takes and returns numpy arrays,
-and torch never escapes the module.
+and torch never escapes the module. The one non-array argument that crosses it is
+`Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
+subclass; it is evaluated internally and only numpy comes back out.
 
 ### Objectives (`optimization/objectives.py`)
 
@@ -126,6 +141,29 @@ Built with `from_df(df, column, action_columns, maximize, name)` or
 `from_data(actions, values, maximize, name)`. `add_points()` appends and re-runs
 `__post_init__`, so the transform tracks the new mean.
 
+`from_synthetic(function, actions, maximize, rel_noise_std, seed, name)` builds
+one from a BoTorch `SyntheticTestFunction` **subclass** (not an instance),
+evaluated at `actions` with Gaussian noise added. `rel_noise_std` is a fraction
+of the truth's own spread, matching the convention `noise_std` uses everywhere
+else in the package, so it means the same difficulty across functions whose
+ranges differ by orders of magnitude. The noise is drawn from an explicit
+`default_rng(seed)` rather than through the function's own `noise_std`, which
+would be an absolute magnitude drawn from torch's global state.
+
+`negate` is deliberately never passed: `Objective` already encodes direction
+through `maximize`, so `from_synthetic(Levy, ..., maximize=False)` means
+"minimize Levy" and negating too would double-flip it.
+
+The bounds handed to the function span **both** the action range and the
+function's own default box. Both halves are load-bearing, and neither is
+optional in botorch 0.18.1: `evaluate_true` rejects actions outside the bounds,
+so they must cover the data (StyblinskiTang's default box is `[-5, 5]`, and
+actions on `[-8, 8]` fail without custom bounds); and passing *any* custom
+bounds triggers a check that at least one known optimizer lies inside them, so
+they must also cover the default box or a design that misses the optimum raises
+`ValueError`. Widening is free — bounds gate the domain, they never enter the
+formula, so the values are identical whichever bounds are used.
+
 **`DecoupledObjectives(objectives)`** — a list of `Objective`s that are
 *decoupled*: each carries its own actions and its own number of measurements.
 Nothing requires them to share a design. What they do share is one action frame:
@@ -149,6 +187,48 @@ standardized values.
 from maximization space into each objective's own units, column by column, using
 `inv()` on the means and `inv_scale()` on the standard deviations. This is what
 `posterior_at(raw=True)` and `best_actions(raw=True)` call.
+
+### The GP layer (`optimization/gp.py`)
+
+Every GP in the repo comes out of one factory. `build_botorch_gp(actions, values,
+noise_std, signal_var, length_scale)` returns the single `SingleTaskGP`
+configuration the package uses: an ARD `ScaleKernel(RBFKernel)`, `ZeroMean()`,
+`Standardize(m=1)`, and noise pinned through `train_Yvar`. Both wrappers below
+call it, so a change there changes every GP at once.
+
+**`gp_hyperparameters(model)`** — every hyperparameter of one such GP, as a dict:
+
+| key | what it is |
+| --- | --- |
+| `lengthscale` | `(d,)` ARD lengthscales, in the normalized `[0, 1]^d` action frame |
+| `signal_var` | the `ScaleKernel` outputscale |
+| `noise_var` | the fixed observation noise |
+| `standardize_scale` | the divisor `Standardize` applied to the values |
+
+That is the complete set. `model.named_hyperparameters()` yields only
+`raw_outputscale` and `raw_lengthscale`; `ZeroMean` has no parameters; and
+`Standardize`'s *offset* is zero, because `standard_y` reaches the GP already
+centered. The noise is missing from `named_hyperparameters()` only because
+`FixedNoiseGaussianLikelihood` stores it as a buffer rather than a learned
+parameter — it is still a hyperparameter of the model, the fit just never moves
+it.
+
+`standardize_scale` is what makes the two variances interpretable: they are in
+post-`Standardize` units, so a `signal_var` of 4.4 is not comparable to
+`standard_y`'s variance of 1.0. Multiplying by `standardize_scale ** 2` undoes
+the transform and lands back in the units the GP was handed. The scale is close
+to but never exactly 1, since `Standardize` divides by the sample (ddof=1)
+standard deviation where `AffineTransform.make_standardized` used the population
+(ddof=0) one.
+
+**`BoTorchGP(objective, noise_std, fit_hyperparameters=True)`** — the
+single-objective wrapper: one `Objective` rather than a collection, so the action
+frame is that objective's own normalization instead of a shared one, and the
+marginal likelihood is a plain `ExactMarginalLogLikelihood`. `posterior_at`,
+`best_actions`, `update_feedback` and `get_fitted_hyperparameters` carry the same
+signatures and contracts as on `DecoupledMOGP` below with `m = 1`, so the
+returned arrays keep their column axis. `BoTorchGP.model` **is** the
+`SingleTaskGP` — there is no sub-model beneath it, unlike `ModelListGP.models`.
 
 ### DecoupledMOGP (`optimization/gp.py`)
 
@@ -219,6 +299,11 @@ raw units either way; `raw=True` puts the values there too.
 refits. There is no warm start and no incremental conditioning; a closed-form
 exact GP is cheap enough that rebuilding is the intended usage.
 
+**`get_fitted_hyperparameters()`** — a length-m list of `gp_hyperparameters`
+dicts, one per objective in objective order. No entry is shared between them:
+each sub-model has its own kernel, fitted from its own term of the
+`SumMarginalLogLikelihood`.
+
 ### Feedback (`feedback/`)
 
 Simulated humans and groundtruth objectives, all numpy, no GP dependency. Kept
@@ -268,14 +353,21 @@ takes plain arrays, so it is independent of any GP class.
 
 - **Runtime:** numpy, scipy, pymoo, botorch (which pulls torch and gpytorch)
 - **Dev:** pytest, matplotlib
-- `hilo/plot_pilot.py` additionally uses pandas
+- `hilo/plot_pilot.py` additionally uses pandas, `hilo/gp_diagnostics.py`
+  scikit-learn
 
 Verified against botorch 0.18.1 / gpytorch 1.15.2 / torch 2.13.0. Two details in
 `gp.py` are version-sensitive: `outcome_transform` must be passed explicitly
 (BoTorch's default changed to `Standardize`), and `train_Yvar` is what selects
-`FixedNoiseGaussianLikelihood`.
+`FixedNoiseGaussianLikelihood`. A third is in `objectives.py`: the bounds
+`from_synthetic` passes are both validated against the actions (`evaluate_true`
+rejects points outside them) and required to contain a known optimizer.
 
 ## Known stale code
 
-`scripts/` is scratch work and is not maintained. Nothing in it imports
-`pypolar`, so `test_no_stale_references.py` has nothing to check there.
+`scratch/` is scratch work and is not maintained; some of it still names classes
+that no longer exist (`ConjugateGP`). `test_no_stale_references.py` searches
+`examples/`, `scripts/` and `hilo/`, none of which is `scratch/`, so nothing
+there is checked. `docs/` predates the BoTorch rewrite and describes the
+hand-written GP that `git rm`'d in "delete custom gps". `tablet/` is an
+independent iPad control panel and does not import `pypolar`.

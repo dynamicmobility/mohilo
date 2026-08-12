@@ -48,6 +48,32 @@ def build_botorch_gp(
         input_transform     = None,
     )
 
+def gp_hyperparameters(model: SingleTaskGP) -> dict:
+    """Every hyperparameter of one GP built by `build_botorch_gp`.
+
+    `ZeroMean` has no parameters and `Standardize`'s offset is zero on centered
+    values, so the kernel, the noise and the Standardize scale are the whole set.
+
+    Args:
+        model: a GP built by `build_botorch_gp`.
+
+    Returns:
+        dict of `lengthscale` (d,) ARD lengthscales in the normalized action
+        frame, `signal_var` the ScaleKernel outputscale, `noise_var` the fixed
+        observation noise, and `standardize_scale` the divisor Standardize
+        applied. Both variances are in post-Standardize units; multiplying by
+        `standardize_scale ** 2` puts them in the units the GP was handed.
+    """
+    kernel = model.covar_module
+    return {
+        'lengthscale':       kernel.base_kernel.lengthscale.detach().numpy().ravel(),
+        'signal_var':        kernel.outputscale.item(),
+        # identical at every point by construction, so the mean is that value
+        'noise_var':         model.likelihood.noise.mean().item(),
+        'standardize_scale': model.outcome_transform.stdvs.item(),
+    }
+
+
 class BoTorchGP:
     """BoTorch GP in a convenient wrapper.
     """
@@ -158,6 +184,10 @@ class BoTorchGP:
         # (m, m) evaluated at m actions; the diagonal is each objective at its own
         mu, std = self.posterior_at(actions, normalized=True, raw=raw)
         return self.objective.xtransform.inv(actions), np.diag(mu), np.diag(std)
+    
+    def get_fitted_hyperparameters(self):
+        """The GP's hyperparameters, as described by `gp_hyperparameters`."""
+        return gp_hyperparameters(self.model)
 
 
 class DecoupledMOGP:
@@ -272,3 +302,12 @@ class DecoupledMOGP:
         # (m, m) evaluated at m actions; the diagonal is each objective at its own
         mu, std = self.posterior_at(actions, normalized=True, raw=raw)
         return self.objectives.xtransform.inv(actions), np.diag(mu), np.diag(std)
+
+    def get_fitted_hyperparameters(self):
+        """Each objective's GP hyperparameters, in objective order.
+
+        Returns:
+            a length-m list of `gp_hyperparameters` dicts. The objectives are
+            decoupled, so no entry is shared between them.
+        """
+        return [gp_hyperparameters(gp) for gp in self.model.models]

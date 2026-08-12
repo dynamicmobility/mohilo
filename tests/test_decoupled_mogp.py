@@ -293,3 +293,88 @@ class TestUpdateFeedback:
         returned = mogp.update_feedback(objectives)
         assert returned is mogp.model
         assert not returned.training
+
+
+# ---- hyperparameters -------------------------------------------------------
+
+KEYS = {'lengthscale', 'signal_var', 'noise_var', 'standardize_scale'}
+
+NOISE_STD = 0.05    # the DecoupledMOGP default
+
+
+class TestGetFittedHyperparameters:
+    """One dict per objective, because the objectives are decoupled: each GP
+    has its own kernel and nothing is tied across them."""
+
+    def test_one_entry_per_objective_with_the_four_hyperparameters(
+            self, mogp, objectives):
+        hypers = mogp.get_fitted_hyperparameters()
+        assert len(hypers) == len(objectives)
+        assert all(set(h) == KEYS for h in hypers)
+
+    def test_it_is_in_objective_order(self, mogp):
+        """Entry i belongs to sub-model i, which is objective i."""
+        for h, gp in zip(mogp.get_fitted_hyperparameters(), mogp.model.models):
+            np.testing.assert_allclose(
+                h['lengthscale'],
+                gp.covar_module.base_kernel.lengthscale.detach().numpy().ravel()
+            )
+            assert h['signal_var'] == pytest.approx(gp.covar_module.outputscale.item())
+
+    def test_one_lengthscale_per_action_dimension(self, mogp, actions):
+        for h in mogp.get_fitted_hyperparameters():
+            assert h['lengthscale'].shape == (actions.shape[1],)
+
+    def test_nothing_torch_escapes(self, mogp):
+        for h in mogp.get_fitted_hyperparameters():
+            assert isinstance(h['lengthscale'], np.ndarray)
+            assert all(isinstance(h[k], float) for k in KEYS - {'lengthscale'})
+
+    def test_the_noise_is_the_squared_fraction_for_every_objective(self, mogp):
+        """noise_std is a fraction of each objective's own spread, so after
+        Standardize every sub-model reports the same variance."""
+        for h in mogp.get_fitted_hyperparameters():
+            assert h['noise_var'] == pytest.approx(NOISE_STD ** 2)
+
+    def test_an_unfitted_model_reports_the_starting_values(self, objectives):
+        mogp = DecoupledMOGP(objectives, fit_hyperparameters=False)
+        for h in mogp.get_fitted_hyperparameters():
+            assert h['lengthscale'] == pytest.approx(DecoupledMOGP.LENGTH_SCALE)
+            assert h['signal_var'] == pytest.approx(DecoupledMOGP.SIGNAL_VAR)
+
+    def test_each_objective_gets_its_own_lengthscales(self, actions):
+        """A shared fit would be a bug. The two objectives here differ only in
+        smoothness, so the smoother one must come out with the longer
+        lengthscales in every action dimension.
+
+        The `objectives` fixture cannot show this: PEAK and VALLEY sit at
+        [0.75, 0.75] and [0.25, 0.25] in the normalized frame, and the sign flip
+        on the minimized cost turns -bump back into +bump, so the two data sets
+        are reflections of each other through the center of the box. A
+        reflection leaves every RBF distance unchanged, which makes the two
+        marginal likelihoods the same function of the lengthscales."""
+        objs = DecoupledObjectives.from_empty()
+        objs.add_objective(Objective.from_data(
+            actions=actions, values=_bump(actions, PEAK, width=6.0),
+            maximize=True, name='wide'
+        ))
+        objs.add_objective(Objective.from_data(
+            actions=actions, values=_bump(actions, PEAK, width=1.5),
+            maximize=True, name='narrow'
+        ))
+        wide, narrow = DecoupledMOGP(objs, fit_hyperparameters=True
+                                     ).get_fitted_hyperparameters()
+
+        assert np.all(wide['lengthscale'] > narrow['lengthscale'])
+
+    def test_it_tracks_a_refit_after_new_measurements(self, objectives):
+        mogp = DecoupledMOGP(objectives, fit_hyperparameters=True)
+        before = [h['lengthscale'].copy() for h in mogp.get_fitted_hyperparameters()]
+
+        # a measurement contradicting the bump, on 'reward' only
+        objectives.add_point('reward', np.array([[5.0, 0.0]]), np.array([5.0]))
+        mogp.update_feedback(objectives)
+        after = mogp.get_fitted_hyperparameters()
+
+        assert not np.allclose(before[0], after[0]['lengthscale'])
+        np.testing.assert_allclose(before[1], after[1]['lengthscale'])

@@ -1,38 +1,4 @@
 """Leave-one-out cross-validation and R^2 for one GP on a synthetic objective.
-
-The point is to answer, on data whose ground truth is known exactly, two
-questions a fit to real pilot data cannot answer:
-
-1. **Does the GP predict measurements it has not seen?** That is leave-one-out:
-   for each of the N measurements, refit on the other N-1 and predict the one
-   that was held out. Nothing in fold i has seen point i -- not the kernel, not
-   the standardization, not the action normalization, since every fold builds
-   its own `Objective`. R^2 over those held-out predictions is the honest
-   version of R^2; the in-sample R^2 printed beside it is the same GP scored on
-   its own training points, and the gap between them is how much the fit is
-   memorizing rather than generalizing.
-
-2. **Are its error bars honest?** A GP reports a standard deviation, so the
-   held-out residuals can be divided by it. If the posterior is calibrated those
-   z-scores are standard normal, so their standard deviation is 1 and 95% of the
-   truth falls inside the 95% interval. R^2 alone cannot see this: a model can
-   predict well and still be systematically over- or under-confident.
-
-Because the objective is synthetic, both are reported twice -- against the noisy
-measurements (what you could compute from real data) and against the noiseless
-truth (what you actually want to know). The first is capped by the noise: no
-model can explain variance that is not there, so its ceiling is printed too.
-
-    conda activate pypolar
-    python -m hilo.gp_diagnostics --dim 1 --samples 40 --noise 0.05
-
-Two noise levels are deliberately separate. `--noise` is the noise actually added
-to the measurements; `--gp-noise` is what the GP is told to assume. Both are
-fractions of a spread, matching `BoTorchGP`'s own convention, so equal values
-mean a well-specified GP and unequal ones a deliberately misspecified one.
-
-Needs `matplotlib` and `scikit-learn`, neither of which is a package dependency
--- both are experiment-only imports, as `pandas` is in plot_pilot.py.
 """
 
 import argparse
@@ -48,6 +14,7 @@ from botorch.test_functions import (
     Rastrigin,
     Rosenbrock,
     StyblinskiTang,
+    SyntheticTestFunction
 )
 from botorch.utils.sampling import draw_sobol_samples
 from sklearn.metrics import r2_score
@@ -63,7 +30,7 @@ REFIT_FOLDS  = False    # refit kernel hyperparameters inside every LOO fold
 FUNCTION     = 'levy'
 BOX          = 5.0      # the action box is [-BOX, BOX]^DIM
 DESIGN       = 'sobol'  # 'sobol' (space-filling) or 'uniform' (iid)
-SEED         = 0
+SEED         = 95
 OUTPUT       = Path('hilo/output/gp_diagnostics.png')
 
 PLOT_RES     = 400      # plotting only
@@ -85,20 +52,11 @@ FULL_COLOR  = '#D55E00'
 POINT_COLOR = '#0072B2'
 
 
-def make_truth(name, dim, box):
-    """The synthetic objective over [-box, box]^dim, negated so that it is
-    maximized. The default box matters: Ackley's own bounds are +/-32.77, where
-    the function is a flat plateau almost everywhere and nothing is learnable."""
+def make_truth(name: str, dim: int, box: float) -> SyntheticTestFunction:
     return FUNCTIONS[name](dim=dim, negate=True, bounds=[(-box, box)] * dim)
 
 
 def truth_at(truth, X):
-    """Noiseless values of the objective at X, as an (n,) array.
-
-    `evaluate_true` does not apply `negate`, so it is the wrong way to ask for
-    the ground truth of a negated function; calling the function with
-    `noise=False` applies the negation and skips only the noise.
-    """
     with torch.no_grad():
         return truth(torch.as_tensor(X, dtype=DTYPE), noise=False).numpy()
 
@@ -118,43 +76,32 @@ def fit_gp(objective, noise_std, hypers=None):
     Args:
         objective: the measurements to condition on.
         noise_std: observation noise, as a fraction of the objective's spread.
-        hypers: `(lengthscale, signal_var)` to hold fixed, or None to fit them.
+        hypers: a `get_fitted_hyperparameters()` dict to hold fixed, or None to
+            fit them.
     """
     gp = BoTorchGP(objective, noise_std=noise_std, fit_hyperparameters=hypers is None)
     if hypers is not None:
-        # BoTorchGP reads these when it builds, so the model constructed in
-        # __init__ is thrown away and rebuilt on the frozen values
-        gp.LENGTH_SCALE, gp.SIGNAL_VAR = hypers
+        gp.LENGTH_SCALE, gp.SIGNAL_VAR = hypers['lengthscale'], hypers['signal_var']
         gp.update_feedback(objective)
 
     return gp
 
 
-def hyperparameters(gp):
-    """The fitted ARD lengthscales and signal variance of a fitted GP."""
-    kernel = gp.model.covar_module
-    return (kernel.base_kernel.lengthscale.detach().numpy().ravel(),
-            kernel.outputscale.item())
-
-
 def leave_one_out(objective, noise_std, hypers):
     """Held-out posterior at every measured action.
 
-    Fold i is refit on the other N-1 measurements and asked to predict point i.
-    The fold builds its own `Objective`, so its standardization and its action
-    normalization are computed without the held-out point too -- leaking the
-    mean of a point into the transform that predicts it would flatter the
-    result, especially at small N.
+    Fold i is refit on every measurement except i, and is then asked to predict 
+    point i.
 
     Args:
         objective: the full set of measurements.
         noise_std: what each fold's GP assumes, a fraction of its own spread.
-        hypers: `(lengthscale, signal_var)` frozen in every fold, or None to
-            refit them fold by fold.
+        hypers: a `get_fitted_hyperparameters()` dict frozen in every fold, or
+            None to refit them fold by fold.
 
     Returns:
-        (mu, std, models): length-N held-out mean and standard deviation in raw
-        units, and the GP of each fold.
+        (mu, std, models): mu and std are the predicted (held-out) point for each
+        respective fold in raw unit. Models is the GP of each fold.
     """
     n = objective.ydata.size
     mu, std, models = np.empty(n), np.empty(n), []
@@ -219,10 +166,6 @@ def report(args, y_obs, y_true, loo_mu, loo_std, in_sample_mu, noise_abs, gp_noi
 
 def plot_folds(ax, truth, objective, models, full_gp, bounds):
     """Every fold's posterior mean on one axes, over the truth and the samples.
-
-    The spread between the faint curves is the diagnostic: it is how much the
-    fit moves when any single measurement is removed, so a wide bundle means the
-    fit is resting on individual points rather than on the design as a whole.
     """
     grid = np.linspace(bounds[0, 0], bounds[1, 0], PLOT_RES)[:, None]
 
@@ -309,31 +252,42 @@ def main():
     truth  = make_truth(args.function, args.dim, args.box)
     bounds = truth.bounds
 
-    # the noise is a fraction of the truth's own spread, so that it is on the
-    # same footing as the GP's noise_std and the two are directly comparable
-    noise_abs = args.noise * truth_at(
-        truth, draw_sobol_samples(bounds=bounds, n=SPREAD_REF, q=1, seed=args.seed).squeeze(1)
-    ).std()
+    X = draw_sobol_samples(
+        bounds = bounds,
+        n      = args.samples,
+        q      = 1,
+        seed   = args.seed
+    ).squeeze(1) 
+    noise_abs = args.noise * truth_at(truth, X).std() # noise is a fraction of the truth's own spread
 
-    X = sample_design(bounds, args.samples, args.design, args.seed)
     y_true = truth_at(truth, X)
     y_obs  = y_true + noise_abs * np.random.default_rng(args.seed).standard_normal(y_true.shape)
 
-    objective = Objective.from_data(actions=X, values=y_obs, maximize=True,
-                                    name=args.function)
+    objective = Objective.from_data(
+        actions  = X,
+        values   = y_obs,
+        maximize = True,
+        name     = args.function
+    )
 
-    # the full-data fit does double duty: it is the in-sample baseline, and its
-    # hyperparameters are what the folds freeze unless asked to refit
     full_gp = fit_gp(objective, args.gp_noise)
-    hypers  = None if args.refit_folds else hyperparameters(full_gp)
+    hypers  = None if args.refit_folds else full_gp.get_fitted_hyperparameters()
 
-    mu, std, models = leave_one_out(objective, args.gp_noise, hypers)
+    loo_mu, loo_std, models = leave_one_out(objective, args.gp_noise, hypers)
     in_sample_mu = full_gp.posterior_at(X, raw=True)[0][:, 0]
 
-    report(args, y_obs, y_true, mu, std, in_sample_mu,
-           noise_abs, args.gp_noise * y_obs.std())
+    report(
+        args         = args,
+        y_obs        = y_obs,
+        y_true       = y_true,
+        loo_mu       = loo_mu,
+        loo_std      = loo_std,
+        in_sample_mu = in_sample_mu,
+        noise_abs    = noise_abs,
+        gp_noise_abs = args.gp_noise * y_obs.std()
+    )
     make_figure(args, truth, objective, models, full_gp, bounds.numpy(),
-                y_true, mu, std)
+                y_true, loo_mu, loo_std)
 
 
 if __name__ == '__main__':

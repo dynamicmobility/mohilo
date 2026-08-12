@@ -4,6 +4,9 @@ rescalings applied before they reach a GP."""
 from dataclasses import dataclass
 
 import numpy as np
+import torch
+
+from botorch.test_functions import SyntheticTestFunction
 
 
 @dataclass
@@ -125,6 +128,52 @@ class Objective:
             ydata       = values,
             xdata       = actions,
             column      = None
+        )
+        
+    @classmethod
+    def from_synthetic(
+        cls,
+        function     : type[SyntheticTestFunction],
+        actions      : np.ndarray,
+        maximize     : bool,
+        rel_noise_std: float,
+        seed         : int,
+        name         : str = None
+    ):
+        """Measurements of a BoTorch synthetic function, plus Gaussian noise.
+
+        Args:
+            function: a `SyntheticTestFunction` subclass, not an instance.
+            actions: (N,) or (N, K) actions to evaluate at.
+            maximize: whether larger values of the function are better.
+            rel_noise_std: noise added, as a fraction of the truth's own spread.
+            seed: seeds the noise draw.
+        """
+        actions = np.asarray(actions, dtype=float)
+        if actions.ndim == 1:
+            actions = actions[:, None]
+
+        # bounds gate the domain: evaluate_true rejects actions outside them,
+        # and custom bounds must contain a known optimizer, so span both
+        dim = actions.shape[1]
+        default = function(dim=dim).bounds.numpy()
+        lo = np.minimum(actions.min(axis=0), default[0])
+        hi = np.maximum(actions.max(axis=0), default[1])
+
+        f = function(dim=dim, bounds=list(zip(lo, hi)))
+        with torch.no_grad():
+            y_true = f(torch.as_tensor(actions, dtype=torch.float64), noise=False).numpy()
+
+        # noise is a fraction of the truth's own spread, so it means the same
+        # thing across functions whose ranges differ by orders of magnitude
+        noise_abs = rel_noise_std * y_true.std()
+        y_noisy = y_true + noise_abs * np.random.default_rng(seed).standard_normal(y_true.shape)
+
+        return cls.from_data(
+            actions  = actions,
+            values   = y_noisy,
+            maximize = maximize,
+            name     = name
         )
 
 

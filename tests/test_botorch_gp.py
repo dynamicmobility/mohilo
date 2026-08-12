@@ -19,7 +19,7 @@ from botorch.models.transforms.outcome import Standardize
 from gpytorch.likelihoods import FixedNoiseGaussianLikelihood
 from gpytorch.means import ZeroMean
 
-from pypolar.optimization.gp import BoTorchGP, build_botorch_gp
+from pypolar.optimization.gp import BoTorchGP, build_botorch_gp, gp_hyperparameters
 from pypolar.optimization.objectives import Objective
 
 
@@ -427,3 +427,132 @@ class TestUpdateFeedback:
         returned = gp.update_feedback(reward)
         assert returned is gp.model
         assert not returned.training
+
+
+# ---- hyperparameters -------------------------------------------------------
+
+KEYS = {'lengthscale', 'signal_var', 'noise_var', 'standardize_scale'}
+
+
+class TestGpHyperparameters:
+    """The four numbers that, with the training data, determine the posterior:
+    the ARD lengthscales and outputscale of the ScaleKernel(RBFKernel), the
+    fixed observation noise, and the scale Standardize divided the values by.
+    ZeroMean contributes no parameter, and Standardize's offset is zero because
+    `standard_y` is already centered, so nothing else is left to report."""
+
+    @pytest.fixture
+    def built(self, actions):
+        return build_botorch_gp(
+            actions=actions, values=_bump(actions, PEAK),
+            noise_std=NOISE_STD, signal_var=3.0, length_scale=0.7
+        )
+
+    def test_it_reports_exactly_these_four(self, built):
+        assert set(gp_hyperparameters(built)) == KEYS
+
+    def test_they_are_the_ones_the_model_was_built_with(self, built):
+        hypers = gp_hyperparameters(built)
+        assert hypers['lengthscale'] == pytest.approx(0.7)
+        assert hypers['signal_var'] == pytest.approx(3.0)
+
+    def test_one_lengthscale_per_action_dimension(self, built, actions):
+        assert gp_hyperparameters(built)['lengthscale'].shape == (actions.shape[1],)
+
+    def test_nothing_torch_escapes(self, built):
+        """The module's boundary contract: numpy out, never a tensor."""
+        hypers = gp_hyperparameters(built)
+        assert isinstance(hypers['lengthscale'], np.ndarray)
+        assert isinstance(hypers['signal_var'], float)
+        assert isinstance(hypers['noise_var'], float)
+        assert isinstance(hypers['standardize_scale'], float)
+
+    def test_it_reads_the_models_own_tensors(self, built):
+        kernel = built.covar_module
+        hypers = gp_hyperparameters(built)
+        np.testing.assert_allclose(
+            hypers['lengthscale'],
+            kernel.base_kernel.lengthscale.detach().numpy().ravel()
+        )
+        assert hypers['signal_var'] == pytest.approx(kernel.outputscale.item())
+        assert hypers['standardize_scale'] == \
+            pytest.approx(built.outcome_transform.stdvs.item())
+
+    def test_the_noise_is_the_squared_fraction(self, built):
+        """Post-Standardize the data has unit variance, so a noise standard
+        deviation of 5% of the spread reads as a variance of 0.05^2."""
+        assert gp_hyperparameters(built)['noise_var'] == pytest.approx(NOISE_STD ** 2)
+
+    def test_the_standardize_scale_is_the_sample_spread(self, built, actions):
+        """Standardize uses the sample (ddof=1) standard deviation, which is
+        what makes the reported variances post-Standardize quantities."""
+        assert gp_hyperparameters(built)['standardize_scale'] == \
+            pytest.approx(_bump(actions, PEAK).std(ddof=1))
+
+    def test_the_scale_converts_the_noise_back_to_the_fed_units(self, built, actions):
+        """The documented relation: multiplying by standardize_scale^2 undoes
+        Standardize, recovering the train_Yvar build_botorch_gp pinned."""
+        hypers = gp_hyperparameters(built)
+        spread = _bump(actions, PEAK).std(ddof=1)
+        assert hypers['noise_var'] * hypers['standardize_scale'] ** 2 == \
+            pytest.approx((NOISE_STD * spread) ** 2)
+
+
+class TestGetFittedHyperparameters:
+
+    def test_it_does_not_reach_through_a_missing_attribute(self, gp):
+        """BoTorchGP.model *is* the SingleTaskGP; there is no sub-model under
+        it, so nothing here may go looking for one."""
+        assert set(gp.get_fitted_hyperparameters()) == KEYS
+
+    def test_it_matches_the_module_level_reader(self, gp):
+        method = gp.get_fitted_hyperparameters()
+        direct = gp_hyperparameters(gp.model)
+        np.testing.assert_allclose(method['lengthscale'], direct['lengthscale'])
+        assert method['signal_var'] == pytest.approx(direct['signal_var'])
+
+    def test_an_unfitted_gp_reports_the_starting_values(self, reward):
+        hypers = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=False
+                           ).get_fitted_hyperparameters()
+        assert hypers['lengthscale'] == pytest.approx(BoTorchGP.LENGTH_SCALE)
+        assert hypers['signal_var'] == pytest.approx(BoTorchGP.SIGNAL_VAR)
+
+    def test_a_fitted_gp_reports_values_it_moved_to(self, gp):
+        hypers = gp.get_fitted_hyperparameters()
+        assert not np.allclose(hypers['lengthscale'], BoTorchGP.LENGTH_SCALE)
+        assert np.all(hypers['lengthscale'] > 0)
+        assert hypers['signal_var'] > 0
+
+    def test_a_one_dimensional_objective_gets_one_lengthscale(self, actions):
+        one_d = Objective.from_data(
+            actions=actions[:, :1], values=_bump(actions, PEAK),
+            maximize=True, name='reward'
+        )
+        gp = BoTorchGP(one_d, noise_std=NOISE_STD, fit_hyperparameters=True)
+        assert gp.get_fitted_hyperparameters()['lengthscale'].shape == (1,)
+
+    def test_the_objectives_units_do_not_change_them(self, actions):
+        """Objective standardizes before a GP ever sees the values, so the same
+        measurements in different units must fit the same hyperparameters."""
+        def fitted(scale):
+            obj = Objective.from_data(
+                actions=actions, values=scale * _bump(actions, PEAK),
+                maximize=True, name='reward'
+            )
+            return BoTorchGP(obj, noise_std=NOISE_STD, fit_hyperparameters=True
+                             ).get_fitted_hyperparameters()
+
+        small, large = fitted(1.0), fitted(1000.0)
+        np.testing.assert_allclose(small['lengthscale'], large['lengthscale'])
+        assert small['signal_var'] == pytest.approx(large['signal_var'])
+        assert small['noise_var'] == pytest.approx(large['noise_var'])
+
+    def test_it_tracks_a_refit_after_new_measurements(self, reward):
+        model = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=True)
+        before = model.get_fitted_hyperparameters()['lengthscale'].copy()
+
+        # a measurement contradicting the bump, so the fit has to move
+        reward.add_points(np.array([[5.0, 0.0]]), np.array([5.0]))
+        model.update_feedback(reward)
+
+        assert not np.allclose(before, model.get_fitted_hyperparameters()['lengthscale'])
