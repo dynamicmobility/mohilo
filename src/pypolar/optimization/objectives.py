@@ -21,23 +21,29 @@ class AffineTransform:
     def inv(self, data):
         return 1 / self.scale * data - self.shift
 
+    def inv_scale(self, data):
+        """Inverse for a spread: undoes the scaling but not the shift, since a
+        shift does not move a standard deviation and a sign flip cannot make
+        one negative."""
+        return data / np.abs(self.scale)
+
     @classmethod
-    def make_standardized(cls, data, axis=None):
+    def make_standardized(cls, data, sign=1.0, axis=None):
         std  = np.std(data, axis=axis)
         mean = np.mean(data, axis=axis)
         if np.any(std == 0):
             print('WARNING in AffineTransform.make_standardized: data has zero variance')
 
         return cls(
-            scale = 1 / (std + (std == 0)),   # zero-variance data is left unscaled
+            scale = sign / (std + (std == 0)),   # zero-variance data is left unscaled
             shift = -mean
         )
 
     @classmethod
-    def make_centered(cls, data, axis=None):
+    def make_centered(cls, data, scale=1.0, axis=None):
         mean = np.mean(data, axis=axis)
         return cls(
-            scale   = 1.0,
+            scale   = scale,
             shift   = -mean
         )
 
@@ -67,23 +73,39 @@ class Objective:
         if self.xdata.ndim == 1:
             self.xdata = self.xdata[:, None]
 
-        # scale = sign, so the transform both centers and orients: every
-        # objective reads larger-is-better, and inv() returns raw units
-        self.ytransform = AffineTransform(scale=self.sign, shift=-self.ydata.mean())
-        self.centered_y = self.ytransform(self.ydata)
+        self.xtransform = AffineTransform.make_normalized(
+            data = self.xdata,
+            axis = 0
+        )
+        self.normalized_x = self.xtransform(self.xdata)
+        
+        self.ytransform = AffineTransform.make_standardized(
+            data    = self.ydata,
+            sign    = 1.0 if self.maximize else -1.0
+        )
+        self.standard_y = self.ytransform(self.ydata)
+        
 
     @property
     def sign(self):
         return 1.0 if self.maximize else -1.0
 
     def best_action(self):
-        # centering does not move the argmax, and centered_y is larger-is-better
-        return self.xdata[np.argmax(self.centered_y)]
+        # a positive rescale and shift do not move the argmax, and standard_y
+        # is larger-is-better
+        return self.xdata[np.argmax(self.standard_y)]
 
     def add_points(self, actions: np.ndarray, values: np.ndarray):
         self.xdata = np.vstack([self.xdata, np.atleast_2d(actions)])
         self.ydata = np.hstack([self.ydata, values])
         self.__post_init__()
+        
+    def to_raw(self, mu, std=None):
+        mu = self.ytransform.inv(mu)
+        if std is None:
+            return mu
+        std = self.ytransform.inv_scale(std)
+        return mu, std
 
     @classmethod
     def from_df(cls, df, column, action_columns, maximize, name=None):
@@ -176,27 +198,47 @@ class DecoupledObjectives:
         return selected[0] if _is_single(objs) else DecoupledObjectives(selected)
 
     def feedback(self, objs=None):
-        """Centered values of the selected objectives, each larger-is-better."""
-        return self._unwrap([o.centered_y for o in self._select(objs)], objs)
+        """Standardized values of the selected objectives, each larger-is-better."""
+        return self._unwrap([o.standard_y for o in self._select(objs)], objs)
 
     def actions(self, objs=None):
         """Actions of the selected objectives, in the shared normalized frame."""
         return self._unwrap([self.xtransform(o.xdata) for o in self._select(objs)], objs)
 
+    def to_raw(self, mu, std=None, objs=None):
+        """Posterior moments in maximization space, back in each objective's
+        own units. Columns line up with the selected objectives.
+
+        Args:
+            mu: (n, m) posterior means.
+            std: (n, m) posterior standard deviations, or None.
+            objs: selector for the objectives the columns belong to.
+
+        Returns:
+            `mu` in raw units, or `(mu, std)` in raw units when `std` is given.
+        """
+        ts = [o.ytransform for o in self._select(objs)]
+        mu = np.stack([t.inv(mu[..., i]) for i, t in enumerate(ts)], axis=-1)
+        if std is None:
+            return mu
+
+        return mu, np.stack([t.inv_scale(std[..., i]) for i, t in enumerate(ts)],
+                            axis=-1)
+
     def max(self, objs=None):
-        """Largest centered value of each selected objective."""
+        """Largest standardized value of each selected objective."""
         return self._unwrap(
-            np.array([o.centered_y.max() for o in self._select(objs)]), objs
+            np.array([o.standard_y.max() for o in self._select(objs)]), objs
         )
 
     def min(self, objs=None):
-        """Smallest centered value of each selected objective."""
+        """Smallest standardized value of each selected objective."""
         return self._unwrap(
-            np.array([o.centered_y.min() for o in self._select(objs)]), objs
+            np.array([o.standard_y.min() for o in self._select(objs)]), objs
         )
 
     def range(self, objs=None):
-        """Per-objective [min, max] of the centered values. Shape (num_objs, 2),
+        """Per-objective [min, max] of the standardized values. Shape (num_objs, 2),
         or (2,) for a single objective."""
         return np.stack([self.min(objs), self.max(objs)], axis=-1)
 

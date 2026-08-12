@@ -99,7 +99,7 @@ def main():
     fig.savefig('hilo/output/test.png', dpi=500)
     
     # print best of each
-    actions, mu, std = mogp.best_actions()
+    actions, mu, std = mogp.best_actions(raw=True)
     width = max(len(name) for name in mogp.objectives.names) + 6   # room for ' (min)'
 
     print('\n=== best action per objective ===')
@@ -108,11 +108,9 @@ def main():
     for i in range(len(mogp.objectives)):
         obj = mogp.objectives[i]
         label = f'{obj.name} ({"max" if obj.maximize else "min"})'
-        # ytransform is larger-is-better and centered, so invert it to report
-        # the value in the objective's own units
         best_seen = obj.ydata.max() if obj.maximize else obj.ydata.min()
         print(f'  {label:<{width}} ' + ''.join(f'{a:>22.4f}' for a in actions[i])
-              + f'{obj.ytransform.inv(mu[i]):>13.3f} +/- {std[i]:<5.3f}'
+              + f'{mu[i]:>13.3f} +/- {std[i]:<5.3f}'
               + f'{best_seen:>16.3f}')
 
 

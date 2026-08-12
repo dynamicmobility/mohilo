@@ -183,6 +183,41 @@ class TestPosteriorAt:
         assert mu[1, 1] > mu[0, 1]
 
 
+class TestPosteriorAtRawUnits:
+    """`raw=True` reports in the units the measurements were taken in, which is
+    where a mean and a standard deviation stop transforming the same way."""
+
+    def test_the_minimized_objective_reads_lower_is_better(self, mogp):
+        mu, _ = mogp.posterior_at(np.vstack([PEAK, VALLEY]), raw=True)
+        # 'cost' is back in its own units, so VALLEY is now the *smaller* value
+        assert mu[1, 1] < mu[0, 1]
+        assert mu[0, 0] > mu[1, 0]      # 'reward' is maximized, so unchanged
+
+    def test_it_lands_in_the_range_of_the_measurements(self, mogp, objectives):
+        mu, _ = mogp.posterior_at(_grid(5), raw=True)
+        for i, obj in enumerate(objectives.objectives):
+            assert mu[:, i].min() >= obj.ydata.min() - 0.5 * obj.ydata.std()
+            assert mu[:, i].max() <= obj.ydata.max() + 0.5 * obj.ydata.std()
+
+    def test_standard_deviations_stay_positive(self, mogp):
+        _, std = mogp.posterior_at(_grid(5), raw=True)
+        assert np.all(std > 0)
+
+    def test_a_standard_deviation_is_scaled_not_shifted(self, mogp, objectives):
+        """The whole point of inv_scale: inv() would add the mean back on."""
+        _, std = mogp.posterior_at(_grid(5))
+        _, std_raw = mogp.posterior_at(_grid(5), raw=True)
+        for i, obj in enumerate(objectives.objectives):
+            np.testing.assert_allclose(std_raw[:, i], std[:, i] * obj.ydata.std())
+
+    def test_it_matches_converting_by_hand(self, mogp, objectives):
+        mu, std = mogp.posterior_at(_grid(4))
+        by_hand = objectives.to_raw(mu, std)
+        got = mogp.posterior_at(_grid(4), raw=True)
+        np.testing.assert_allclose(got[0], by_hand[0])
+        np.testing.assert_allclose(got[1], by_hand[1])
+
+
 # ---- best_actions ----------------------------------------------------------
 
 class TestBestActions:
@@ -225,6 +260,18 @@ class TestBestActions:
         best, mu, _ = mogp.best_actions(num_restarts=8, raw_samples=256)
         on_grid = mogp.posterior_at(actions)[0].max(axis=0)
         assert np.all(mu >= on_grid - 1e-6)
+
+    def test_raw_units_leave_the_actions_alone(self, mogp):
+        """Only the values change; the actions are in raw units either way."""
+        best, _, _ = mogp.best_actions(num_restarts=4, raw_samples=128)
+        best_raw, _, _ = mogp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        np.testing.assert_allclose(best, best_raw, atol=1e-6)
+
+    def test_raw_values_match_the_posterior_at_those_actions(self, mogp):
+        best, mu, std = mogp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        mu_full, std_full = mogp.posterior_at(best, raw=True)
+        np.testing.assert_allclose(mu, np.diag(mu_full))
+        np.testing.assert_allclose(std, np.diag(std_full))
 
 
 # ---- update_feedback -------------------------------------------------------

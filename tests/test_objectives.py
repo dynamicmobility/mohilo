@@ -101,6 +101,26 @@ class TestAffineTransformInverse:
         assert t.inv(t(y)) == pytest.approx(y)
 
 
+class TestAffineTransformInvScale:
+    """A spread transforms by |scale| alone: mean and standard deviation do not
+    transform the same way, so inv() is only correct for the mean."""
+
+    def test_the_shift_is_ignored(self):
+        t = AffineTransform(scale=2.0, shift=100.0)
+        assert t.inv_scale(6.0) == pytest.approx(3.0)
+
+    def test_a_negative_scale_still_gives_a_positive_spread(self):
+        t = AffineTransform(scale=-2.0, shift=0.0)
+        assert t.inv_scale(6.0) == pytest.approx(3.0)
+
+    def test_it_matches_the_spread_of_the_inverted_samples(self, y):
+        # SD[aY + b] = |a| SD[Y]: inverting the samples and taking their std is
+        # the same as inv_scale of the samples' std
+        t = AffineTransform.make_standardized(y, sign=-1.0)
+        z = t(y)
+        assert t.inv_scale(z.std()) == pytest.approx(t.inv(z).std())
+
+
 class TestMakeCentered:
 
     def test_centered_data_has_zero_mean(self, y):
@@ -116,12 +136,32 @@ class TestMakeCentered:
         t = AffineTransform.make_centered(x, axis=0)
         assert t(x).mean(axis=0) == pytest.approx(np.zeros(x.shape[1]))
 
+    def test_an_explicit_scale_is_applied_after_centering(self, y):
+        # (data - mean) * scale, so the spread is scaled but the centre stays
+        t = AffineTransform.make_centered(y, scale=2.0)
+        assert t(y) == pytest.approx(2.0 * (y - y.mean()))
+        assert t(y).mean() == pytest.approx(0.0)
+
+    def test_a_negative_scale_flips_the_data(self, y):
+        # how a minimized objective is oriented without also standardizing it
+        t = AffineTransform.make_centered(y, scale=-1.0)
+        assert t(y) == pytest.approx(-(y - y.mean()))
+
+    def test_a_zero_scale_is_rejected(self, y):
+        with pytest.raises(ValueError):
+            AffineTransform.make_centered(y, scale=0.0)
+
 
 class TestMakeStandardized:
 
     def test_standardized_data_has_zero_mean_and_unit_std(self, y):
         t = AffineTransform.make_standardized(y)
         assert t(y).mean() == pytest.approx(0.0)
+        assert t(y).std() == pytest.approx(1.0)
+
+    def test_a_negative_sign_flips_the_data_but_not_its_spread(self, y):
+        t = AffineTransform.make_standardized(y, sign=-1.0)
+        assert t(y) == pytest.approx(-(y - y.mean()) / y.std())
         assert t(y).std() == pytest.approx(1.0)
 
     def test_constant_data_falls_back_to_centering(self):
@@ -168,24 +208,25 @@ class TestMakeNormalized:
 
 class TestObjectiveConstruction:
 
-    def test_centered_y_has_zero_mean(self, objective):
-        assert objective.centered_y.mean() == pytest.approx(0.0)
+    def test_standard_y_has_zero_mean_and_unit_std(self, objective):
+        assert objective.standard_y.mean() == pytest.approx(0.0)
+        assert objective.standard_y.std() == pytest.approx(1.0)
 
     def test_maximized_objective_keeps_its_ordering(self, x, y):
         obj = Objective('comfort', maximize=True, ydata=y, xdata=x)
-        assert obj.centered_y == pytest.approx(y - y.mean())
+        assert obj.standard_y == pytest.approx((y - y.mean()) / y.std())
 
     def test_minimized_objective_is_flipped(self, x, y):
-        # every objective reads larger-is-better once centered, so the GPs and
-        # the Pareto machinery downstream never need to know the direction
+        # every objective reads larger-is-better once standardized, so the GPs
+        # and the Pareto machinery downstream never need to know the direction
         obj = Objective('cost', maximize=False, ydata=y, xdata=x)
-        assert obj.centered_y == pytest.approx(-(y - y.mean()))
+        assert obj.standard_y == pytest.approx(-(y - y.mean()) / y.std())
 
     def test_ytransform_returns_raw_units(self, objective, y):
-        # the sign lives inside the transform, so inv() undoes both the
-        # centering and the flip -- this is how a GP mean gets plotted in the
-        # units the measurement was taken in
-        assert objective.ytransform.inv(objective.centered_y) == pytest.approx(y)
+        # the sign lives inside the transform, so inv() undoes the
+        # standardization and the flip -- this is how a GP mean gets plotted in
+        # the units the measurement was taken in
+        assert objective.ytransform.inv(objective.standard_y) == pytest.approx(y)
 
     def test_raw_data_is_left_alone(self, objective, y, x):
         assert objective.ydata == pytest.approx(y)
@@ -194,6 +235,75 @@ class TestObjectiveConstruction:
     def test_one_dimensional_actions_become_a_column(self, y):
         obj = Objective('cost', False, y, np.arange(5.0))
         assert obj.xdata.shape == (5, 1)
+
+
+class TestObjectiveActionFrame:
+    """An Objective normalizes its own actions onto [0, 1]^K, so it can be
+    modelled on its own without a DecoupledObjectives frame around it."""
+
+    def test_normalized_actions_span_zero_to_one(self, objective, x):
+        assert objective.normalized_x.min(axis=0) == pytest.approx(np.zeros(x.shape[1]))
+        assert objective.normalized_x.max(axis=0) == pytest.approx(np.ones(x.shape[1]))
+
+    def test_each_dimension_gets_its_own_scale(self, objective, x):
+        # the column ranges here are 4, 8 and 0.4, so one shared scale could not
+        # put all three on [0, 1] -- which is what makes one set of GP
+        # lengthscales meaningful across dimensions
+        assert objective.normalized_x == pytest.approx(
+            (x - x.min(axis=0)) / (x.max(axis=0) - x.min(axis=0))
+        )
+
+    def test_xtransform_inverts_back_to_the_raw_actions(self, objective, x):
+        # how a GP optimum found in the unit box is reported in raw units
+        assert objective.xtransform.inv(objective.normalized_x) == pytest.approx(x)
+
+    def test_the_frame_is_the_objectives_own_not_a_shared_one(self, ragged, x):
+        # comfort saw only the first three actions. On its own it stretches them
+        # to fill [0, 1]; against the shared DecoupledObjectives frame the same
+        # actions sit in the lower half
+        assert ragged['comfort'].normalized_x.max(axis=0) == pytest.approx(np.ones(3))
+        assert ragged.actions('comfort').max(axis=0) == pytest.approx([0.5, 0.5, 0.5])
+
+    def test_added_points_widen_the_frame(self, objective):
+        objective.add_points(np.array([8.0, 16.0, 0.9]), np.array([12.0]))
+        # the new action is the largest in every dimension, so it is the one
+        # that now maps to 1
+        assert objective.normalized_x[-1] == pytest.approx(np.ones(3))
+
+    def test_one_dimensional_actions_normalize_as_a_column(self, y):
+        obj = Objective('cost', False, y, np.arange(5.0))
+        assert obj.normalized_x.shape == (5, 1)
+        assert obj.normalized_x[:, 0] == pytest.approx(np.linspace(0.0, 1.0, 5))
+
+
+class TestObjectiveToRaw:
+    """The inverse of standard_y: standardized, larger-is-better values back in
+    the units the objective was measured in. The single-objective counterpart of
+    DecoupledObjectives.to_raw, so no selector is needed."""
+
+    def test_means_round_trip_to_the_raw_measurements(self, objective, y):
+        assert objective.to_raw(objective.standard_y) == pytest.approx(y)
+
+    def test_a_spread_is_scaled_but_not_shifted(self, objective, y):
+        # one standardized unit is one raw standard deviation of this objective
+        _, got = objective.to_raw(objective.standard_y, np.ones_like(y))
+        assert got == pytest.approx(np.full(y.size, y.std()))
+
+    def test_a_minimized_objectives_spread_stays_positive(self, objective, y):
+        # the ytransform carries a negative scale here, so inv() would report a
+        # negative standard deviation
+        _, got = objective.to_raw(objective.standard_y, np.ones_like(y))
+        assert np.all(got > 0)
+
+    def test_the_std_is_optional(self, objective):
+        assert isinstance(objective.to_raw(objective.standard_y), np.ndarray)
+
+    def test_it_agrees_with_the_collection_version(self, pair, y):
+        # one column through DecoupledObjectives.to_raw is the same conversion
+        mu = pair.feedback('cost')[:, None]
+        assert pair['cost'].to_raw(mu[:, 0]) == pytest.approx(
+            pair.to_raw(mu, objs='cost')[:, 0]
+        )
 
 
 class TestObjectiveSign:
@@ -225,8 +335,8 @@ class TestObjectiveAddPoints:
 
     def test_transforms_are_recomputed(self, objective):
         objective.add_points(np.array([5.0, 10.0, 0.6]), np.array([12.0]))
-        # the mean moved, so the old centering would no longer give zero mean
-        assert objective.centered_y.mean() == pytest.approx(0.0)
+        # the mean moved, so the old transform would no longer give zero mean
+        assert objective.standard_y.mean() == pytest.approx(0.0)
 
 
 class TestObjectiveFromDataFrame:
@@ -310,8 +420,8 @@ class TestDecoupledObjectivesSelection:
 
 class TestDecoupledObjectivesReadout:
 
-    def test_feedback_is_the_centered_values(self, pair, y):
-        assert pair.feedback('cost') == pytest.approx(-(y - y.mean()))
+    def test_feedback_is_the_standardized_values(self, pair, y):
+        assert pair.feedback('cost') == pytest.approx(-(y - y.mean()) / y.std())
 
     def test_feedback_for_several_objectives_is_a_list(self, pair):
         got = pair.feedback(['cost', 'comfort'])
@@ -330,6 +440,41 @@ class TestDecoupledObjectivesReadout:
         # comfort, five for cost
         for values, actions in zip(ragged.feedback(), ragged.actions()):
             assert values.shape[0] == actions.shape[0]
+
+
+class TestDecoupledObjectivesToRaw:
+    """The inverse of feedback(): standardized, larger-is-better columns back in
+    the units each objective was measured in."""
+
+    @pytest.fixture
+    def mu(self, pair):
+        return np.column_stack(pair.feedback())
+
+    def test_means_round_trip_to_the_raw_measurements(self, pair, mu, y):
+        assert pair.to_raw(mu) == pytest.approx(np.column_stack([y, 2.0 * y]))
+
+    def test_a_spread_is_scaled_but_not_shifted(self, pair, mu, y):
+        # one standardized unit is one raw standard deviation of that objective,
+        # and comfort is twice cost, so its standard deviation is twice as wide
+        _, got = pair.to_raw(mu, np.ones_like(mu))
+        assert got == pytest.approx(np.column_stack([
+            np.full(len(y), y.std()), np.full(len(y), 2.0 * y.std())
+        ]))
+
+    def test_a_minimized_objectives_spread_stays_positive(self, pair, mu):
+        # cost's ytransform carries a negative scale, so inv() would report a
+        # negative standard deviation here
+        _, got = pair.to_raw(mu, np.ones_like(mu))
+        assert np.all(got > 0)
+
+    def test_the_std_is_optional(self, pair, mu):
+        assert isinstance(pair.to_raw(mu), np.ndarray)
+
+    def test_columns_follow_the_selector(self, pair, y):
+        mu = np.column_stack([pair.feedback('comfort'), pair.feedback('cost')])
+        assert pair.to_raw(mu, objs=['comfort', 'cost']) == pytest.approx(
+            np.column_stack([2.0 * y, y])
+        )
 
 
 class TestDecoupledObjectivesShareOneActionFrame:
@@ -354,10 +499,11 @@ class TestDecoupledObjectivesShareOneActionFrame:
 class TestDecoupledObjectivesRanges:
 
     def test_min_and_max_are_per_objective(self, pair, y):
-        centered = y - y.mean()
-        # cost is minimized, so its centered values are flipped
-        assert pair.min() == pytest.approx([-centered.max(), 2.0 * centered.min()])
-        assert pair.max() == pytest.approx([-centered.min(), 2.0 * centered.max()])
+        standardized = (y - y.mean()) / y.std()
+        # comfort is twice cost in raw units, but standardizing divides that
+        # factor out, so only the flip on the minimized cost is left
+        assert pair.min() == pytest.approx([-standardized.max(), standardized.min()])
+        assert pair.max() == pytest.approx([-standardized.min(), standardized.max()])
 
     def test_range_pairs_each_min_with_its_max(self, pair):
         got = pair.range()
@@ -368,7 +514,7 @@ class TestDecoupledObjectivesRanges:
     def test_a_single_objective_gives_one_pair(self, pair):
         assert pair.range('cost').shape == (2,)
         assert pair.range('cost') == pytest.approx(
-            [pair['cost'].centered_y.min(), pair['cost'].centered_y.max()]
+            [pair['cost'].standard_y.min(), pair['cost'].standard_y.max()]
         )
 
 

@@ -61,8 +61,8 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-126 tests: public API surface (29), dangling references (8), objectives (67),
-`DecoupledMOGP` (22).
+135 tests: public API surface (29), dangling references (1), objectives (76),
+`DecoupledMOGP` (29).
 
 ## How to run experiments
 
@@ -93,23 +93,34 @@ The bookkeeping layer. It owns the two coordinate changes that the GP assumes
 have already happened, so nothing downstream has to think about units or signs.
 
 **`AffineTransform(scale, shift)`** — `x -> (x + shift) * scale`, with `inv()`.
-Three constructors: `make_standardized` (zero mean, unit variance),
-`make_centered` (zero mean), `make_normalized` (mapped onto `[0, 1]`). Each
-guards against zero-variance/zero-range data by leaving it unscaled.
+Three constructors: `make_standardized(data, sign=1.0)` (zero mean, unit
+variance, times `sign`), `make_centered` (zero mean), `make_normalized` (mapped
+onto `[0, 1]`). Each guards against zero-variance/zero-range data by leaving it
+unscaled. `inv_scale()` is the inverse for a *spread*: it undoes the scaling but
+not the shift, since a shift does not move a standard deviation and a sign flip
+cannot make one negative. Means go back through `inv()`, standard deviations
+through `inv_scale()`.
 
 **`Objective(name, maximize, ydata, xdata, column=None)`** — one measured
 objective: `ydata` is `(N,)`, `xdata` is `(N, K)`. On construction it builds
 
 ```
-ytransform = AffineTransform(scale=sign, shift=-mean(ydata))
-centered_y = ytransform(ydata)
+ytransform = AffineTransform.make_standardized(ydata, sign=sign)
+standard_y = ytransform(ydata)          # sign * (y - mean) / std
 ```
 
-where `sign` is `+1` for `maximize=True` and `-1` otherwise. So `centered_y` is
-zero-mean **and larger-is-better regardless of the objective's direction**. This
-is what lets the GP layer ignore minimization entirely: a minimized cost has
-already been negated by the time a GP sees it, and `ytransform.inv()` puts a
-prediction back into the objective's own units for reporting.
+where `sign` is `+1` for `maximize=True` and `-1` otherwise. So `standard_y` is
+zero-mean, unit-variance, **and larger-is-better regardless of the objective's
+direction**. Two things downstream depend on this:
+
+1. **The GP layer can ignore minimization entirely** — a minimized cost has
+   already been negated by the time a GP sees it, and `ytransform.inv()` puts a
+   prediction back into the objective's own units for reporting.
+2. **Objectives are comparable across axes.** Metabolic cost, walk time, and the
+   comfort ratings have ranges differing by orders of magnitude. Dividing by each
+   objective's own standard deviation is what makes a shared hyperparameter prior
+   or a hypervolume reference point meaningful; centering alone would let the
+   widest objective dominate any volume computed in objective space.
 
 Built with `from_df(df, column, action_columns, maximize, name)` or
 `from_data(actions, values, maximize, name)`. `add_points()` appends and re-runs
@@ -130,9 +141,14 @@ GP lengthscales is meaningful across all of them.
 Selectors (`objs`) accept a name, an index, a list of either, a slice, or `None`
 for all. `__getitem__` returns a bare `Objective` for a single selector and a new
 `DecoupledObjectives` for a multi-selector, so `objectives[['Cost', 'Comfort']]`
-is how you fit a GP to a subset. `feedback(objs)` returns `centered_y`,
+is how you fit a GP to a subset. `feedback(objs)` returns `standard_y`,
 `actions(objs)` returns normalized actions, and `max`/`min`/`range` report the
-centered values.
+standardized values.
+
+`to_raw(mu, std=None, objs=None)` is the way back out: it maps posterior moments
+from maximization space into each objective's own units, column by column, using
+`inv()` on the means and `inv_scale()` on the standard deviations. This is what
+`posterior_at(raw=True)` and `best_actions(raw=True)` call.
 
 ### DecoupledMOGP (`optimization/gp.py`)
 
@@ -169,20 +185,25 @@ likelihood in one `fit_gpytorch_mll` call on a `SumMarginalLogLikelihood`. The
 sum splits over the sub-models precisely because the objectives are independent,
 so a single call fits all of them.
 
-**`posterior_at(action, normalized=False, chunk=2048)`** — posterior mean and
-standard deviation at *arbitrary* actions, on or off any grid. `normalized=False`
-(the default) maps raw actions through `objectives.xtransform` first; pass
-`normalized=True` if they are already in the `[0, 1]^d` box. Returns `(n, m)`
-arrays in **maximization space** — larger-is-better and centered, matching
-`objectives.feedback()`. Use `objectives[name].ytransform.inv()` to report in raw
-units.
+**`posterior_at(action, normalized=False, raw=False, chunk=2048)`** — posterior
+mean and standard deviation at *arbitrary* actions, on or off any grid.
+`normalized=False` (the default) maps raw actions through `objectives.xtransform`
+first; pass `normalized=True` if they are already in the `[0, 1]^d` box. Returns
+`(n, m)` arrays in **maximization space** — larger-is-better and standardized,
+matching `objectives.feedback()`. Pass `raw=True` to get them in the units the
+measurements were taken in, sign included.
+
+Which space you want depends on what you are doing with them. Pareto and
+hypervolume work needs maximization space, where every objective is
+larger-is-better and on the same scale; only reporting and plotting want
+`raw=True`.
 
 Actions are fed as `q=1` batch elements (`unsqueeze(1)`), so each posterior is
 1x1 per objective and gpytorch never materializes the `n x n` test-test block —
 that path is quadratic in the number of evaluation points and dominates the cost
 on a large scan. `chunk` bounds the per-call batch.
 
-**`best_actions(num_restarts=8, raw_samples=512)`** — the action maximizing each
+**`best_actions(num_restarts=8, raw_samples=512, raw=False)`** — the action maximizing each
 objective's posterior mean, over the **continuous box**, not over the measured
 actions. Two stages, which is what `optimize_acqf` does internally: a Sobol scan
 of `raw_samples` points to locate the basins, then box-constrained L-BFGS-B from
@@ -191,7 +212,8 @@ the `num_restarts` best starting points. One single-output problem per objective
 No sign handling appears here, and none is needed — `feedback()` is already
 flipped to larger-is-better, so the argmax of the posterior *is* the optimum for
 a minimized objective too. Returns actions in raw units (via `xtransform.inv`),
-plus the diagonal of the posterior evaluated at those actions.
+plus the diagonal of the posterior evaluated at those actions. The actions are in
+raw units either way; `raw=True` puts the values there too.
 
 **`update_feedback(objectives)`** rebuilds every sub-model from scratch and
 refits. There is no warm start and no incremental conditioning; a closed-form
