@@ -7,6 +7,8 @@ and a maximization space that hides the sign of a minimized objective. Each
 test below states one of those.
 """
 
+from dataclasses import fields
+
 import numpy as np
 import pytest
 
@@ -302,50 +304,51 @@ class TestUpdateFeedback:
 
 # ---- hyperparameters -------------------------------------------------------
 
-KEYS = {'lengthscale', 'signal_var', 'noise_var', 'standardize_scale'}
+FIELDS = {'lengthscale', 'signal_var', 'noise_var', 'standardize_scale'}
 
 NOISE_STD = 0.05    # the DecoupledMOGP default
 
 
 class TestGetFittedHyperparameters:
-    """One dict per objective, because the objectives are decoupled: each GP
-    has its own kernel and nothing is tied across them."""
+    """One `GPHyperparameters` per objective, because the objectives are
+    decoupled: each GP has its own kernel and nothing is tied across them."""
 
     def test_one_entry_per_objective_with_the_four_hyperparameters(
             self, mogp, objectives):
         hypers = mogp.get_fitted_hyperparameters()
         assert len(hypers) == len(objectives)
-        assert all(set(h) == KEYS for h in hypers)
+        assert all({f.name for f in fields(h)} == FIELDS for h in hypers)
 
     def test_it_is_in_objective_order(self, mogp):
         """Entry i belongs to sub-model i, which is objective i."""
         for h, gp in zip(mogp.get_fitted_hyperparameters(), mogp.model.models):
             np.testing.assert_allclose(
-                h['lengthscale'],
+                h.lengthscale,
                 gp.covar_module.base_kernel.lengthscale.detach().numpy().ravel()
             )
-            assert h['signal_var'] == pytest.approx(gp.covar_module.outputscale.item())
+            assert h.signal_var == pytest.approx(gp.covar_module.outputscale.item())
 
     def test_one_lengthscale_per_action_dimension(self, mogp, actions):
         for h in mogp.get_fitted_hyperparameters():
-            assert h['lengthscale'].shape == (actions.shape[1],)
+            assert h.lengthscale.shape == (actions.shape[1],)
 
     def test_nothing_torch_escapes(self, mogp):
         for h in mogp.get_fitted_hyperparameters():
-            assert isinstance(h['lengthscale'], np.ndarray)
-            assert all(isinstance(h[k], float) for k in KEYS - {'lengthscale'})
+            assert isinstance(h.lengthscale, np.ndarray)
+            assert all(isinstance(getattr(h, name), float)
+                       for name in FIELDS - {'lengthscale'})
 
     def test_the_noise_is_the_squared_fraction_for_every_objective(self, mogp):
         """noise_std is a fraction of each objective's own spread, so after
         Standardize every sub-model reports the same variance."""
         for h in mogp.get_fitted_hyperparameters():
-            assert h['noise_var'] == pytest.approx(NOISE_STD ** 2)
+            assert h.noise_var == pytest.approx(NOISE_STD ** 2)
 
     def test_an_unfitted_model_reports_the_starting_values(self, objectives):
         mogp = DecoupledMOGP(objectives, fit_hyperparameters=False)
         for h in mogp.get_fitted_hyperparameters():
-            assert h['lengthscale'] == pytest.approx(LENGTH_SCALE)
-            assert h['signal_var'] == pytest.approx(SIGNAL_VAR)
+            assert h.lengthscale == pytest.approx(LENGTH_SCALE)
+            assert h.signal_var == pytest.approx(SIGNAL_VAR)
 
     def test_each_objective_gets_its_own_lengthscales(self, actions):
         """A shared fit would be a bug. The two objectives here differ only in
@@ -370,19 +373,19 @@ class TestGetFittedHyperparameters:
         wide, narrow = DecoupledMOGP(objs, fit_hyperparameters=True
                                      ).get_fitted_hyperparameters()
 
-        assert np.all(wide['lengthscale'] > narrow['lengthscale'])
+        assert np.all(wide.lengthscale > narrow.lengthscale)
 
     def test_it_tracks_a_refit_after_new_measurements(self, objectives):
         mogp = DecoupledMOGP(objectives, fit_hyperparameters=True)
-        before = [h['lengthscale'].copy() for h in mogp.get_fitted_hyperparameters()]
+        before = [h.lengthscale.copy() for h in mogp.get_fitted_hyperparameters()]
 
         # a measurement contradicting the bump, on 'reward' only
         objectives.add_point('reward', np.array([[5.0, 0.0]]), np.array([5.0]))
         mogp.update_feedback(objectives)
         after = mogp.get_fitted_hyperparameters()
 
-        assert not np.allclose(before[0], after[0]['lengthscale'])
-        np.testing.assert_allclose(before[1], after[1]['lengthscale'])
+        assert not np.allclose(before[0], after[0].lengthscale)
+        np.testing.assert_allclose(before[1], after[1].lengthscale)
 
 
 # ---- fitted noise and bounded lengthscales ---------------------------------
@@ -407,7 +410,7 @@ class TestFittedNoise:
         mogp = DecoupledMOGP(objs, fit_hyperparameters=True, noise=None)
         clean_h, noisy_h = mogp.get_fitted_hyperparameters()
 
-        assert noisy_h['noise_var'] > clean_h['noise_var']
+        assert noisy_h.noise_var > clean_h.noise_var
 
     def test_it_refuses_to_leave_the_noise_undetermined(self, objectives):
         with pytest.raises(ValueError, match='fit_hyperparameters'):
@@ -435,27 +438,27 @@ class TestConstructorHyperparameters:
 
     def test_every_sub_model_respects_it(self, objectives):
         for h in self._bounded(objectives).get_fitted_hyperparameters():
-            assert np.all(h['lengthscale'] >= 0.5)
+            assert np.all(h.lengthscale >= 0.5)
 
     def test_it_survives_a_refit(self, objectives):
         mogp = self._bounded(objectives)
         objectives.add_point('reward', np.array([[5.0, 0.0]]), np.array([5.0]))
         mogp.update_feedback(objectives)
         for h in mogp.get_fitted_hyperparameters():
-            assert np.all(h['lengthscale'] >= 0.5)
+            assert np.all(h.lengthscale >= 0.5)
 
     def test_the_starting_hyperparameters_are_arguments_too(self, objectives):
         mogp = DecoupledMOGP(objectives, fit_hyperparameters=False,
                              length_scale=0.7, signal_var=3.0)
         for h in mogp.get_fitted_hyperparameters():
-            assert h['lengthscale'] == pytest.approx(0.7)
-            assert h['signal_var'] == pytest.approx(3.0)
+            assert h.lengthscale == pytest.approx(0.7)
+            assert h.signal_var == pytest.approx(3.0)
 
     def test_the_defaults_are_the_module_constants(self, objectives):
         mogp = DecoupledMOGP(objectives, fit_hyperparameters=False)
         for h in mogp.get_fitted_hyperparameters():
-            assert h['lengthscale'] == pytest.approx(LENGTH_SCALE)
-            assert h['signal_var'] == pytest.approx(SIGNAL_VAR)
+            assert h.lengthscale == pytest.approx(LENGTH_SCALE)
+            assert h.signal_var == pytest.approx(SIGNAL_VAR)
 
 
 class TestNoiseModelAcrossObjectives:
@@ -483,4 +486,4 @@ class TestNoiseModelAcrossObjectives:
         clean_h, noisy_h = DecoupledMOGP(
             objs, noise=NoiseModel.prior(0.3)).get_fitted_hyperparameters()
 
-        assert noisy_h['noise_var'] > clean_h['noise_var']
+        assert noisy_h.noise_var > clean_h.noise_var

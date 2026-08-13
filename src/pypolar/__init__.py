@@ -1,4 +1,9 @@
-from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP, NoiseModel
+from pypolar.optimization.gp import (
+    BoTorchGP,
+    DecoupledMOGP,
+    GPHyperparameters,
+    NoiseModel
+)
 from pypolar.optimization.objectives import (
     AffineTransform,
     Objective,
@@ -17,11 +22,13 @@ from pypolar.feedback import (
     BoundedIdealPoint
 )
 from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
+from pypolar.performance.loo import loo
 
 __all__ = [
     # optimization
     "BoTorchGP",
     "DecoupledMOGP",
+    "GPHyperparameters",
     "NoiseModel",
     # objectives
     "AffineTransform",
@@ -47,5 +54,6 @@ __all__ = [
     "plot_gp_1d",
     # performance
     "pareto_overlay",
-    "groundtruth_hypervolume"
+    "groundtruth_hypervolume",
+    "loo"
 ]

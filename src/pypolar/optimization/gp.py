@@ -175,31 +175,44 @@ def build_botorch_gp(
         input_transform     = None,
     )
 
-def gp_hyperparameters(model: SingleTaskGP) -> dict:
+@dataclass(frozen=True, eq=False)
+class GPHyperparameters:
     """Every hyperparameter of one GP built by `build_botorch_gp`.
 
-    `ZeroMean` has no parameters and `Standardize`'s offset is zero on centered
-    values, so the kernel, the noise and the Standardize scale are the whole set.
+    Attributes:
+        lengthscale: (d,) ARD lengthscales, in the normalized action frame.
+            Scalar when the same value is meant for every dimension.
+        signal_var: the ScaleKernel outputscale.
+        noise_var: the observation noise, pinned or fitted.
+        standardize_scale: the divisor Standardize applied to the values. Both
+            variances are in post-Standardize units; multiplying them by
+            `standardize_scale ** 2` puts them in the units the GP was handed.
+            Defaults to 1, which is the scale of values already at unit spread.
+    """
+
+    lengthscale       : np.ndarray | float
+    signal_var        : float
+    noise_var         : float
+    standardize_scale : float = 1.0
+
+
+def gp_hyperparameters(model: SingleTaskGP) -> GPHyperparameters:
+    """The hyperparameters of one GP built by `build_botorch_gp`.
 
     Args:
         model: a GP built by `build_botorch_gp`.
 
     Returns:
-        dict of `lengthscale` (d,) ARD lengthscales in the normalized action
-        frame, `signal_var` the ScaleKernel outputscale, `noise_var` the
-        observation noise (pinned or fitted, depending on `noise_std`), and
-        `standardize_scale` the divisor Standardize applied. Both variances are
-        in post-Standardize units; multiplying by
-        `standardize_scale ** 2` puts them in the units the GP was handed.
+        the `GPHyperparameters`, read off the model's own tensors.
     """
     kernel = model.covar_module
-    return {
-        'lengthscale':       kernel.base_kernel.lengthscale.detach().numpy().ravel(),
-        'signal_var':        kernel.outputscale.item(),
+    return GPHyperparameters(
+        lengthscale       = kernel.base_kernel.lengthscale.detach().numpy().ravel(),
+        signal_var        = kernel.outputscale.item(),
         # identical at every point by construction, so the mean is that value
-        'noise_var':         model.likelihood.noise.mean().item(),
-        'standardize_scale': model.outcome_transform.stdvs.item(),
-    }
+        noise_var         = model.likelihood.noise.mean().item(),
+        standardize_scale = model.outcome_transform.stdvs.item(),
+    )
 
 
 class BoTorchGP:
@@ -455,7 +468,7 @@ class DecoupledMOGP:
         """Each objective's GP hyperparameters, in objective order.
 
         Returns:
-            a length-m list of `gp_hyperparameters` dicts. The objectives are
+            a length-m list of `GPHyperparameters`. The objectives are
             decoupled, so no entry is shared between them.
         """
         return [gp_hyperparameters(gp) for gp in self.model.models]

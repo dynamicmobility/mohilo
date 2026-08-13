@@ -25,11 +25,13 @@ pyPolar/
 │   ├── __init__.py                 # Public API
 │   ├── optimization/
 │   │   ├── objectives.py           # AffineTransform, Objective, DecoupledObjectives
-│   │   └── gp.py                   # build_botorch_gp, gp_hyperparameters, BoTorchGP, DecoupledMOGP
+│   │   └── gp.py                   # build_botorch_gp, GPHyperparameters, BoTorchGP, DecoupledMOGP
 │   ├── feedback/
 │   │   ├── rewards.py              # InternalReward hierarchy (groundtruth objectives)
 │   │   └── oracles.py              # Simulated humans: Bradley-Terry, noisy regression
-│   ├── performance/mo.py           # groundtruth_hypervolume, pareto_overlay
+│   ├── performance/
+│   │   ├── mo.py                   # groundtruth_hypervolume, pareto_overlay
+│   │   └── loo.py                  # loo: leave-one-out cross-validation
 │   └── utils/                      # pareto.py, plotting.py
 ├── hilo/
 │   ├── plot_pilot.py               # The one live experiment: pilot data -> fronts + optima
@@ -46,7 +48,8 @@ pyPolar/
     ├── test_no_stale_references.py # No dangling references in scripts/hilo
     ├── test_objectives.py          # AffineTransform, Objective, DecoupledObjectives
     ├── test_botorch_gp.py          # build_botorch_gp, gp_hyperparameters, BoTorchGP behaviour
-    └── test_decoupled_mogp.py      # DecoupledMOGP behaviour
+    ├── test_decoupled_mogp.py      # DecoupledMOGP behaviour
+    └── test_loo.py                 # leave-one-out folds, predictions, fit_gp arguments
 ```
 
 `hilo/` is a top-level directory, not part of the installed package. Run its
@@ -69,8 +72,8 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-315 tests: public API surface (32), dangling references (5), objectives (131),
-`BoTorchGP` (100), `DecoupledMOGP` (47).
+330 tests: public API surface (34), dangling references (6), objectives (131),
+`BoTorchGP` (100), `DecoupledMOGP` (47), `loo` (12).
 
 ## How to run experiments
 
@@ -110,9 +113,10 @@ the noise is not a substitute for a design that can identify it.
 ## Package API
 
 ```python
-from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel
+from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
 from pypolar import DecoupledObjectives, Objective, AffineTransform
 from pypolar import sample_actions
+from pypolar import loo
 ```
 
 Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is the
@@ -269,14 +273,26 @@ wandering into that flat region. Measured across `MT03`/`MT04`/`MT05` (45 points
 0.210 for a noise pinned at 0.1. On MT03 no configuration beats predicting the
 training mean; that is a data limitation, not a hyperparameter one.
 
-**`gp_hyperparameters(model)`** — every hyperparameter of one such GP, as a dict:
+**`GPHyperparameters`** — every hyperparameter of one such GP, as a frozen
+dataclass. `gp_hyperparameters(model)` reads one off a model's own tensors, and
+both wrappers' `get_fitted_hyperparameters()` return them:
 
-| key | what it is |
+| field | what it is |
 | --- | --- |
 | `lengthscale` | `(d,)` ARD lengthscales, in the normalized `[0, 1]^d` action frame |
 | `signal_var` | the `ScaleKernel` outputscale |
 | `noise_var` | the observation noise, pinned or fitted |
-| `standardize_scale` | the divisor `Standardize` applied to the values |
+| `standardize_scale` | the divisor `Standardize` applied to the values, default 1.0 |
+
+It is a dataclass rather than a dict so that a hand-written specification — the
+one an experiment freezes across cross-validation folds — is checked at
+construction instead of failing on a mistyped key deep inside a fit.
+`standardize_scale` is the only field with a default, because it is reported
+rather than consumed: nothing takes it as an input, and 1.0 is its value for
+values already at unit spread. `lengthscale` may be a scalar when the same value
+is meant for every dimension. Comparison is by identity (`eq=False`), since a
+field-by-field `==` on the `lengthscale` array would return an array whose truth
+value is ambiguous.
 
 That is the complete set, and it is the same set either way — only whether the
 fit moves `noise_var` changes. With a pinned noise, `model.named_hyperparameters()`
@@ -397,8 +413,8 @@ raw units either way; `raw=True` puts the values there too.
 refits. There is no warm start and no incremental conditioning; a closed-form
 exact GP is cheap enough that rebuilding is the intended usage.
 
-**`get_fitted_hyperparameters()`** — a length-m list of `gp_hyperparameters`
-dicts, one per objective in objective order. No entry is shared between them:
+**`get_fitted_hyperparameters()`** — a length-m list of `GPHyperparameters`,
+one per objective in objective order. No entry is shared between them:
 each sub-model has its own kernel, fitted from its own term of the
 `SumMarginalLogLikelihood`.
 
@@ -416,7 +432,7 @@ for simulation work; `plot_pilot.py` uses real data and touches none of it.
 reward plus Gaussian noise; `BradleyTerryOracle(beta_boltzmann, reward_fn, rng)`
 returns a noisy preference; `MultiObjectiveOracle` the multi-objective version.
 
-### Metrics (`performance/mo.py`, `utils/pareto.py`)
+### Metrics (`performance/mo.py`, `performance/loo.py`, `utils/pareto.py`)
 
 - `get_nondominated(F)` — indices of the non-dominated front of `F` (higher is
   better), via pymoo.
@@ -430,6 +446,23 @@ returns a noisy preference; `MultiObjectiveOracle` the multi-objective version.
 - `pareto_overlay(estimated_objs, true_objs, tol=0.0)` — Jaccard overlap between
   the estimated and true fronts. Stricter: it penalizes getting the right
   hypervolume via the wrong actions.
+
+**`loo(objective, fit_gp, noise, hypers=None)`** (`performance/loo.py`) —
+leave-one-out cross-validation over one `Objective`'s N measurements. Fold `i`
+is fit on every measurement except `i` and then predicts point `i`, so the
+returned `(mu, std, models)` — `(N,)`, `(N,)`, and the N fold GPs — are honest
+out-of-sample predictions rather than a training fit. `mu` and `std` come back
+in raw units (`posterior_at(raw=True)`), which is what pairs them with
+`objective.ydata` for an R².
+
+The GP is not built here. `fit_gp` is supplied by the caller and is called as
+`fit_gp(objective, noise, hypers)`, with `noise` and `hypers` passed straight
+through. Anything else a fold's GP needs — a lengthscale floor, say — is bound
+into that callable (`functools.partial`), which is what guarantees every fold
+and the full-data fit are the *same* configuration: cross-validating a GP that
+differs from the one being evaluated measures nothing. Passing `hypers` freezes
+the full-data fit's hyperparameters across the folds; passing None refits them
+fold by fold, which is the honest but far slower measurement.
 
 ### Plotting (`utils/plotting.py`)
 

@@ -33,14 +33,11 @@ SEED         = 95
 OUTPUT       = Path('hilo/output/gp_diagnostics.png')
 
 
-LENGTHSCALE = 0.2
-SIGNAL_VAR = 1.0
-NOISE_VAR = 0.3 ** 2
-HYPERS = {
-    'lengthscale': LENGTHSCALE,
-    'signal_var': SIGNAL_VAR,
-    'noise_var': NOISE_VAR
-}
+HYPERS = plr.GPHyperparameters(
+    lengthscale = 0.2,
+    signal_var  = 1.0,
+    noise_var   = 0.3 ** 2
+)
 HYPERS = None
 
 
@@ -61,9 +58,9 @@ def fit_gp(objective, noise, hypers=None):
         objective: the measurements to condition on.
         noise: a `NoiseModel`, or a fraction of the objective's spread to pin,
             or None to fit it by marginal likelihood alongside the kernel.
-        hypers: a `get_fitted_hyperparameters()` dict to hold fixed, or None to
-            fit them. Every entry supersedes the arguments, the noise included,
-            so a fitted noise freezes across folds exactly as the kernel does.
+        hypers: a `GPHyperparameters` to hold fixed, or None to fit them. Every
+            field supersedes the arguments, the noise included, so a fitted
+            noise freezes across folds exactly as the kernel does.
     """
     if hypers is None:
         return plr.BoTorchGP(objective, noise=noise, fit_hyperparameters=True,
@@ -73,48 +70,12 @@ def fit_gp(objective, noise, hypers=None):
     # of a post-Standardize noise variance is the fraction a pinned noise states
     return plr.BoTorchGP(
         objective,
-        noise               = plr.NoiseModel.pinned(np.sqrt(hypers['noise_var'])),
+        noise               = plr.NoiseModel.pinned(np.sqrt(hypers.noise_var)),
         fit_hyperparameters = False,
-        length_scale        = hypers['lengthscale'],
-        signal_var          = hypers['signal_var'],
+        length_scale        = hypers.lengthscale,
+        signal_var          = hypers.signal_var,
         min_length_scale    = MIN_LENGTHSCALE
     )
-
-
-def leave_one_out(objective, noise_std, hypers):
-    """Held-out posterior at every measured action.
-
-    Fold i is refit on every measurement except i, and is then asked to predict 
-    point i.
-
-    Args:
-        objective: the full set of measurements.
-        noise_std: what each fold's GP assumes, a fraction of its own spread.
-        hypers: a `get_fitted_hyperparameters()` dict frozen in every fold, or
-            None to refit them fold by fold.
-
-    Returns:
-        (mu, std, models): mu and std are the predicted (held-out) point for each
-        respective fold in raw unit. Models is the GP of each fold.
-    """
-    n = objective.ydata.size
-    mu, std, models = np.empty(n), np.empty(n), []
-
-    for i in range(n):
-        keep = np.delete(np.arange(n), i)
-        fold = plr.Objective.from_data(
-            actions  = objective.xdata[keep],
-            values   = objective.ydata[keep],
-            maximize = objective.maximize,
-            name     = objective.name
-        )
-        gp = fit_gp(fold, noise_std, hypers)
-        fold_mu, fold_std = gp.posterior_at(objective.xdata[i], raw=True)
-
-        mu[i], std[i] = fold_mu[0, 0], fold_std[0, 0]
-        models.append(gp)
-
-    return mu, std, models
 
 
 def main():
@@ -155,10 +116,10 @@ def main():
     hypers  = HYPERS if REFIT_FOLDS else full_gp.get_fitted_hyperparameters()
 
     fitted = full_gp.get_fitted_hyperparameters()
-    print(f'full-data fit: noise_std {np.sqrt(fitted["noise_var"]):.3f} of spread, '
-          f'lengthscales {np.round(fitted["lengthscale"], 2)}')
+    print(f'full-data fit: noise_std {np.sqrt(fitted.noise_var):.3f} of spread, '
+          f'lengthscales {np.round(fitted.lengthscale, 2)}')
 
-    loo_mu, loo_std, models = leave_one_out(objective, GP_NOISE, hypers)
+    loo_mu, loo_std, models = plr.loo(objective, fit_gp, GP_NOISE, hypers)
     in_sample_mu, _ = full_gp.posterior_at(objective.xdata, raw=True)
 
     r2 = r2_score(objective.ydata, loo_mu)
