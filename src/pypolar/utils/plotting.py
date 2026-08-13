@@ -11,12 +11,15 @@ def plot_gp_1d(
         ground_truth    = None,
         num_std         = 1.0
     ):
-    """Plot a 1D GP estimate against a regression dataset.
+    """Plot a 1D GP posterior against the data it was fit to.
 
     Args:
         ax: a ``matplotlib.axes.Axes`` to draw on.
-        gp: a fitted ``GPModel`` (uses ``gp.mu`` and ``gp.std()``).
-        regression: a ``Regression`` holding the action space and feedback data.
+        mu: length-``N`` posterior mean over ``action_space``.
+        std: length-``N`` posterior standard deviation over ``action_space``.
+        action_space: ``(N, 1)`` array of actions the posterior is evaluated on.
+        feedback_idxs: indices into ``action_space`` where feedback was given.
+        feedback_values: the feedback values at those indices.
         ground_truth: optional callable mapping the action space ``(N, d)`` to a
             length-``N`` array of rewards, drawn as a reference curve.
         num_std: width of the shaded uncertainty band, in standard deviations.
@@ -24,7 +27,6 @@ def plot_gp_1d(
     Returns:
         The ``ax`` that was drawn on, for chaining.
     """
-    # x = regression.action_space
     if action_space.shape[1] != 1:
         raise ValueError(
             f"plot_gp_1d only supports 1D action spaces, got shape {action_space.shape}"
@@ -52,35 +54,4 @@ def plot_gp_1d(
     ax.set_xlabel('Action')
     ax.set_ylabel('Reward')
     ax.legend()
-    return ax
-
-
-def plot_pareto_2d(
-    ax              : plt.Axes, 
-    optimizer,
-    regression,
-    mo_ground_truth,
-):
-    x = regression.action_space
-
-    ax.plot(*mo_ground_truth(x).T, label='Ground Truth Pareto Front', color='grey')
-
-    ax.scatter(
-        regression.feedback_data[:, 1],
-        regression.feedback_data[:, 2],
-        color='red', 
-        label='Feedback Data',
-        s=40,
-        zorder=3
-    )
-
-    ax.plot(
-        optimizer.gps[0].mu, 
-        optimizer.gps[1].mu, 
-        label='GP Mean Pareto', 
-        zorder=2,
-        color='blue',
-    )
-    ax.legend()
-    
     return ax

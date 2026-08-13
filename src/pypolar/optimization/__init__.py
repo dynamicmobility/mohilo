@@ -1,23 +1,16 @@
-from pypolar.optimization.problem import (
-    Likelihood,
-    PreferenceBasedLearning,
-    Regression,
-    MultiObjectiveRegression
-)
-from pypolar.optimization.gp import (
-    GPModel,
-    ConjugateGP,
-    LaplaceGP,
-    MultiObjectiveGP
+from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP
+from pypolar.optimization.objectives import (
+    AffineTransform,
+    Objective,
+    DecoupledObjectives,
+    sample_actions
 )
 
 __all__ = [
-    "Likelihood",
-    "PreferenceBasedLearning",
-    "Regression",
-    "MultiObjectiveRegression",
-    "GPModel",
-    "ConjugateGP",
-    "LaplaceGP",
-    "MultiObjectiveGP"
+    "BoTorchGP",
+    "DecoupledMOGP",
+    "AffineTransform",
+    "Objective",
+    "DecoupledObjectives",
+    "sample_actions"
 ]
