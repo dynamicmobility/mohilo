@@ -1,4 +1,4 @@
-from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP
+from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP, NoiseModel
 from pypolar.optimization.objectives import (
     AffineTransform,
     Objective,
@@ -22,6 +22,7 @@ __all__ = [
     # optimization
     "BoTorchGP",
     "DecoupledMOGP",
+    "NoiseModel",
     # objectives
     "AffineTransform",
     "Objective",

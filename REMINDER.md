@@ -107,3 +107,10 @@ Newest entries go at the top.
 - **Priority:** 1
 - **File:** fill in @claude
 - **Why:** fill in @claude
+
+
+### Create a script for 1D acquisition function testing and fitting. Use the same noise profile as the collected data.
+
+### Create a multi objective version with mo acq f
+
+### Implement a decoupled version of mo acq f and test

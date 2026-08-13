@@ -19,13 +19,14 @@ from botorch.test_functions import (
 from botorch.utils.sampling import draw_sobol_samples
 from sklearn.metrics import r2_score
 
-from pypolar.optimization.gp import DTYPE, BoTorchGP
+from pypolar.optimization.gp import DTYPE, BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import Objective
 
 DIM          = 1        # action dimension
-NUM_SAMPLES  = 15       # measurements drawn from the objective
-NOISE        = 0.25     # noise added, as a fraction of the truth's spread
-GP_NOISE     = None     # noise the GP assumes; None matches NOISE
+NUM_SAMPLES  = 30       # measurements drawn from the objective
+NOISE        = 0.710    # noise added, as a fraction of the truth's spread
+GP_NOISE     = 'prior:0.3'  # a fraction, 'match', 'fit', or 'prior:MEDIAN'
+MIN_LENGTHSCALE = None  # lengthscale floor, or None; scale it to the design
 REFIT_FOLDS  = False    # refit kernel hyperparameters inside every LOO fold
 FUNCTION     = 'levy'
 BOX          = 5.0      # the action box is [-BOX, BOX]^DIM
@@ -70,34 +71,46 @@ def sample_design(bounds, n, kind, seed):
     return np.random.default_rng(seed).uniform(lo, hi, size=(n, len(lo)))
 
 
-def fit_gp(objective, noise_std, hypers=None):
-    """A GP on `objective`, with kernel hyperparameters refit or frozen.
+def fit_gp(objective, noise, hypers=None, min_length_scale=None):
+    """A GP on `objective`, with its hyperparameters refit or frozen.
 
     Args:
         objective: the measurements to condition on.
-        noise_std: observation noise, as a fraction of the objective's spread.
+        noise: a `NoiseModel`, or a fraction of the objective's spread to pin,
+            or None to fit it by marginal likelihood alongside the kernel.
         hypers: a `get_fitted_hyperparameters()` dict to hold fixed, or None to
-            fit them.
+            fit them. Every entry supersedes the arguments, the noise included,
+            so a fitted noise freezes across folds exactly as the kernel does.
+        min_length_scale: lower bound on every lengthscale, or None.
     """
-    gp = BoTorchGP(objective, noise_std=noise_std, fit_hyperparameters=hypers is None)
-    if hypers is not None:
-        gp.LENGTH_SCALE, gp.SIGNAL_VAR = hypers['lengthscale'], hypers['signal_var']
-        gp.update_feedback(objective)
+    if hypers is None:
+        return BoTorchGP(objective, noise=noise, fit_hyperparameters=True,
+                         min_length_scale=min_length_scale)
 
-    return gp
+    # Standardize divides train_Y by its own sample spread, so the square root
+    # of a post-Standardize noise variance is the fraction a pinned noise states
+    return BoTorchGP(
+        objective,
+        noise               = NoiseModel.pinned(np.sqrt(hypers['noise_var'])),
+        fit_hyperparameters = False,
+        length_scale        = hypers['lengthscale'],
+        signal_var          = hypers['signal_var'],
+        min_length_scale    = min_length_scale
+    )
 
 
-def leave_one_out(objective, noise_std, hypers):
+def leave_one_out(objective, noise, hypers, min_length_scale=None):
     """Held-out posterior at every measured action.
 
-    Fold i is refit on every measurement except i, and is then asked to predict 
+    Fold i is refit on every measurement except i, and is then asked to predict
     point i.
 
     Args:
         objective: the full set of measurements.
-        noise_std: what each fold's GP assumes, a fraction of its own spread.
+        noise: what each fold's GP assumes, as `fit_gp` takes it.
         hypers: a `get_fitted_hyperparameters()` dict frozen in every fold, or
             None to refit them fold by fold.
+        min_length_scale: lower bound on every lengthscale, or None.
 
     Returns:
         (mu, std, models): mu and std are the predicted (held-out) point for each
@@ -114,7 +127,7 @@ def leave_one_out(objective, noise_std, hypers):
             maximize = objective.maximize,
             name     = objective.name
         )
-        gp = fit_gp(fold, noise_std, hypers)
+        gp = fit_gp(fold, noise, hypers, min_length_scale)
         fold_mu, fold_std = gp.posterior_at(objective.xdata[i], raw=True)
 
         mu[i], std[i] = fold_mu[0, 0], fold_std[0, 0]
@@ -133,9 +146,11 @@ def calibration(residual, std):
     return z.std(), np.mean(np.abs(z) <= 1.96)
 
 
-def report(args, y_obs, y_true, loo_mu, loo_std, in_sample_mu, noise_abs, gp_noise_abs):
+def report(args, y_obs, y_true, loo_mu, loo_std, in_sample_mu, noise_abs, gp_noise):
     """Everything the run measured, as one table."""
     folds = 'refit per fold' if args.refit_folds else 'frozen at the full-data fit'
+    assumes = 'GP fitted' if NoiseModel.coerce(args.gp_noise).is_fitted \
+        else 'GP assumes'
     # no model can explain variance the noise put there, so R^2 against the
     # noisy observations cannot exceed this
     ceiling = 1 - noise_abs ** 2 / y_obs.var()
@@ -144,7 +159,7 @@ def report(args, y_obs, y_true, loo_mu, loo_std, in_sample_mu, noise_abs, gp_noi
     print(f'  {"function":<28}{args.function} on [{-args.box:g}, {args.box:g}]^{args.dim}, negated')
     print(f'  {"samples":<28}{args.samples} ({args.design})')
     print(f'  {"true noise":<28}{args.noise:.3f} of spread  =  {noise_abs:.4f}')
-    print(f'  {"GP assumes":<28}{args.gp_noise:.3f} of spread  =  {gp_noise_abs:.4f}')
+    print(f'  {assumes:<28}{gp_noise:.3f} of spread  =  {gp_noise * y_obs.std():.4f}')
     print(f'  {"fold hyperparameters":<28}{folds}')
 
     print('\n=== R^2 ===')
@@ -226,12 +241,39 @@ def make_figure(args, truth, objective, models, full_gp, bounds, y_true, mu, std
     print(f'wrote {args.output}')
 
 
+def gp_noise_arg(value):
+    """--gp-noise takes a fraction of the spread, 'match', 'fit', or 'prior:M'."""
+    if value in ('match', 'fit') or value.startswith('prior:'):
+        return value
+    return float(value)
+
+
+def resolve_gp_noise(value, true_noise):
+    """The CLI spelling, as `fit_gp` takes it.
+
+    'match' pins the GP at the oracle's own noise, which only a simulation can
+    do; 'fit' leaves it free; 'prior:M' fits it under a LogNormal centered on M.
+    """
+    if value == 'match':
+        return true_noise
+    if value == 'fit':
+        return None
+    if isinstance(value, str):
+        return NoiseModel.prior(float(value.split(':', 1)[1]))
+    return value
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument('--dim',      type=int,   default=DIM,         help='action dimension')
     p.add_argument('--samples',  type=int,   default=NUM_SAMPLES, help='number of measurements')
     p.add_argument('--noise',    type=float, default=NOISE,       help="noise added, as a fraction of the truth's spread")
-    p.add_argument('--gp-noise', type=float, default=GP_NOISE,    help='noise the GP assumes; defaults to --noise')
+    p.add_argument('--gp-noise', type=gp_noise_arg, default=GP_NOISE,
+                   help="noise the GP assumes: a fraction of spread, 'match' for "
+                        "--noise, 'fit' to estimate it, or 'prior:M' to fit it "
+                        "under a LogNormal centered on M")
+    p.add_argument('--min-lengthscale', type=float, default=MIN_LENGTHSCALE,
+                   help='floor every lengthscale, in the normalized action box')
     p.add_argument('--refit-folds', action='store_true', default=REFIT_FOLDS,
                    help='refit kernel hyperparameters inside every LOO fold')
     p.add_argument('--function', default=FUNCTION, choices=sorted(FUNCTIONS))
@@ -241,7 +283,7 @@ def parse_args():
     p.add_argument('--output',   type=Path,  default=OUTPUT)
 
     args = p.parse_args()
-    args.gp_noise = args.noise if args.gp_noise is None else args.gp_noise
+    args.gp_noise = resolve_gp_noise(args.gp_noise, args.noise)
     return args
 
 
@@ -270,10 +312,14 @@ def main():
         name     = args.function
     )
 
-    full_gp = fit_gp(objective, args.gp_noise)
+    full_gp = fit_gp(objective, args.gp_noise, min_length_scale=args.min_lengthscale)
     hypers  = None if args.refit_folds else full_gp.get_fitted_hyperparameters()
+    # a pinned noise reads back as exactly what it was given, so this one line
+    # reports the effective level on either path
+    gp_noise = float(np.sqrt(full_gp.get_fitted_hyperparameters()['noise_var']))
 
-    loo_mu, loo_std, models = leave_one_out(objective, args.gp_noise, hypers)
+    loo_mu, loo_std, models = leave_one_out(objective, args.gp_noise, hypers,
+                                            args.min_lengthscale)
     in_sample_mu = full_gp.posterior_at(X, raw=True)[0][:, 0]
 
     report(
@@ -284,7 +330,7 @@ def main():
         loo_std      = loo_std,
         in_sample_mu = in_sample_mu,
         noise_abs    = noise_abs,
-        gp_noise_abs = args.gp_noise * y_obs.std()
+        gp_noise     = gp_noise
     )
     make_figure(args, truth, objective, models, full_gp, bounds.numpy(),
                 y_true, loo_mu, loo_std)

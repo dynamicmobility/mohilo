@@ -16,10 +16,17 @@ import pytest
 import torch
 from botorch.models import SingleTaskGP
 from botorch.models.transforms.outcome import Standardize
-from gpytorch.likelihoods import FixedNoiseGaussianLikelihood
+from gpytorch.likelihoods import FixedNoiseGaussianLikelihood, GaussianLikelihood
 from gpytorch.means import ZeroMean
 
-from pypolar.optimization.gp import BoTorchGP, build_botorch_gp, gp_hyperparameters
+from pypolar.optimization.gp import (
+    LENGTH_SCALE,
+    SIGNAL_VAR,
+    BoTorchGP,
+    NoiseModel,
+    build_botorch_gp,
+    gp_hyperparameters,
+)
 from pypolar.optimization.objectives import Objective
 
 
@@ -48,6 +55,12 @@ def _grid(n=GRID_POINTS):
 def _bump(X, center, width=3.0):
     """A smooth unimodal bump, peaked at center."""
     return np.exp(-np.sum((X - center) ** 2, axis=1) / width ** 2)
+
+
+def _noisy(values, rel, seed=0):
+    """`values` plus Gaussian noise of `rel` times their own spread."""
+    rng = np.random.default_rng(seed)
+    return values + rng.normal(0.0, rel * values.std(), size=values.shape)
 
 
 def _targets(model):
@@ -86,18 +99,18 @@ def cost(actions):
 @pytest.fixture
 def gp(reward):
     """Hyperparameters fitted, as the pilot script uses it."""
-    return BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=True)
+    return BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=True)
 
 
 @pytest.fixture
 def cost_gp(cost):
-    return BoTorchGP(cost, noise_std=NOISE_STD, fit_hyperparameters=True)
+    return BoTorchGP(cost, noise=NOISE_STD, fit_hyperparameters=True)
 
 
 @pytest.fixture
 def interpolating_gp(reward):
     """Near-noiseless, so the posterior must pass through the measurements."""
-    return BoTorchGP(reward, noise_std=1e-4, fit_hyperparameters=False)
+    return BoTorchGP(reward, noise=1e-4, fit_hyperparameters=False)
 
 
 # ---- build_botorch_gp ------------------------------------------------------
@@ -109,7 +122,7 @@ class TestBuildBotorchGpStructure:
     def built(self, actions):
         return build_botorch_gp(
             actions=actions, values=_bump(actions, PEAK),
-            noise_std=NOISE_STD, signal_var=1.0, length_scale=0.2
+            noise=NOISE_STD, signal_var=1.0, length_scale=0.2
         )
 
     def test_it_is_a_single_task_gp(self, built):
@@ -131,14 +144,14 @@ class TestBuildBotorchGpStructure:
     def test_a_one_dimensional_action_gets_one_lengthscale(self, actions):
         built = build_botorch_gp(
             actions=actions[:, :1], values=_bump(actions, PEAK),
-            noise_std=NOISE_STD, signal_var=1.0, length_scale=0.2
+            noise=NOISE_STD, signal_var=1.0, length_scale=0.2
         )
         assert built.covar_module.base_kernel.lengthscale.shape[-1] == 1
 
     def test_the_starting_hyperparameters_are_the_requested_ones(self, actions):
         built = build_botorch_gp(
             actions=actions, values=_bump(actions, PEAK),
-            noise_std=NOISE_STD, signal_var=3.0, length_scale=0.7
+            noise=NOISE_STD, signal_var=3.0, length_scale=0.7
         )
         assert built.covar_module.base_kernel.lengthscale.detach().numpy() == \
             pytest.approx(0.7)
@@ -165,7 +178,7 @@ class TestBuildBotorchGpNoise:
     def _noise(values, actions=None):
         built = build_botorch_gp(
             actions=_grid() if actions is None else actions, values=values,
-            noise_std=NOISE_STD, signal_var=1.0, length_scale=0.2
+            noise=NOISE_STD, signal_var=1.0, length_scale=0.2
         )
         return built.likelihood.noise.detach().numpy()
 
@@ -202,6 +215,86 @@ class TestBuildBotorchGpNoise:
         assert np.all(np.isfinite(noise))
 
 
+class TestBuildBotorchGpFittedNoise:
+    """noise=None leaves the noise for the fit to determine instead of
+    pinning it, which is a different likelihood rather than a different value."""
+
+    @pytest.fixture
+    def built(self, actions):
+        return build_botorch_gp(
+            actions=actions, values=_bump(actions, PEAK),
+            noise=None, signal_var=1.0, length_scale=0.2
+        )
+
+    def test_the_likelihood_is_learnable(self, built):
+        """Not FixedNoiseGaussianLikelihood, which stores noise as a buffer and
+        leaves nothing for fit_gpytorch_mll to move."""
+        assert isinstance(built.likelihood, GaussianLikelihood)
+        assert not isinstance(built.likelihood, FixedNoiseGaussianLikelihood)
+
+    def test_the_noise_joins_the_fitted_hyperparameters(self, built, actions):
+        pinned = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.2)
+        assert 'likelihood.noise_covar.raw_noise' in dict(built.named_hyperparameters())
+        assert 'likelihood.noise_covar.raw_noise' not in dict(pinned.named_hyperparameters())
+
+    def test_it_carries_no_prior(self, built):
+        """The likelihood is passed explicitly for this reason: BoTorch's own
+        default attaches a LogNormal noise prior centered low, which would
+        decide the noise instead of the data."""
+        assert [p[0] for p in built.named_priors()] == []
+
+    def test_the_hyperparameter_keys_are_unchanged(self, built):
+        assert set(gp_hyperparameters(built)) == KEYS
+
+    def test_everything_is_still_float64(self, built):
+        assert built.likelihood.noise.dtype == torch.float64
+
+
+class TestBuildBotorchGpLengthscaleBound:
+    """min_length_scale floors every ARD lengthscale, in the normalized frame."""
+
+    def test_no_bound_is_the_default(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.2)
+        assert built.covar_module.base_kernel.lengthscale.detach().numpy() == \
+            pytest.approx(0.2)
+
+    def test_the_bound_floors_the_lengthscale(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.2,
+                                 min_length_scale=0.3)
+        assert np.all(built.covar_module.base_kernel.lengthscale.detach().numpy() >= 0.3)
+
+    def test_a_start_below_the_bound_is_moved_inside_it(self, actions):
+        """A GreaterThan constraint cannot represent its own edge, so a start at
+        or below the bound would raise rather than clamp."""
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.2,
+                                 min_length_scale=0.3)
+        assert built.covar_module.base_kernel.lengthscale.detach().numpy() == \
+            pytest.approx(0.45)
+
+    def test_a_start_above_the_bound_is_kept(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.7,
+                                 min_length_scale=0.3)
+        assert built.covar_module.base_kernel.lengthscale.detach().numpy() == \
+            pytest.approx(0.7)
+
+    def test_a_per_dimension_start_is_floored_elementwise(self, actions):
+        """Freezing a fitted kernel hands back one lengthscale per action
+        dimension, so the start is a vector rather than a scalar."""
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0,
+                                 np.array([0.2, 0.9]), min_length_scale=0.3)
+        np.testing.assert_allclose(
+            built.covar_module.base_kernel.lengthscale.detach().numpy().ravel(),
+            [0.45, 0.9]
+        )
+
+    def test_it_stays_float64(self, actions):
+        """The constraint stores its bound in single precision, so the
+        transformed lengthscale has to promote back."""
+        built = build_botorch_gp(actions, _bump(actions, PEAK), NOISE_STD, 1.0, 0.2,
+                                 min_length_scale=0.3)
+        assert built.covar_module.base_kernel.lengthscale.dtype == torch.float64
+
+
 # ---- BoTorchGP structure ---------------------------------------------------
 
 class TestModelStructure:
@@ -229,11 +322,11 @@ class TestModelStructure:
         def lengthscales(m):
             return m.model.covar_module.base_kernel.lengthscale.detach().numpy().ravel()
 
-        fixed  = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=False)
-        fitted = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=True)
+        fixed  = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=False)
+        fitted = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=True)
 
-        assert np.allclose(lengthscales(fixed), BoTorchGP.LENGTH_SCALE)
-        assert not np.allclose(lengthscales(fitted), BoTorchGP.LENGTH_SCALE)
+        assert np.allclose(lengthscales(fixed), LENGTH_SCALE)
+        assert not np.allclose(lengthscales(fitted), LENGTH_SCALE)
 
 
 # ---- posterior_at ----------------------------------------------------------
@@ -408,7 +501,7 @@ class TestBestActions:
 class TestUpdateFeedback:
 
     def test_refits_against_new_measurements(self, reward):
-        model = BoTorchGP(reward, noise_std=1e-4, fit_hyperparameters=False)
+        model = BoTorchGP(reward, noise=1e-4, fit_hyperparameters=False)
         probe = np.array([[5.0, 0.0]])
         before = model.posterior_at(probe)[0].copy()
 
@@ -445,7 +538,7 @@ class TestGpHyperparameters:
     def built(self, actions):
         return build_botorch_gp(
             actions=actions, values=_bump(actions, PEAK),
-            noise_std=NOISE_STD, signal_var=3.0, length_scale=0.7
+            noise=NOISE_STD, signal_var=3.0, length_scale=0.7
         )
 
     def test_it_reports_exactly_these_four(self, built):
@@ -512,14 +605,14 @@ class TestGetFittedHyperparameters:
         assert method['signal_var'] == pytest.approx(direct['signal_var'])
 
     def test_an_unfitted_gp_reports_the_starting_values(self, reward):
-        hypers = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=False
+        hypers = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=False
                            ).get_fitted_hyperparameters()
-        assert hypers['lengthscale'] == pytest.approx(BoTorchGP.LENGTH_SCALE)
-        assert hypers['signal_var'] == pytest.approx(BoTorchGP.SIGNAL_VAR)
+        assert hypers['lengthscale'] == pytest.approx(LENGTH_SCALE)
+        assert hypers['signal_var'] == pytest.approx(SIGNAL_VAR)
 
     def test_a_fitted_gp_reports_values_it_moved_to(self, gp):
         hypers = gp.get_fitted_hyperparameters()
-        assert not np.allclose(hypers['lengthscale'], BoTorchGP.LENGTH_SCALE)
+        assert not np.allclose(hypers['lengthscale'], LENGTH_SCALE)
         assert np.all(hypers['lengthscale'] > 0)
         assert hypers['signal_var'] > 0
 
@@ -528,7 +621,7 @@ class TestGetFittedHyperparameters:
             actions=actions[:, :1], values=_bump(actions, PEAK),
             maximize=True, name='reward'
         )
-        gp = BoTorchGP(one_d, noise_std=NOISE_STD, fit_hyperparameters=True)
+        gp = BoTorchGP(one_d, noise=NOISE_STD, fit_hyperparameters=True)
         assert gp.get_fitted_hyperparameters()['lengthscale'].shape == (1,)
 
     def test_the_objectives_units_do_not_change_them(self, actions):
@@ -539,7 +632,7 @@ class TestGetFittedHyperparameters:
                 actions=actions, values=scale * _bump(actions, PEAK),
                 maximize=True, name='reward'
             )
-            return BoTorchGP(obj, noise_std=NOISE_STD, fit_hyperparameters=True
+            return BoTorchGP(obj, noise=NOISE_STD, fit_hyperparameters=True
                              ).get_fitted_hyperparameters()
 
         small, large = fitted(1.0), fitted(1000.0)
@@ -548,7 +641,7 @@ class TestGetFittedHyperparameters:
         assert small['noise_var'] == pytest.approx(large['noise_var'])
 
     def test_it_tracks_a_refit_after_new_measurements(self, reward):
-        model = BoTorchGP(reward, noise_std=NOISE_STD, fit_hyperparameters=True)
+        model = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=True)
         before = model.get_fitted_hyperparameters()['lengthscale'].copy()
 
         # a measurement contradicting the bump, so the fit has to move
@@ -556,3 +649,210 @@ class TestGetFittedHyperparameters:
         model.update_feedback(reward)
 
         assert not np.allclose(before, model.get_fitted_hyperparameters()['lengthscale'])
+
+
+# ---- fitting the noise -----------------------------------------------------
+
+class TestFittedNoise:
+    """With noise=None the noise is fitted by marginal likelihood, so it has
+    to track how noisy the measurements actually are."""
+
+    @staticmethod
+    def _fitted(values, actions, maximize=True):
+        obj = Objective.from_data(actions=actions, values=values,
+                                  maximize=maximize, name='reward')
+        gp = BoTorchGP(obj, noise=None, fit_hyperparameters=True)
+        return gp.get_fitted_hyperparameters()
+
+    def test_noisier_measurements_fit_a_larger_noise(self, actions):
+        clean = _bump(actions, PEAK)
+        fitted = [self._fitted(_noisy(clean, rel), actions)['noise_var']
+                  for rel in (0.1, 0.3, 0.5)]
+        assert fitted == sorted(fitted)
+
+    def test_it_recovers_roughly_the_noise_that_was_added(self, actions):
+        """Post-Standardize the values have unit variance, so the fitted
+        noise_var is the squared fraction of the spread. Adding 30% of the clean
+        spread makes it 30% / sqrt(1 + 0.3^2) of the noisy one."""
+        noise_std = np.sqrt(self._fitted(_noisy(_bump(actions, PEAK), 0.3),
+                                         actions)['noise_var'])
+        assert noise_std == pytest.approx(0.3 / np.sqrt(1.09), rel=0.4)
+
+    def test_noiseless_measurements_fit_the_smallest_allowed_noise(self, actions):
+        """Nothing to explain, so the fit drives the noise to the likelihood's
+        own floor rather than to zero, which would be singular."""
+        assert self._fitted(_bump(actions, PEAK), actions)['noise_var'] == \
+            pytest.approx(1e-4)
+
+    def test_the_objectives_units_do_not_change_it(self, actions):
+        """The same scale-free promise the pinned path makes: noise_std is a
+        fraction of the objective's own spread either way."""
+        values = _noisy(_bump(actions, PEAK), 0.3)
+        assert self._fitted(values, actions)['noise_var'] == \
+            pytest.approx(self._fitted(1000.0 * values, actions)['noise_var'])
+
+    def test_a_minimized_objective_fits_the_same_noise(self, actions):
+        """Objective flips the sign before a GP sees it, and a sign flip cannot
+        change a spread."""
+        values = _noisy(_bump(actions, PEAK), 0.3)
+        assert self._fitted(values, actions, maximize=True)['noise_var'] == \
+            pytest.approx(self._fitted(-values, actions, maximize=False)['noise_var'])
+
+    def test_it_refuses_to_leave_the_noise_undetermined(self, reward):
+        """Without a fit there is nothing to set the noise, so the GP would
+        silently keep the likelihood's arbitrary starting value."""
+        with pytest.raises(ValueError, match='fit_hyperparameters'):
+            BoTorchGP(reward, noise=None, fit_hyperparameters=False)
+
+    def test_a_pinned_noise_still_reports_what_it_was_given(self, reward):
+        """The default path is untouched: the fit never moves a pinned noise."""
+        gp = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=True)
+        assert gp.get_fitted_hyperparameters()['noise_var'] == \
+            pytest.approx(NOISE_STD ** 2)
+
+
+class TestMinLengthScale:
+    """min_length_scale floors the fitted lengthscales, in the normalized frame.
+    A lengthscale below the design spacing is not identifiable, so the bound is
+    what stops the fit from wandering there."""
+
+    @staticmethod
+    def _bounded(objective, noise=NOISE_STD):
+        return BoTorchGP(objective, noise=noise, fit_hyperparameters=True,
+                         min_length_scale=0.5)
+
+    def test_the_default_is_no_bound(self, gp):
+        assert gp.min_length_scale is None
+
+    def test_the_fit_respects_it(self, reward):
+        gp = self._bounded(reward)
+        assert np.all(gp.get_fitted_hyperparameters()['lengthscale'] >= 0.5)
+
+    def test_it_is_a_floor_and_not_a_value(self, reward):
+        """It binds on the dimension the free fit puts below it, and leaves the
+        rest free to sit above it. Not *unchanged*, though: the ARD lengthscales
+        share one marginal likelihood, so lifting one moves the others."""
+        free  = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=True)
+        free_ls  = free.get_fitted_hyperparameters()['lengthscale']
+        bound_ls = self._bounded(reward).get_fitted_hyperparameters()['lengthscale']
+
+        assert np.any(free_ls < 0.5)      # the bound has something to bind on here
+        assert np.all(bound_ls >= 0.5)
+        assert np.any(bound_ls > 0.5)     # and does not collapse the rest onto it
+
+    def test_it_combines_with_a_fitted_noise(self, reward):
+        hypers = self._bounded(reward, noise=None).get_fitted_hyperparameters()
+        assert np.all(hypers['lengthscale'] >= 0.5)
+        assert hypers['noise_var'] > 0
+
+    def test_it_survives_a_refit(self, reward):
+        gp = self._bounded(reward)
+        reward.add_points(np.array([[5.0, 0.0]]), np.array([5.0]))
+        gp.update_feedback(reward)
+        assert np.all(gp.get_fitted_hyperparameters()['lengthscale'] >= 0.5)
+
+    def test_the_starting_hyperparameters_are_arguments_too(self, reward):
+        """length_scale and signal_var are per-instance, so two GPs on the same
+        objective can start from different places."""
+        gp = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=False,
+                       length_scale=0.7, signal_var=3.0)
+        hypers = gp.get_fitted_hyperparameters()
+        assert hypers['lengthscale'] == pytest.approx(0.7)
+        assert hypers['signal_var'] == pytest.approx(3.0)
+
+    def test_the_defaults_are_the_module_constants(self, reward):
+        gp = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=False)
+        hypers = gp.get_fitted_hyperparameters()
+        assert hypers['lengthscale'] == pytest.approx(LENGTH_SCALE)
+        assert hypers['signal_var'] == pytest.approx(SIGNAL_VAR)
+
+
+# ---- NoiseModel ------------------------------------------------------------
+
+class TestNoiseModel:
+    """One argument carrying the three noise representations, so a pinned noise
+    and a prior on a fitted one cannot be requested at the same time."""
+
+    def test_pinned_selects_a_fixed_likelihood(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK),
+                                 NoiseModel.pinned(0.05), 1.0, 0.2)
+        assert isinstance(built.likelihood, FixedNoiseGaussianLikelihood)
+        assert built.likelihood.noise.mean().item() == pytest.approx(0.05 ** 2)
+
+    def test_fitted_carries_no_prior(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK),
+                                 NoiseModel.fitted(), 1.0, 0.2)
+        assert isinstance(built.likelihood, GaussianLikelihood)
+        assert [p[0] for p in built.named_priors()] == []
+
+    def test_prior_attaches_a_lognormal(self, actions):
+        built = build_botorch_gp(actions, _bump(actions, PEAK),
+                                 NoiseModel.prior(0.3), 1.0, 0.2)
+        assert 'likelihood.noise_covar.noise_prior' in \
+            [p[0] for p in built.named_priors()]
+
+    def test_the_prior_is_centered_on_the_median_noise_std(self, actions):
+        """The prior is on the variance, so a median noise standard deviation of
+        m has to become a median variance of m^2."""
+        built = build_botorch_gp(actions, _bump(actions, PEAK),
+                                 NoiseModel.prior(0.3), 1.0, 0.2)
+        prior = built.likelihood.noise_covar.noise_prior
+        assert np.exp(prior.loc.item()) == pytest.approx(0.3 ** 2)
+
+    def test_the_prior_pulls_a_collapsing_fit_back(self, actions):
+        """Noiseless data drives an unpriored fit onto the likelihood floor. A
+        prior centered well above it must land higher than that."""
+        clean = _bump(actions, PEAK)
+        obj = Objective.from_data(actions=actions, values=clean,
+                                  maximize=True, name='reward')
+        free    = BoTorchGP(obj, noise=NoiseModel.fitted())
+        priored = BoTorchGP(obj, noise=NoiseModel.prior(0.3))
+
+        assert priored.get_fitted_hyperparameters()['noise_var'] > \
+            free.get_fitted_hyperparameters()['noise_var']
+
+    def test_a_wider_prior_constrains_less(self, actions):
+        """sigma is the prior width, so widening it lets the data pull further
+        from the median."""
+        obj = Objective.from_data(actions=actions, values=_bump(actions, PEAK),
+                                  maximize=True, name='reward')
+        tight = BoTorchGP(obj, noise=NoiseModel.prior(0.3, sigma=0.2))
+        loose = BoTorchGP(obj, noise=NoiseModel.prior(0.3, sigma=3.0))
+
+        assert tight.get_fitted_hyperparameters()['noise_var'] > \
+            loose.get_fitted_hyperparameters()['noise_var']
+
+    def test_a_pinned_noise_cannot_also_carry_a_prior(self):
+        with pytest.raises(ValueError, match='pinned'):
+            NoiseModel(std=0.05, median=0.3)
+
+    def test_a_prior_median_must_be_positive(self):
+        """A LogNormal has positive support, so a non-positive median has no
+        meaning and log() would return -inf rather than raise."""
+        with pytest.raises(ValueError, match='positive'):
+            NoiseModel.prior(0.0)
+
+    def test_a_pinned_noise_cannot_be_negative(self):
+        with pytest.raises(ValueError, match='non-negative'):
+            NoiseModel.pinned(-0.1)
+
+    def test_it_coerces_the_shorthands(self):
+        assert NoiseModel.coerce(0.05) == NoiseModel.pinned(0.05)
+        assert NoiseModel.coerce(None) == NoiseModel.fitted()
+        model = NoiseModel.prior(0.3)
+        assert NoiseModel.coerce(model) is model
+
+    def test_the_wrapper_coerces_too(self, reward):
+        """A bare float still means a pinned noise, so no call site had to change."""
+        assert BoTorchGP(reward, noise=0.05).noise == NoiseModel.pinned(0.05)
+
+    def test_is_fitted_splits_the_two_kinds(self):
+        assert not NoiseModel.pinned(0.05).is_fitted
+        assert NoiseModel.fitted().is_fitted
+        assert NoiseModel.prior(0.3).is_fitted
+
+    def test_it_is_immutable(self):
+        """Frozen, so a NoiseModel shared between GPs cannot be edited under one
+        of them."""
+        with pytest.raises(Exception):
+            NoiseModel.pinned(0.05).std = 0.2
