@@ -412,6 +412,76 @@ class TestObjectiveAddPoints:
         # the mean moved, so the old transform would no longer give zero mean
         assert objective.standard_y.mean() == pytest.approx(0.0)
 
+    def test_several_points_are_appended_at_once(self, objective, y):
+        objective.add_points(np.array([[5.0, 10.0, 0.6], [6.0, 12.0, 0.7]]),
+                             np.array([12.0, 14.0]))
+        assert objective.ydata == pytest.approx(np.append(y, [12.0, 14.0]))
+        assert objective.xdata.shape == (y.size + 2, 3)
+
+
+class TestObjectiveFromEmpty:
+    """An objective declared before any measurement exists, then grown."""
+
+    def test_the_name_and_direction_are_carried(self):
+        obj = Objective.from_empty('cost', maximize=False)
+        assert obj.name == 'cost'
+        assert obj.maximize is False
+        assert obj.sign == -1.0
+        assert obj.column is None
+
+    def test_it_holds_no_measurements(self):
+        obj = Objective.from_empty('cost', maximize=False)
+        assert obj.xdata.size == 0
+        assert obj.ydata.size == 0
+
+    def test_it_has_no_transforms_yet(self):
+        # there is no mean or spread to compute, so __post_init__ stops early
+        obj = Objective.from_empty('cost', maximize=False)
+        assert not hasattr(obj, 'xtransform')
+        assert not hasattr(obj, 'ytransform')
+        with pytest.raises(AttributeError):
+            obj.standard_y
+
+    def test_the_first_points_set_the_action_dimension(self):
+        obj = Objective.from_empty('cost', maximize=False)
+        obj.add_points(np.array([5.0, 10.0, 0.6]), np.array([12.0]))
+        assert obj.xdata.shape == (1, 3)
+        assert obj.ydata == pytest.approx([12.0])
+
+    def test_the_first_points_build_the_transforms(self, x, y):
+        obj = Objective.from_empty('cost', maximize=False)
+        obj.add_points(x, y)
+        assert obj.standard_y.mean() == pytest.approx(0.0)
+        assert obj.standard_y.std() == pytest.approx(1.0)
+        assert obj.normalized_x.min(axis=0) == pytest.approx(np.zeros(3))
+        assert obj.normalized_x.max(axis=0) == pytest.approx(np.ones(3))
+
+    def test_points_can_be_added_one_at_a_time(self, x, y):
+        obj = Objective.from_empty('cost', maximize=False)
+        for action, value in zip(x, y):
+            obj.add_points(action, np.array([value]))
+
+        assert obj.xdata == pytest.approx(x)
+        assert obj.ydata == pytest.approx(y)
+
+    def test_growing_from_empty_matches_direct_construction(self, x, y):
+        # the two routes to the same five measurements must agree, transforms
+        # included, or an objective's history would change its model
+        grown = Objective.from_empty('cost', maximize=False)
+        grown.add_points(x, y)
+        direct = Objective('cost', maximize=False, ydata=y.copy(), xdata=x.copy())
+        assert grown.xdata == pytest.approx(direct.xdata)
+        assert grown.ydata == pytest.approx(direct.ydata)
+        assert grown.standard_y == pytest.approx(direct.standard_y)
+        assert grown.normalized_x == pytest.approx(direct.normalized_x)
+
+    def test_direction_still_holds_once_data_arrives(self, x, y):
+        # standard_y is larger-is-better, so a minimized objective's largest
+        # standardized value sits at its smallest measurement
+        obj = Objective.from_empty('cost', maximize=False)
+        obj.add_points(x, y)
+        assert obj.best_action() == pytest.approx(x[y.argmin()])
+
 
 class TestObjectiveFromDataFrame:
 

@@ -20,7 +20,7 @@ import pypolar as plr
 import pandas as pd
 from hilo.read_data import read_MH01_data, read_MT0x_data
 
-DIM          = 3        # action dimension
+DIM          = 1        # action dimension
 NUM_SAMPLES  = 15       # measurements drawn from the objective
 NOISE        = 0.5      # noise added, as a fraction of the truth's spread
 GP_NOISE     = plr.NoiseModel.prior(1.0)  # a float pins, None fits, prior() regularizes

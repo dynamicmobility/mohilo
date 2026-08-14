@@ -71,6 +71,18 @@ class AffineTransform:
             scale = 1 / (span + (span == 0)),   # zero-range data is left unscaled
             shift = -np.min(data, axis)
         )
+        
+    @classmethod
+    def make_normalized_from_bounds(cls, low, high):
+        raise NotImplementedError()
+    
+    @classmethod
+    def make_centered_from_bounds(cls, low, high):
+        raise NotImplementedError()
+    
+    @classmethod
+    def make_standardized_from_bounds(cls, low, high):
+        raise NotImplementedError()
 
 
 @dataclass
@@ -82,6 +94,9 @@ class Objective:
     column:   str | None = None # source dataframe column, when read from one
 
     def __post_init__(self):
+        if len(self.xdata) == 0:
+            return None
+        
         self.ydata = np.asarray(self.ydata, dtype=float)
         self.xdata = np.asarray(self.xdata, dtype=float)
         if self.xdata.ndim == 1:
@@ -110,7 +125,12 @@ class Objective:
         return self.xdata[np.argmax(self.standard_y)]
 
     def add_points(self, actions: np.ndarray, values: np.ndarray):
-        self.xdata = np.vstack([self.xdata, np.atleast_2d(actions)])
+        actions = np.atleast_2d(actions)
+        if len(self.xdata) == 0:
+            # an empty objective has no action dimension until its first points
+            self.xdata = np.empty((0, actions.shape[1]))
+
+        self.xdata = np.vstack([self.xdata, actions])
         self.ydata = np.hstack([self.ydata, values])
         self.__post_init__()
         
@@ -120,6 +140,20 @@ class Objective:
             return mu
         std = self.ytransform.inv_scale(std)
         return mu, std
+    
+    @classmethod
+    def from_empty(cls, name, maximize):
+        return cls(
+            name        = name,
+            maximize    = maximize,
+            xdata       = np.array([]),
+            ydata       = np.array([]),
+            column      = None
+        )
+        
+    @classmethod
+    def from_bounds(cls, name, low, high, maximize):
+        raise NotImplementedError()
 
     @classmethod
     def from_df(cls, df, column, action_columns, maximize, name=None):
@@ -313,6 +347,10 @@ class DecoupledObjectives:
     @classmethod
     def from_empty(cls):
         return cls(objectives=[])
+    
+    @classmethod
+    def from_bounds(cls):
+        raise NotImplementedError()
 
     def add_objective(self, objective: Objective):
         """Adds an entire objective 'axis'"""

@@ -27,6 +27,48 @@ Newest entries go at the top.
 
 ---
 
+### Rewrite the throwaway scripts behind HANDOFF.md §3–§4
+
+- **Time:** 2026-08-13 16:35 EDT
+- **Priority:** 1
+- **File:** new script(s) under `hilo/`; the numbers they back are `HANDOFF.md` §3.2–§3.5,
+  §4.1–§4.5
+- **Why:** Every noise sweep, cross-subject LOO table and regret comparison in the handoff
+  was produced by scripts in a session scratchpad that no longer exists, so the numbers can
+  be read but not reproduced, extended to a new subject, or re-run after a change to
+  `gp.py`. The two worth promoting are the cross-subject LOO sweep (§3.4) and the bootstrap
+  stability check (§4.5, its own reminder below). Until they exist, a decision that cites
+  those tables cannot be re-checked.
+
+### Regret-minimization script: bootstrap stability of `best_actions()`
+
+- **Time:** 2026-08-13 16:35 EDT
+- **Priority:** 1
+- **File:** a new `hilo/regret_minimization.py` (not a mode inside `hilo/gp_accuracy.py`);
+  uses `DecoupledMOGP.best_actions` in `src/pypolar/optimization/gp.py`
+- **Why:** Resample a subject's measurements with replacement, refit, re-run
+  `best_actions()`, and report how far the recommendation moves as a fraction of the box
+  diagonal. It needs no groundtruth and measures the quantity we actually care about, so it
+  is a better gate than LOO R² for optimization work — §4.1 shows R² and regret can rank
+  hyperparameters in opposite orders. Measured once at 20–37% of the box across all three
+  subjects and every setting (§4.5), which is the strongest evidence we have that the
+  design is underpowered; it currently exists nowhere in the repo.
+
+### Compare acquisition functions at human-scale noise
+
+- **Time:** 2026-08-13 16:35 EDT
+- **Priority:** 1
+- **File:** `hilo/regret_minimization.py`; the package has no acquisition module — the only
+  acquisition is `PosteriorMean` inside `best_actions` (`src/pypolar/optimization/gp.py`)
+- **Why:** Run a few acquisitions (plain EI, `qLogNoisyExpectedImprovement`, UCB) across
+  many seeds and several synthetic functions, at an observation noise of **0.3–0.7 of the
+  objective's spread** — the range the human data actually shows (freely fitted 0.39–0.45,
+  replicates ~0.46, `HANDOFF.md` §3.2–§3.3). Noise that high is the regime plain EI is worst
+  in, since its `best_f` is itself a noisy draw, so an acquisition ranked at the usual
+  textbook noise levels says nothing about this problem. Many seeds because §4.2 found the
+  ranking flips by test function and no setting won significantly at 12–24 seeds. Pairs
+  with the oracle reminder below, which supplies a groundtruth with the right geometry.
+
 ### Oracle backed by the GP fitted to the human data
 
 - **Time:** 2026-08-11 11:29 EDT
@@ -114,3 +156,7 @@ Newest entries go at the top.
 ### Create a multi objective version with mo acq f
 
 ### Implement a decoupled version of mo acq f and test
+
+### Ensure DecoupledObjectives matches the capabilities afforded by Objectives but in the MO sense
+
+### Figure out why prior 1.0 Fitted noise results in lower noise than asserting a lower bound
