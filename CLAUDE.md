@@ -72,7 +72,7 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-330 tests: public API surface (34), dangling references (6), objectives (131),
+368 tests: public API surface (34), dangling references (6), objectives (169),
 `BoTorchGP` (100), `DecoupledMOGP` (47), `loo` (12).
 
 ## How to run experiments
@@ -142,16 +142,19 @@ where an iid design leaves clumps and gaps at the sample sizes these experiments
 run at.
 
 **`AffineTransform(scale, shift)`** — `x -> (x + shift) * scale`, with `inv()`.
-Three constructors: `make_standardized(data, sign=1.0)` (zero mean, unit
+Four constructors: `make_standardized(data, sign=1.0)` (zero mean, unit
 variance, times `sign`), `make_centered` (zero mean), `make_normalized` (mapped
-onto `[0, 1]`). Each guards against zero-variance/zero-range data by leaving it
+onto `[0, 1]`), and `make_normalized_from_bounds(low, high)` (the same `[0, 1]`
+map, from a declared range rather than from the data). Each guards against
+zero-variance/zero-range data by leaving it
 unscaled. `inv_scale()` is the inverse for a *spread*: it undoes the scaling but
 not the shift, since a shift does not move a standard deviation and a sign flip
 cannot make one negative. Means go back through `inv()`, standard deviations
 through `inv_scale()`.
 
-**`Objective(name, maximize, ydata, xdata, column=None)`** — one measured
-objective: `ydata` is `(N,)`, `xdata` is `(N, K)`. On construction it builds
+**`Objective(name, maximize, ydata, xdata, column=None, action_bounds=None)`** —
+one measured objective: `ydata` is `(N,)`, `xdata` is `(N, K)`. On construction
+it builds
 
 ```
 ytransform = AffineTransform.make_standardized(ydata, sign=sign)
@@ -171,9 +174,42 @@ direction**. Two things downstream depend on this:
    or a hypervolume reference point meaningful; centering alone would let the
    widest objective dominate any volume computed in objective space.
 
-Built with `from_df(df, column, action_columns, maximize, name)` or
-`from_data(actions, values, maximize, name)`. `add_points()` appends and re-runs
-`__post_init__`, so the transform tracks the new mean.
+Built with `from_df(df, column, action_columns, maximize, name)`,
+`from_data(actions, values, maximize, name)`, or `from_empty(name, maximize,
+action_bounds=None)` for an objective declared before its first measurement.
+`add_points()` appends and re-runs `__post_init__`, so the transform tracks the
+new mean.
+
+**`action_bounds`** pins the action frame. Without it, `xtransform` is
+`make_normalized(xdata, axis=0)` — the bounding box of the points measured *so
+far*, which moves every time a point is added. With it, the frame is
+`make_normalized_from_bounds(low, high)` and holds still. `low` and `high` are
+in raw action units, scalar or one per action dimension.
+
+This matters because the x frame is the one the GP's hyperparameters are stated
+in. `LENGTH_SCALE = 0.2` means "20% of the box", `min_length_scale = 0.3` floors
+a physical distance only if the box does not move, and a lengthscale fitted at
+step 10 is comparable to one fitted at step 20 only under the same
+normalization. A sequential run on a data-derived frame silently changes what
+every one of those numbers means.
+
+There is deliberately **no equivalent for the values**, because the y frame is
+inert. `Standardize(m=1)` subtracts `train_Y`'s own mean and divides by its own
+sample standard deviation before the fit, and the pinned-noise path
+pre-multiplies by `spread = train_Y.std()`, so any positive affine rescaling of
+`standard_y` cancels out exactly. Measured on 15 points: standardizing,
+normalizing and centering the same values gave identical lengthscales
+(0.180903), identical `noise_var` (0.081210) and posterior means agreeing to
+6e-14. Pinning the y frame would change what `standard_y` reads as and nothing a
+model does.
+
+**Actions must lie in the declared box.** `__post_init__` raises `ValueError`
+for any action outside `action_bounds`, which covers both construction and every
+subsequent `add_points`, and `add_points` rolls its append back before
+re-raising so a refused point is not left in the record. The check allows
+`BOUNDS_SLACK = 1e-9` of the box span, because an action that `optimize_acqf`
+puts *on* a boundary comes back a float epsilon outside it; a real overrun is
+orders of magnitude larger than that and still raises.
 
 `from_synthetic(function, actions, maximize, rel_noise_std, seed, name)` builds
 one from a BoTorch `SyntheticTestFunction` **subclass** (not an instance),
@@ -203,12 +239,18 @@ formula, so the values are identical whichever bounds are used.
 Nothing requires them to share a design. What they do share is one action frame:
 
 ```
-xtransform = AffineTransform.make_normalized(concat(all xdata), axis=0)
+boxes      = [o.action_box() for o in objectives]   # bounds if pinned, else data range
+xtransform = AffineTransform.make_normalized_from_bounds(min of lows, max of highs)
 ```
 
-a single per-dimension normalization spanning every objective's actions, so
-actions from different objectives land in the same `[0, 1]^d` box and one set of
-GP lengthscales is meaningful across all of them.
+a single per-dimension normalization spanning every objective's box, so actions
+from different objectives land in the same `[0, 1]^d` box and one set of GP
+lengthscales is meaningful across all of them. `Objective.action_box()` returns
+that objective's `action_bounds` when they pin it and its measured range
+otherwise, so a collection of declared objectives gets a frame that holds still
+for the same reason a single one does. The union is taken with
+`reduce(np.minimum, ...)` so a scalar bound broadcasts against a per-dimension
+one.
 
 Selectors (`objs`) accept a name, an index, a list of either, a slice, or `None`
 for all. `__getitem__` returns a bare `Objective` for a single selector and a new

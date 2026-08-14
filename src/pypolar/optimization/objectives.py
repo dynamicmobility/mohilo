@@ -2,12 +2,15 @@
 rescalings applied before they reach a GP."""
 
 from dataclasses import dataclass
+from functools import reduce
 
 import numpy as np
 import torch
 
 from botorch.test_functions import SyntheticTestFunction
 from botorch.utils.sampling import draw_sobol_samples
+
+BOUNDS_SLACK = 1e-9   # float round-off allowed outside a declared action box
 
 def sample_actions(bounds, n, kind, seed):
     """n actions over the box: Sobol is space-filling, uniform is iid."""
@@ -74,15 +77,17 @@ class AffineTransform:
         
     @classmethod
     def make_normalized_from_bounds(cls, low, high):
-        raise NotImplementedError()
-    
-    @classmethod
-    def make_centered_from_bounds(cls, low, high):
-        raise NotImplementedError()
-    
-    @classmethod
-    def make_standardized_from_bounds(cls, low, high):
-        raise NotImplementedError()
+        """[low, high] onto [0, 1]. The same map as make_normalized, from a
+        declared range rather than from whatever happens to be measured."""
+        low, high = np.asarray(low, dtype=float), np.asarray(high, dtype=float)
+        span = high - low
+        if np.any(span == 0):
+            print('WARNING in AffineTransform.make_normalized_from_bounds: bounds have zero range')
+
+        return cls(
+            scale = 1 / (span + (span == 0)),   # zero-range bounds are left unscaled
+            shift = -low
+        )
 
 
 @dataclass
@@ -92,28 +97,55 @@ class Objective:
     ydata:    np.ndarray        # (N,)
     xdata:    np.ndarray        # (N, K), where K is the action dimension
     column:   str | None = None # source dataframe column, when read from one
+    action_bounds: tuple | None = None      # (low, high) actions, pins xtransform
 
     def __post_init__(self):
-        if len(self.xdata) == 0:
-            return None
-        
         self.ydata = np.asarray(self.ydata, dtype=float)
         self.xdata = np.asarray(self.xdata, dtype=float)
-        if self.xdata.ndim == 1:
+        if self.xdata.ndim == 1 and self.xdata.size:
             self.xdata = self.xdata[:, None]
 
-        self.xtransform = AffineTransform.make_normalized(
-            data = self.xdata,
-            axis = 0
-        )
-        self.normalized_x = self.xtransform(self.xdata)
-        
-        self.ytransform = AffineTransform.make_standardized(
-            data    = self.ydata,
-            sign    = 1.0 if self.maximize else -1.0
-        )
-        self.standard_y = self.ytransform(self.ydata)
-        
+        # declared bounds pin the [0, 1]^K frame so it does not move as points
+        # arrive; without them it is the measured actions' own box
+        if self.action_bounds is not None:
+            self._check_inside_bounds()
+            self.xtransform = AffineTransform.make_normalized_from_bounds(*self.action_bounds)
+        elif self.xdata.size:
+            self.xtransform = AffineTransform.make_normalized(data=self.xdata, axis=0)
+
+        if self.xdata.size:
+            self.normalized_x = self.xtransform(self.xdata)
+
+        if self.ydata.size:
+            self.ytransform = AffineTransform.make_standardized(
+                data = self.ydata,
+                sign = self.sign
+            )
+            self.standard_y = self.ytransform(self.ydata)
+
+    def _check_inside_bounds(self):
+        """Actions must lie in the declared box. The slack is float round-off:
+        an action optimized onto a boundary comes back a hair outside it."""
+        if not self.xdata.size:
+            return
+
+        low, high = (np.asarray(b, dtype=float) for b in self.action_bounds)
+        slack   = BOUNDS_SLACK * (high - low)
+        outside = (self.xdata < low - slack) | (self.xdata > high + slack)
+        if np.any(outside):
+            raise ValueError(f'{self.name}: actions '
+                             f'{np.unique(np.nonzero(outside)[0]).tolist()} lie outside '
+                             f'action_bounds {self.action_bounds}')
+
+    def action_box(self):
+        """(low, high) over this objective's actions: action_bounds when they
+        pin it, the measured actions' own range otherwise, None when empty."""
+        if self.action_bounds is not None:
+            return self.action_bounds
+        if self.xdata.size:
+            return self.xdata.min(axis=0), self.xdata.max(axis=0)
+
+        return None
 
     @property
     def sign(self):
@@ -130,9 +162,15 @@ class Objective:
             # an empty objective has no action dimension until its first points
             self.xdata = np.empty((0, actions.shape[1]))
 
+        previous = self.xdata, self.ydata
         self.xdata = np.vstack([self.xdata, actions])
         self.ydata = np.hstack([self.ydata, values])
-        self.__post_init__()
+        try:
+            self.__post_init__()
+        except ValueError:
+            # a rejected point must not be left in the record
+            self.xdata, self.ydata = previous
+            raise
         
     def to_raw(self, mu, std=None):
         mu = self.ytransform.inv(mu)
@@ -142,18 +180,22 @@ class Objective:
         return mu, std
     
     @classmethod
-    def from_empty(cls, name, maximize):
+    def from_empty(cls, name, maximize, action_bounds=None):
+        """An objective declared before any measurement.
+
+        Args:
+            action_bounds: (low, high) actions, in raw units, scalar or one per
+                action dimension. Pins the [0, 1]^K frame so it does not move as
+                points arrive, and measurements outside the box are rejected.
+        """
         return cls(
-            name        = name,
-            maximize    = maximize,
-            xdata       = np.array([]),
-            ydata       = np.array([]),
-            column      = None
+            name          = name,
+            maximize      = maximize,
+            xdata         = np.array([]),
+            ydata         = np.array([]),
+            column        = None,
+            action_bounds = action_bounds
         )
-        
-    @classmethod
-    def from_bounds(cls, name, low, high, maximize):
-        raise NotImplementedError()
 
     @classmethod
     def from_df(cls, df, column, action_columns, maximize, name=None):
@@ -234,14 +276,20 @@ class DecoupledObjectives:
     objectives: list[Objective]
 
     def __post_init__(self):
-        # one frame spanning every objective's actions, so actions taken from
-        # different objectives are normalized into the same box
-        if not self.objectives:
+        # one frame spanning every objective's box -- its action_bounds where
+        # they are pinned and its measured actions otherwise -- so actions taken
+        # from different objectives are normalized into the same box
+        boxes = [box for box in (o.action_box() for o in self.objectives)
+                 if box is not None]
+        if not boxes:
             self.xtransform = None
             return
 
-        self.xtransform = AffineTransform.make_normalized(
-            data=np.concatenate([o.xdata for o in self.objectives]), axis=0
+        # reduce rather than np.min(axis=0), so a scalar bound broadcasts
+        # against a per-dimension one
+        self.xtransform = AffineTransform.make_normalized_from_bounds(
+            low  = reduce(np.minimum, [box[0] for box in boxes]),
+            high = reduce(np.maximum, [box[1] for box in boxes])
         )
 
     @property
@@ -347,10 +395,6 @@ class DecoupledObjectives:
     @classmethod
     def from_empty(cls):
         return cls(objectives=[])
-    
-    @classmethod
-    def from_bounds(cls):
-        raise NotImplementedError()
 
     def add_objective(self, objective: Objective):
         """Adds an entire objective 'axis'"""

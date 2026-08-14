@@ -160,3 +160,5 @@ Newest entries go at the top.
 ### Ensure DecoupledObjectives matches the capabilities afforded by Objectives but in the MO sense
 
 ### Figure out why prior 1.0 Fitted noise results in lower noise than asserting a lower bound
+
+### Look into small n std calculation. if there are only a few datapoints the standaradization is bad

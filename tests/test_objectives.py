@@ -278,6 +278,41 @@ class TestMakeNormalized:
         assert t(np.full(4, 7.0)) == pytest.approx(np.zeros(4))
 
 
+class TestMakeNormalizedFromBounds:
+    """The same [0, 1] map, but from a declared range rather than from the data
+    that happens to have been measured."""
+
+    def test_the_bounds_map_onto_zero_and_one(self):
+        t = AffineTransform.make_normalized_from_bounds(2.0, 10.0)
+        assert t(2.0) == pytest.approx(0.0)
+        assert t(10.0) == pytest.approx(1.0)
+
+    def test_it_matches_make_normalized_on_the_data_s_own_range(self, y):
+        # the two constructors agree when the bounds are the data's range, so
+        # inferring the bounds from the data changes nothing
+        t = AffineTransform.make_normalized_from_bounds(y.min(), y.max())
+        assert t(y) == pytest.approx(AffineTransform.make_normalized(y)(y))
+
+    def test_per_dimension_bounds(self, x):
+        t = AffineTransform.make_normalized_from_bounds(x.min(axis=0), x.max(axis=0))
+        assert t(x).min(axis=0) == pytest.approx(np.zeros(x.shape[1]))
+        assert t(x).max(axis=0) == pytest.approx(np.ones(x.shape[1]))
+
+    def test_inverse_recovers_the_raw_data(self, y):
+        t = AffineTransform.make_normalized_from_bounds(0.0, 20.0)
+        assert t.inv(t(y)) == pytest.approx(y)
+
+    def test_data_outside_the_bounds_is_not_clipped(self):
+        # the transform is a frame, not a gate; Objective is what rejects an
+        # action outside its declared box
+        t = AffineTransform.make_normalized_from_bounds(2.0, 10.0)
+        assert t(14.0) == pytest.approx(1.5)
+
+    def test_zero_range_bounds_map_to_zero(self):
+        t = AffineTransform.make_normalized_from_bounds(7.0, 7.0)
+        assert t(7.0) == pytest.approx(0.0)
+
+
 # ---- Objective -------------------------------------------------------------
 
 class TestObjectiveConstruction:
@@ -481,6 +516,125 @@ class TestObjectiveFromEmpty:
         obj = Objective.from_empty('cost', maximize=False)
         obj.add_points(x, y)
         assert obj.best_action() == pytest.approx(x[y.argmin()])
+
+
+class TestObjectiveActionBounds:
+    """Declared action bounds pin the [0, 1]^K frame, so it does not move as
+    measurements arrive -- which is what makes a lengthscale, or a floor under
+    one, mean the same thing at every step of a sequential run."""
+
+    def test_the_frame_exists_before_any_measurement(self):
+        obj = Objective.from_empty('cost', maximize=False,
+                                   action_bounds=(-5.0, 5.0))
+        assert obj.xtransform(np.array([-5.0, 0.0, 5.0])) == pytest.approx([0.0, 0.5, 1.0])
+
+    def test_the_frame_does_not_move_as_points_arrive(self):
+        # without bounds the first point would sit at 0 and be pushed to 1 by
+        # the second, so a model fit after each step would see a different box
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0))
+        obj.add_points(np.array([[2.0]]), np.array([1.0]))
+        assert obj.normalized_x == pytest.approx(np.array([[0.2]]))
+
+        obj.add_points(np.array([[8.0]]), np.array([3.0]))
+        assert obj.normalized_x == pytest.approx(np.array([[0.2], [0.8]]))
+
+    def test_without_bounds_the_frame_follows_the_data(self, x):
+        # the control for the test above: this is the default behaviour
+        obj = Objective.from_empty('cost', maximize=False)
+        obj.add_points(x[:2], np.array([1.0, 3.0]))
+        assert obj.normalized_x[0] == pytest.approx(np.zeros(3))
+
+    def test_bounds_may_be_given_per_dimension(self, x, y):
+        obj = Objective('cost', False, y.copy(), x.copy(),
+                        action_bounds=(np.zeros(3), np.array([8.0, 16.0, 1.0])))
+        # every column reaches half of its own declared range
+        assert obj.normalized_x.max(axis=0) == pytest.approx([0.5, 0.5, 0.5])
+
+    def test_the_inverse_still_recovers_raw_actions(self, x, y):
+        obj = Objective('cost', False, y.copy(), x.copy(),
+                        action_bounds=(np.zeros(3), np.array([8.0, 16.0, 1.0])))
+        assert obj.xtransform.inv(obj.normalized_x) == pytest.approx(x)
+
+    def test_action_box_reports_the_bounds_when_pinned(self, x, y):
+        pinned = Objective('cost', False, y.copy(), x.copy(),
+                           action_bounds=(0.0, 20.0))
+        assert pinned.action_box() == (0.0, 20.0)
+
+    def test_action_box_falls_back_to_the_measured_range(self, objective, x):
+        low, high = objective.action_box()
+        assert low == pytest.approx(x.min(axis=0))
+        assert high == pytest.approx(x.max(axis=0))
+
+    def test_an_empty_objective_without_bounds_has_no_box(self):
+        assert Objective.from_empty('cost', maximize=False).action_box() is None
+
+
+class TestObjectiveActionsMustLieInTheBox:
+    """Declaring bounds is a claim about where the experiment lives, so an
+    action outside them is a bug -- a wrong unit, a swapped pair, a design from
+    another run -- rather than a point to normalize past 1."""
+
+    def test_an_action_outside_the_box_is_rejected_on_construction(self, x, y):
+        with pytest.raises(ValueError):
+            Objective('cost', False, y, x, action_bounds=(0.0, 1.0))
+
+    def test_an_action_outside_the_box_is_rejected_on_add_points(self):
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0))
+        with pytest.raises(ValueError):
+            obj.add_points(np.array([[15.0]]), np.array([1.0]))
+
+    def test_below_the_box_is_rejected_too(self):
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0))
+        with pytest.raises(ValueError):
+            obj.add_points(np.array([[-0.5]]), np.array([1.0]))
+
+    def test_one_bad_dimension_is_enough(self, x, y):
+        # the third column runs to 0.5 and is declared to stop at 0.2
+        with pytest.raises(ValueError):
+            Objective('cost', False, y, x,
+                      action_bounds=(np.zeros(3), np.array([8.0, 16.0, 0.2])))
+
+    def test_the_error_names_the_offending_measurements(self, x, y):
+        with pytest.raises(ValueError, match=r'\[3, 4\]'):
+            Objective('cost', False, y, x,
+                      action_bounds=(np.zeros(3), np.array([8.0, 16.0, 0.35])))
+
+    def test_the_boundary_itself_is_accepted(self):
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0))
+        obj.add_points(np.array([[0.0], [10.0]]), np.array([1.0, 3.0]))
+        assert obj.normalized_x == pytest.approx(np.array([[0.0], [1.0]]))
+
+    def test_float_round_off_outside_the_boundary_is_accepted(self):
+        # an action optimized onto the boundary comes back a hair outside it,
+        # and losing a measurement to the last bit of a double is not a bug
+        # worth reporting
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(-5.0, 5.0))
+        obj.add_points(np.array([[np.nextafter(5.0, np.inf)]]), np.array([1.0]))
+        assert obj.normalized_x == pytest.approx(np.array([[1.0]]))
+
+    def test_the_slack_does_not_cover_a_real_overrun(self):
+        # the tolerance is 1e-9 of the span, so a millimetre past a 10-unit box
+        # still raises
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(-5.0, 5.0))
+        with pytest.raises(ValueError):
+            obj.add_points(np.array([[5.001]]), np.array([1.0]))
+
+    def test_a_rejected_point_is_not_left_in_the_record(self):
+        # add_points appends before __post_init__ validates, so the append has
+        # to be undone -- a caller that catches the error must not be handed a
+        # objective holding the point it just refused
+        obj = Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0))
+        obj.add_points(np.array([[2.0]]), np.array([1.0]))
+        with pytest.raises(ValueError):
+            obj.add_points(np.array([[15.0]]), np.array([3.0]))
+
+        assert obj.xdata == pytest.approx(np.array([[2.0]]))
+        assert obj.ydata == pytest.approx([1.0])
+        assert obj.normalized_x == pytest.approx(np.array([[0.2]]))
+
+    def test_unbounded_objectives_accept_anything(self, x, y):
+        # the check exists only where a box was declared
+        Objective('cost', False, y, x * 1e6)
 
 
 class TestObjectiveFromDataFrame:
@@ -804,6 +958,53 @@ class TestDecoupledObjectivesGrowth:
         # the new action sits outside the old box, so the frame has to grow
         pair.add_point('cost', np.array([8.0, 16.0, 0.9]), np.array([12.0]))
         assert pair.actions('comfort').max(axis=0) == pytest.approx([0.5, 0.5, 0.5])
+
+
+class TestDecoupledObjectivesSharedFrame:
+    """The shared frame spans every objective's box: its action_bounds where
+    they are pinned and its measured actions where they are not."""
+
+    def test_a_pinned_objective_sets_the_frame_for_all_of_them(self, x, y):
+        # 'cost' declares twice the range it has measured, and 'comfort', which
+        # declares nothing, is normalized into that same wider box
+        objs = DecoupledObjectives([
+            Objective('cost', False, y.copy(), x.copy(),
+                      action_bounds=(np.zeros(3), np.array([8.0, 16.0, 1.0]))),
+            Objective('comfort', True, y.copy(), x.copy()),
+        ])
+        assert objs.actions('comfort').max(axis=0) == pytest.approx([0.5, 0.5, 0.5])
+
+    def test_the_frame_is_the_union_not_the_last_word(self, x, y):
+        # 'cost' declares a box narrower than 'comfort' has measured, and keeps
+        # inside it; the shared frame still has to contain everything either
+        # objective can produce
+        objs = DecoupledObjectives([
+            Objective('cost', False, y.copy(), x.copy() / 10, action_bounds=(0.0, 1.0)),
+            Objective('comfort', True, y.copy(), x.copy()),
+        ])
+        # low is min(0, x.min) and high is max(1, x.max), per dimension
+        assert objs.actions('comfort').min(axis=0) == pytest.approx([0.0, 0.0, 0.1])
+        assert objs.actions('comfort').max(axis=0) == pytest.approx([1.0, 1.0, 0.5])
+
+    def test_a_pinned_frame_does_not_move_as_points_arrive(self, x, y):
+        objs = DecoupledObjectives([
+            Objective.from_empty('cost', maximize=False, action_bounds=(0.0, 10.0)),
+        ])
+        objs.add_point('cost', np.array([2.0]), np.array([1.0]))
+        assert objs.actions('cost') == pytest.approx(np.array([[0.2]]))
+
+        objs.add_point('cost', np.array([8.0]), np.array([3.0]))
+        assert objs.actions('cost') == pytest.approx(np.array([[0.2], [0.8]]))
+
+    def test_objectives_with_neither_bounds_nor_data_have_no_frame(self):
+        objs = DecoupledObjectives([Objective.from_empty('cost', maximize=False)])
+        assert objs.xtransform is None
+
+    def test_it_matches_the_data_derived_frame_when_nothing_is_pinned(self, ragged, x):
+        # the union of the measured ranges is the box make_normalized would have
+        # built over the concatenated actions
+        assert ragged.actions('cost').min(axis=0) == pytest.approx(np.zeros(3))
+        assert ragged.actions('cost').max(axis=0) == pytest.approx(np.ones(3))
 
 
 class TestDecoupledObjectivesAreDecoupled:
