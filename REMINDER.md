@@ -162,3 +162,7 @@ Newest entries go at the top.
 ### Figure out why prior 1.0 Fitted noise results in lower noise than asserting a lower bound
 
 ### Look into small n std calculation. if there are only a few datapoints the standaradization is bad
+
+### Move objective.py to feedback/ and move truth_at as well?
+
+### Make random acquisition function compatible

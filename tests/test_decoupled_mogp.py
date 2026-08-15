@@ -11,6 +11,7 @@ from dataclasses import fields
 
 import numpy as np
 import pytest
+import torch
 
 from pypolar.optimization.gp import (
     LENGTH_SCALE,
@@ -223,6 +224,88 @@ class TestPosteriorAtRawUnits:
         got = mogp.posterior_at(_grid(4), raw=True)
         np.testing.assert_allclose(got[0], by_hand[0])
         np.testing.assert_allclose(got[1], by_hand[1])
+
+
+# ---- sample_paths ----------------------------------------------------------
+
+class TestSamplePaths:
+    """Draws from the *joint* posterior, where `posterior_at` reports only the
+    marginals. Joint over the actions, but still independent across objectives,
+    since that independence is what 'decoupled' claims.
+
+    Every test seeds torch first, since the draws come from its global generator.
+    """
+
+    def test_shape_is_q_by_n_by_m(self, mogp, objectives):
+        paths = mogp.sample_paths(_grid(3), num_paths=5)
+        assert paths.shape == (5, 9, len(objectives))
+
+    def test_a_single_action_is_promoted_to_one_row(self, mogp, objectives):
+        paths = mogp.sample_paths(np.array([5.0, 0.0]), num_paths=4)
+        assert paths.shape == (4, 1, len(objectives))
+
+    def test_marginals_match_posterior_at(self, mogp):
+        """Averaged over enough draws, the paths reproduce the mean and standard
+        deviation `posterior_at` reports, for every objective."""
+        X = _grid(3)
+        torch.manual_seed(0)
+        paths   = mogp.sample_paths(X, num_paths=4000)
+        mu, std = mogp.posterior_at(X)
+        np.testing.assert_allclose(paths.mean(axis=0), mu, atol=0.05)
+        np.testing.assert_allclose(paths.std(axis=0), std, rtol=0.1)
+
+    def test_draws_are_joint_over_actions(self, mogp):
+        """Two actions a hair apart are effectively the same point of the
+        function, so their values must move together across draws."""
+        X = np.array([[5.0, 0.0], [5.0 + 1e-3, 0.0]])
+        torch.manual_seed(0)
+        paths = mogp.sample_paths(X, num_paths=200)
+        for i in range(paths.shape[2]):
+            assert np.corrcoef(paths[:, 0, i], paths[:, 1, i])[0, 1] > 0.99
+
+    def test_draws_are_independent_across_objectives(self, mogp):
+        """The objectives are decoupled, so there is no cross-objective
+        covariance for a draw to carry."""
+        torch.manual_seed(0)
+        paths = mogp.sample_paths(np.array([[5.0, 0.0]]), num_paths=2000)[:, 0, :]
+        assert abs(np.corrcoef(paths[:, 0], paths[:, 1])[0, 1]) < 0.1
+
+    def test_normalized_flag_selects_the_action_frame(self, mogp, objectives):
+        """Passing raw actions equals passing them pre-normalized by hand."""
+        raw = np.array([[1.0, 0.0], [5.0, 1.5]])
+        torch.manual_seed(0)
+        from_raw = mogp.sample_paths(raw, num_paths=3)
+        torch.manual_seed(0)
+        from_norm = mogp.sample_paths(objectives.xtransform(raw), num_paths=3,
+                                      normalized=True)
+        np.testing.assert_allclose(from_raw, from_norm)
+
+    def test_raw_units_match_converting_by_hand(self, mogp, objectives):
+        torch.manual_seed(0)
+        standard = mogp.sample_paths(_grid(3), num_paths=3)
+        torch.manual_seed(0)
+        got = mogp.sample_paths(_grid(3), num_paths=3, raw=True)
+        np.testing.assert_allclose(got, objectives.to_raw(standard))
+
+    def test_raw_restores_the_sign_of_the_minimized_objective(self, mogp):
+        """'cost' reads larger-is-better at VALLEY in maximization space, and
+        lower-is-better there in its own units. 'reward' is unchanged."""
+        X = np.vstack([PEAK, VALLEY])
+        torch.manual_seed(0)
+        standard = mogp.sample_paths(X, num_paths=400).mean(axis=0)
+        torch.manual_seed(0)
+        raw = mogp.sample_paths(X, num_paths=400, raw=True).mean(axis=0)
+        assert standard[1, 1] > standard[0, 1]
+        assert raw[1, 1] < raw[0, 1]
+        assert raw[0, 0] > raw[1, 0]
+
+    def test_a_near_noiseless_mogp_pins_its_paths_to_the_data(
+            self, interpolating_mogp, actions):
+        """With negligible noise every draw passes through the measurements, so
+        the paths have almost no spread there."""
+        torch.manual_seed(0)
+        paths = interpolating_mogp.sample_paths(actions, num_paths=50)
+        assert paths.std(axis=0).max() < 0.02
 
 
 # ---- best_actions ----------------------------------------------------------

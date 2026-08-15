@@ -14,6 +14,7 @@ BOUNDS_SLACK = 1e-9   # float round-off allowed outside a declared action box
 
 def sample_actions(bounds, n, kind, seed):
     """n actions over the box: Sobol is space-filling, uniform is iid."""
+    bounds = torch.as_tensor(bounds, dtype=torch.float64)
     if kind == 'sobol':
         return draw_sobol_samples(bounds=bounds, n=n, q=1, seed=seed).squeeze(1).numpy()
 

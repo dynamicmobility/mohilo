@@ -130,9 +130,12 @@ class TestSampleActions:
             sample_actions(bounds, 6, kind, 1)
 
     @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
-    def test_bounds_must_be_a_torch_tensor(self, bounds, kind):
-        with pytest.raises((AttributeError, TypeError)):
-            sample_actions(bounds.numpy(), 4, kind, 0)
+    def test_bounds_may_be_any_array_like(self, bounds, kind):
+        # coerced to a float64 tensor, so a list and a numpy array give the
+        # same design as the tensor
+        expected = sample_actions(bounds, 4, kind, 0)
+        assert sample_actions(bounds.numpy(), 4, kind, 0) == pytest.approx(expected)
+        assert sample_actions(bounds.tolist(), 4, kind, 0) == pytest.approx(expected)
 
 
 # ---- AffineTransform -------------------------------------------------------

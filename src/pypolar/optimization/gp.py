@@ -303,6 +303,44 @@ class BoTorchGP:
         mu, std = mu.numpy(), var.sqrt().numpy()
         return self.objective.to_raw(mu, std) if raw else (mu, std)
 
+    def sample_paths(self, action, num_paths, normalized=False, raw=False):
+        """Sample paths of the posterior over arbitrary actions.
+
+        Drawn from the *joint* posterior over the whole set of actions, which is
+        what makes each draw a function: sampling every action from its own
+        marginal independently would discard the covariance between them and
+        return white noise. That is also why this cannot chunk the way
+        `posterior_at` does -- the n x n test-test block it avoids forming is
+        the very object a joint draw needs.
+
+        The draws come from torch's global generator, so seeding that is what
+        makes them repeatable.
+
+        Args:
+            action: a single (d,) action or an (n, d) array of them.
+            num_paths: paths drawn. Not botorch's `q`, which here is n: the
+                actions are one q-batch, and this is how often it is sampled.
+            normalized: True if `action` is already in the [0, 1]^d frame.
+            raw: report in the objective's own units instead of maximization
+                space. This undoes the sign too.
+
+        Returns:
+            (num_paths, n, m) draws, in maximization space: larger-is-better and
+            standardized, matching `objective.standard_y`. With `raw=True`, in
+            the units the measurements were taken in.
+        """
+        X = np.atleast_2d(np.asarray(action, dtype=float))
+        if not normalized:
+            X = self.objective.xtransform(X)
+
+        # fed as one batch element rather than n of them, the opposite of
+        # `posterior_at`, so the test-test covariance is formed and sampled
+        X = torch.as_tensor(X, dtype=DTYPE)
+        with torch.no_grad():
+            paths = self.model.posterior(X).rsample(torch.Size([num_paths])).numpy()
+
+        return self.objective.to_raw(paths) if raw else paths
+
     def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
                      raw=False):
         """The action maximizing each objective's posterior mean.
@@ -433,6 +471,48 @@ class DecoupledMOGP:
 
         mu, std = mu.numpy(), var.sqrt().numpy()
         return self.objectives.to_raw(mu, std) if raw else (mu, std)
+
+    def sample_paths(self, action, num_paths, normalized=False, raw=False):
+        """Sample paths of the posterior over arbitrary actions.
+
+        Drawn from the *joint* posterior over the whole set of actions, which is
+        what makes each draw a function: sampling every action from its own
+        marginal independently would discard the covariance between them and
+        return white noise. That is also why this cannot chunk the way
+        `posterior_at` does -- the n x n test-test block it avoids forming is
+        the very object a joint draw needs.
+
+        The objectives are decoupled, so a draw is joint over the actions but
+        independent across the objectives: column j of every path comes from
+        objective j's own GP and carries no covariance with column k.
+
+        The draws come from torch's global generator, so seeding that is what
+        makes them repeatable.
+
+        Args:
+            action: a single (d,) action or an (n, d) array of them.
+            num_paths: paths drawn. Not botorch's `q`, which here is n: the
+                actions are one q-batch, and this is how often it is sampled.
+            normalized: True if `action` is already in the shared [0, 1]^d frame.
+            raw: report in each objective's own units instead of maximization
+                space. This undoes the sign too.
+
+        Returns:
+            (num_paths, n, m) draws, in maximization space: larger-is-better and
+            standardized, matching `objectives.feedback()`. With `raw=True`, in
+            the units the measurements were taken in.
+        """
+        X = np.atleast_2d(np.asarray(action, dtype=float))
+        if not normalized:
+            X = self.objectives.xtransform(X)
+
+        # fed as one batch element rather than n of them, the opposite of
+        # `posterior_at`, so the test-test covariance is formed and sampled
+        X = torch.as_tensor(X, dtype=DTYPE)
+        with torch.no_grad():
+            paths = self.model.posterior(X).rsample(torch.Size([num_paths])).numpy()
+
+        return self.objectives.to_raw(paths) if raw else paths
 
     def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
                      raw=False):

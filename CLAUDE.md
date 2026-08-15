@@ -28,15 +28,19 @@ pyPolar/
 │   │   └── gp.py                   # build_botorch_gp, GPHyperparameters, BoTorchGP, DecoupledMOGP
 │   ├── feedback/
 │   │   ├── rewards.py              # InternalReward hierarchy (groundtruth objectives)
-│   │   └── oracles.py              # Simulated humans: Bradley-Terry, noisy regression
+│   │   ├── oracles.py              # Simulated humans: Bradley-Terry, noisy regression
+│   │   ├── acquisition.py          # AcquisitionFunction: a botorch acqf over an Objective
+│   │   └── synthetic.py            # truth_at, construct_function, SyntheticFunction
 │   ├── performance/
 │   │   ├── mo.py                   # groundtruth_hypervolume, pareto_overlay
-│   │   └── loo.py                  # loo: leave-one-out cross-validation
+│   │   ├── loo.py                  # loo: leave-one-out cross-validation
+│   │   └── regret.py               # regret, action_distance
 │   └── utils/                      # pareto.py, plotting.py
 ├── hilo/
 │   ├── plot_pilot.py               # The one live experiment: pilot data -> fronts + optima
 │   ├── gp_diagnostics.py           # Leave-one-out R^2 and calibration on a synthetic objective
 │   ├── gp_accuracy.py              # The same leave-one-out, on the measured subject data
+│   ├── plot_test_functions.py      # Every synthetic test function, at DIM 1 or 2
 │   ├── read_data.py                # Pilot and MT0x CSVs -> Objective / DecoupledObjectives
 │   └── output/                     # Figures and recorded runs
 ├── scratch/                        # Scratch/experimentation files (not maintained)
@@ -72,8 +76,8 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-368 tests: public API surface (34), dangling references (6), objectives (169),
-`BoTorchGP` (100), `DecoupledMOGP` (47), `loo` (12).
+398 tests: public API surface (43), dangling references (8), objectives (169),
+`BoTorchGP` (110), `DecoupledMOGP` (56), `loo` (12).
 
 ## How to run experiments
 
@@ -84,12 +88,19 @@ python -m hilo.plot_pilot        # fits the pilot data, writes hilo/output/test.
 python -m hilo.gp_diagnostics    # leave-one-out R^2 and calibration on a synthetic
                                  # objective, writes hilo/output/gp_diagnostics.png
 python -m hilo.gp_accuracy       # the same leave-one-out, on a subject's CSV
+python -m hilo.plot_test_functions  # every SYNTHETIC_FUNCTIONS entry with a
+                                 # non-constant DIM-dimensional instance, writes
+                                 # hilo/output/synthetic_functions.svg
 ```
 
 `plot_pilot.py` needs `pandas`, which is not a package dependency (it is an
 experiment-only import). `optimize_acqf` seeds its restarts from torch's global
 state, which the script does not set, so the reported optima wobble in the third
 or fourth decimal between runs.
+
+`plot_test_functions.py` needs `tqdm`, also experiment-only. `DIM` is 1 or 2,
+since that is what `plot_test_function` can draw; at `DIM = 1` most of the
+registry has no instance and the script prints what it skipped.
 
 `gp_diagnostics.py` needs `scikit-learn` and `matplotlib`, also experiment-only.
 Unless `--refit-folds` is passed, every leave-one-out fold freezes the full-data
@@ -117,14 +128,20 @@ from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
 from pypolar import DecoupledObjectives, Objective, AffineTransform
 from pypolar import sample_actions
 from pypolar import loo
+from pypolar import regret, action_distance
+from pypolar import truth_at, construct_function, SyntheticFunction
+from pypolar import SYNTHETIC_FUNCTIONS, SYNTHETIC_1D_FUNCTIONS
+from pypolar import plot_test_function, plot_fit_1d
 ```
 
 Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is the
 boundary in both directions: every public method takes and returns numpy arrays,
-and torch never escapes the module. Two arguments are the exception, both inputs
+and torch never escapes the module. Three arguments are the exception, all inputs
 only: `Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
-subclass, and `sample_actions`'s `bounds`, a torch tensor. Both are consumed
-internally and only numpy comes back out.
+subclass; `sample_actions`'s `bounds`, anything `torch.as_tensor` accepts; and
+the `truth` taken by `feedback/synthetic.py` and `performance/regret.py`, a
+`SyntheticTestFunction` *instance*, whose `optimizers` tensor is converted before
+use. All are consumed internally and only numpy comes back out.
 
 ### Objectives (`optimization/objectives.py`)
 
@@ -132,8 +149,9 @@ The bookkeeping layer. It owns the two coordinate changes that the GP assumes
 have already happened, so nothing downstream has to think about units or signs.
 
 **`sample_actions(bounds, n, kind, seed)`** — `n` actions over a box, returned
-`(n, d)`. `bounds` is a `(2, d)` **torch tensor** of `[lower; upper]` rows, the
-form BoTorch states bounds in; a numpy array raises. `kind='sobol'` draws a
+`(n, d)`. `bounds` is `(2, d)` of `[lower; upper]` rows, the form BoTorch states
+bounds in, and is coerced with `torch.as_tensor`, so a torch tensor, a numpy
+array and a nested list all give the same design. `kind='sobol'` draws a
 space-filling Sobol sequence and `kind='uniform'` draws iid uniform points; the
 branch is a whitelist, so any other value raises `ValueError` rather than
 silently returning a design you did not ask for. Sobol is the default worth
@@ -364,9 +382,9 @@ min_length_scale=None)`** — the
 single-objective wrapper: one `Objective` rather than a collection, so the action
 frame is that objective's own normalization instead of a shared one, and the
 marginal likelihood is a plain `ExactMarginalLogLikelihood`. `posterior_at`,
-`best_actions`, `update_feedback` and `get_fitted_hyperparameters` carry the same
-signatures and contracts as on `DecoupledMOGP` below with `m = 1`, so the
-returned arrays keep their column axis. `BoTorchGP.model` **is** the
+`sample_paths`, `best_actions`, `update_feedback` and `get_fitted_hyperparameters`
+carry the same signatures and contracts as on `DecoupledMOGP` below with `m = 1`,
+so the returned arrays keep their column axis. `BoTorchGP.model` **is** the
 `SingleTaskGP` — there is no sub-model beneath it, unlike `ModelListGP.models`.
 It takes the same hyperparameter arguments as `DecoupledMOGP`.
 
@@ -381,6 +399,7 @@ covariance and the joint marginal likelihood factorizes.
 mogp = DecoupledMOGP(objectives, fit_hyperparameters=True,
                      noise=NoiseModel.prior(0.3), min_length_scale=0.3)
 mu, std     = mogp.posterior_at(X)          # (n, m) each
+paths = mogp.sample_paths(X, num_paths=20)  # (num_paths, n, m), joint over X
 best, mu, s = mogp.best_actions()           # (m, d), (m,), (m,)
 mogp.update_feedback(objectives)            # rebuild after new measurements
 ```
@@ -439,6 +458,40 @@ Actions are fed as `q=1` batch elements (`unsqueeze(1)`), so each posterior is
 that path is quadratic in the number of evaluation points and dominates the cost
 on a large scan. `chunk` bounds the per-call batch.
 
+**`sample_paths(action, num_paths, normalized=False, raw=False)`** — that many
+sample paths of the posterior over those same arbitrary actions, returned
+`(num_paths, n, m)`. The `normalized` and `raw` flags mean exactly what they mean
+on `posterior_at`, and the values come back in maximization space unless `raw` is
+set.
+
+`num_paths` is deliberately **not** called `q`, which everywhere else in the
+package and in BoTorch means the points evaluated jointly as one candidate set —
+`AcquisitionFunction.query(model, q=1)` is that q. Here botorch's q is `n`: the
+actions are one q-batch, and `num_paths` is how many times it is sampled.
+
+This is the counterpart of `posterior_at`, not a variant of it: `posterior_at`
+reports the **marginal** at each action, and `sample_paths` draws from the
+**joint** posterior over the whole set. That is what makes a draw a function
+rather than noise — sampling each action from its own marginal independently
+would throw away the covariance between them, and a "path" through those points
+would be white noise. It is also why `sample_paths` takes no `chunk`: the `n x n`
+test-test block that `posterior_at` goes out of its way never to form is the
+exact object a joint draw is drawn from, so the actions go in as *one* batch
+element where `posterior_at` sends `n` of them. Cost is the price of that —
+quadratic in `n`, plus a Cholesky.
+
+The two agree where they overlap, which is the marginals: averaged over enough
+draws, `sample_paths` reproduces `posterior_at`'s mean and standard deviation
+point by point, and the tests pin that.
+
+On `DecoupledMOGP` a draw is joint over the actions but **independent across the
+objectives** — column `j` comes from objective `j`'s own GP and carries no
+covariance with column `k`, which is the same decoupling claim the class makes
+everywhere else.
+
+Draws come from torch's global generator (`rsample`), so `torch.manual_seed` is
+what makes them repeatable — the same way `best_actions`' restarts are seeded.
+
 **`best_actions(num_restarts=8, raw_samples=512, raw=False)`** — the action maximizing each
 objective's posterior mean, over the **continuous box**, not over the measured
 actions. Two stages, which is what `optimize_acqf` does internally: a Sobol scan
@@ -474,7 +527,46 @@ for simulation work; `plot_pilot.py` uses real data and touches none of it.
 reward plus Gaussian noise; `BradleyTerryOracle(beta_boltzmann, reward_fn, rng)`
 returns a noisy preference; `MultiObjectiveOracle` the multi-objective version.
 
-### Metrics (`performance/mo.py`, `performance/loo.py`, `utils/pareto.py`)
+**`synthetic.py`** — the other kind of groundtruth: BoTorch's own test functions
+rather than an analytic bump. This is the only module that evaluates one, so
+`torch` appears here and nowhere else in `feedback/`.
+
+- `SYNTHETIC_FUNCTIONS` — name -> `SyntheticTestFunction` subclass, the registry
+  the experiments draw from, 24 entries.
+- `SYNTHETIC_1D_FUNCTIONS` — the 7 of those with a non-constant 1D instance:
+  Ackley, DixonPrice, Griewank, Levy, Michalewicz, Rastrigin, StyblinskiTang.
+  Most of the registry is 2D-or-higher only, so this is the subset a 1D sweep or
+  plot can actually use. It is a measured fact rather than a fixed one —
+  `construct_function` is the authority, and it takes a box: a box that excludes
+  a function's known optimizer drops it, which puts StyblinskiTang (optimizer at
+  −2.904) outside the set below a half-width of 2.91.
+- `truth_at(truth, X)` — noiseless values of the truth at the `(n, d)` actions
+  `X`, returned `(n,)`. The evaluation is `noise=False`, so a metric is never
+  scored against a lucky draw. Takes an *instance*, not a subclass.
+- `construct_function(func, dim, box, seed=0)` — one non-constant instance of
+  `func` at that `dim`, or None when it has none. It tries `[-box, box]^dim`
+  first and falls back to the function's own default bounds, since a custom box
+  is rejected unless it contains a known optimizer. The non-constant probe is
+  needed because `Powell` sums over `range(dim // 4)` and `Rosenbrock` over
+  `range(dim - 1)`, so below dim 4 and dim 2 they are identically zero rather
+  than an error.
+- `SyntheticFunction(truth, rel_noise_std=0.0, measure='std', n_spread=4096,
+  seed=0)` — a test function plus an observation noise stated as a fraction of
+  the function's own spread. `sf(X)` measures, `sf(X, noise=False)` is
+  `truth_at`, and `sf.spread` / `sf.noise_std` report what the fraction resolved
+  to. `measure` picks the standard deviation or the peak-to-peak range of a
+  Sobol scan of the whole box.
+
+  The spread is measured **once**, at construction. That is what makes
+  `rel_noise_std` mean the same difficulty across functions whose ranges differ
+  by orders of magnitude — the same convention `Objective.from_synthetic`'s
+  `rel_noise_std` uses — and it is the only way a sequential loop can use the
+  convention at all, since it adds one point at a time and a single point has no
+  spread of its own to take a fraction of. The noise comes from an
+  instance-owned `default_rng(seed)`, so repeated calls advance one stream
+  rather than repeating a seeded draw.
+
+### Metrics (`performance/mo.py`, `performance/loo.py`, `performance/regret.py`, `utils/pareto.py`)
 
 - `get_nondominated(F)` — indices of the non-dominated front of `F` (higher is
   better), via pymoo.
@@ -506,10 +598,68 @@ differs from the one being evaluated measures nothing. Passing `hypers` freezes
 the full-data fit's hyperparameters across the folds; passing None refits them
 fold by fold, which is the honest but far slower measurement.
 
+**`performance/regret.py`** scores a sequential run against a *known* truth, so
+unlike everything above it takes a BoTorch `SyntheticTestFunction` instance and
+reads its `optimal_value` and `optimizers`. It evaluates that truth through
+`feedback/synthetic.py`'s `truth_at`, which is what keeps the metrics free of
+torch.
+
+- `regret(truth, objective, inferred, maximize=False)` — `(simple, inference)`
+  in the objective's own units. *Simple* regret is the gap at the best noiseless
+  value sampled so far; *inference* regret is the gap at `inferred`, the action
+  the run would recommend right now, which is what a study hands a subject. The
+  two answer different questions: simple regret can only improve, while
+  inference regret can get worse when a new point moves the posterior argmax.
+- `action_distance(truth, objective, inferred)` — the same pair in action space,
+  as distances to the *nearest* true optimizer. Measured in the objective's
+  normalized frame, so a distance of 0.1 is a tenth of a box span and the whole
+  box has diagonal `sqrt(d)`; without that normalization an action dimension
+  with larger units would dominate the norm.
+
+`maximize` states the direction of the *truth*, separately from
+`objective.maximize` which orients that objective's own standardization. A
+regret is a distance from the optimum and so is non-negative either way:
+`maximize=False` scores `value - optimal_value` over the sampled minimum and
+`maximize=True` scores `optimal_value - value` over the sampled maximum. In a
+run where the objective is this truth the two flags must agree. The default is
+False because a botorch synthetic built with `negate=False` — which is what
+`Objective` expects, since it encodes direction itself — reports its global
+minimum as `optimal_value`.
+
+`regret` and `action_distance` can disagree, and neither is redundant: a
+recommendation in a neighbouring basin of a multimodal truth is far in action
+space and possibly close in value, and a flat optimum inverts that. A study pays
+for the action directly, since the recommendation it hands a subject is one.
+
 ### Plotting (`utils/plotting.py`)
 
-`plot_gp_1d(ax, mu, std, action_space, feedback_idxs, feedback_values, ...)` —
-takes plain arrays, so it is independent of any GP class.
+`plot_test_function(ax, X, y, title=None)` — a scalar function sampled at the
+`(N, d)` actions `X`, as a line for `d = 1` and a filled contour for `d = 2`;
+any other `d` raises. It takes the values `y` rather than the function that
+produces them, which keeps the module on plain arrays — independent of any GP or
+groundtruth class, and free of a `utils` -> `feedback` import.
+
+The scan need not be a grid: 1D is sorted before it is drawn and 2D is contoured
+over its own Delaunay triangulation, so a Sobol sequence plots correctly either
+way.
+
+`plot_fit_1d(ax, x, mu, std, xdata, ydata, truth=None, paths=None, vlines=None,
+band_std=2.0, title=None)` — a 1D model fit: the posterior mean over the `(n,)`
+grid `x`, a `band_std`-sigma band around it, the `(S, n)` sample `paths` and the
+`(n,)` `truth` curve when given, and the measurements `(xdata, ydata)` it was fit
+to. `vlines` is label -> action, drawn styled by `VLINE_STYLES` in the order
+given. Returns the `ax`.
+
+Everything arrives already evaluated, for the same reason `plot_test_function`
+takes `y`: the caller owns the GP and the groundtruth, so the module stays on
+plain arrays and free of a `utils` -> `optimization`/`feedback` import. What the
+band means is therefore the caller's choice too — `posterior_at`'s `std` is the
+*latent* posterior, so the band is the model's uncertainty about the noiseless
+function, which is what a truth curve should fall inside; a predictive interval
+for a new measurement would be wider by the observation noise.
+
+`x` need not be sorted: it is ordered on entry and `mu`, `std`, `truth` and
+`paths`' columns are reordered with it.
 
 ## Typical workflow
 
@@ -527,7 +677,7 @@ takes plain arrays, so it is independent of any GP class.
 - **Runtime:** numpy, scipy, pymoo, botorch (which pulls torch and gpytorch)
 - **Dev:** pytest, matplotlib
 - `hilo/plot_pilot.py` additionally uses pandas, `hilo/gp_diagnostics.py`
-  scikit-learn
+  scikit-learn, `hilo/plot_test_functions.py` tqdm
 
 Verified against botorch 0.18.1 / gpytorch 1.15.2 / torch 2.13.0. Three details in
 `gp.py` are version-sensitive: `outcome_transform` must be passed explicitly

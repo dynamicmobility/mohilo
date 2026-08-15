@@ -436,6 +436,99 @@ class TestPosteriorAtRawUnits:
         np.testing.assert_allclose(got[1], by_hand[1])
 
 
+# ---- sample_paths ----------------------------------------------------------
+
+class TestSamplePaths:
+    """Draws from the *joint* posterior, where `posterior_at` reports only the
+    marginals. The two must agree point by point on mean and spread, and differ
+    exactly in that the draws carry the covariance between actions.
+
+    Every test seeds torch first, since the draws come from its global generator.
+    """
+
+    def test_shape_is_q_by_n_by_one(self, gp):
+        """One objective, so the column axis is kept but is width 1 -- the same
+        (n, m) column contract `posterior_at` keeps."""
+        assert gp.sample_paths(_grid(3), num_paths=5).shape == (5, 9, 1)
+
+    def test_a_single_action_is_promoted_to_one_row(self, gp):
+        assert gp.sample_paths(np.array([5.0, 0.0]), num_paths=4).shape == (4, 1, 1)
+
+    def test_marginals_match_posterior_at(self, gp):
+        """Averaged over enough draws, the paths reproduce the mean and standard
+        deviation `posterior_at` reports."""
+        X = _grid(3)
+        torch.manual_seed(0)
+        paths   = gp.sample_paths(X, num_paths=4000)
+        mu, std = gp.posterior_at(X)
+        np.testing.assert_allclose(paths.mean(axis=0), mu, atol=0.05)
+        np.testing.assert_allclose(paths.std(axis=0), std, rtol=0.1)
+
+    def test_draws_are_joint_rather_than_independent(self, gp):
+        """Two actions a hair apart are effectively the same point of the
+        function, so their values must move together across draws. Sampling each
+        from its own marginal would leave them uncorrelated."""
+        X = np.array([[5.0, 0.0], [5.0 + 1e-3, 0.0]])
+        torch.manual_seed(0)
+        paths = gp.sample_paths(X, num_paths=200)[:, :, 0]
+        assert np.corrcoef(paths[:, 0], paths[:, 1])[0, 1] > 0.99
+
+    def test_correlation_falls_off_with_distance(self, gp):
+        """The covariance being sampled is the kernel's, so a far pair is less
+        correlated than a near one."""
+        near = np.array([[5.0, 0.0], [5.2, 0.0]])
+        far  = np.array([[5.0, 0.0], [0.0, -2.0]])
+        torch.manual_seed(0)
+        near_paths = gp.sample_paths(near, num_paths=400)[:, :, 0]
+        torch.manual_seed(0)
+        far_paths  = gp.sample_paths(far, num_paths=400)[:, :, 0]
+        assert (np.corrcoef(*near_paths.T)[0, 1] > np.corrcoef(*far_paths.T)[0, 1])
+
+    def test_normalized_flag_selects_the_action_frame(self, gp, reward):
+        """Passing raw actions equals passing them pre-normalized by hand."""
+        raw = np.array([[1.0, 0.0], [5.0, 1.5]])
+        torch.manual_seed(0)
+        from_raw = gp.sample_paths(raw, num_paths=3)
+        torch.manual_seed(0)
+        from_norm = gp.sample_paths(reward.xtransform(raw), num_paths=3, normalized=True)
+        np.testing.assert_allclose(from_raw, from_norm)
+
+    def test_raw_actions_are_not_silently_treated_as_normalized(self, gp):
+        """The raw box is not [0, 1]^2, so the two frames must disagree."""
+        raw = np.array([[7.5, 1.0]])
+        torch.manual_seed(0)
+        from_raw = gp.sample_paths(raw, num_paths=200)
+        torch.manual_seed(0)
+        as_norm = gp.sample_paths(raw, num_paths=200, normalized=True)
+        assert not np.allclose(from_raw.mean(axis=0), as_norm.mean(axis=0))
+
+    def test_raw_units_match_converting_by_hand(self, cost_gp, cost):
+        torch.manual_seed(0)
+        standard = cost_gp.sample_paths(_grid(3), num_paths=3)
+        torch.manual_seed(0)
+        got = cost_gp.sample_paths(_grid(3), num_paths=3, raw=True)
+        np.testing.assert_allclose(got, cost.to_raw(standard))
+
+    def test_raw_restores_the_sign_of_a_minimized_objective(self, cost_gp):
+        """Maximization space reads larger-is-better at VALLEY; its own units
+        read lower-is-better there."""
+        X = np.vstack([VALLEY, PEAK])
+        torch.manual_seed(0)
+        standard = cost_gp.sample_paths(X, num_paths=400)[:, :, 0].mean(axis=0)
+        torch.manual_seed(0)
+        raw = cost_gp.sample_paths(X, num_paths=400, raw=True)[:, :, 0].mean(axis=0)
+        assert standard[0] > standard[1]
+        assert raw[0] < raw[1]
+
+    def test_a_near_noiseless_gp_pins_its_paths_to_the_data(
+            self, interpolating_gp, reward, actions):
+        """With negligible noise every draw passes through the measurements, so
+        the paths have almost no spread there."""
+        torch.manual_seed(0)
+        paths = interpolating_gp.sample_paths(actions, num_paths=50)[:, :, 0]
+        assert paths.std(axis=0).max() < 0.02 * reward.standard_y.std()
+
+
 # ---- best_actions ----------------------------------------------------------
 
 class TestBestActions:
