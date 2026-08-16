@@ -8,7 +8,7 @@ from ax.api.configs import RangeParameterConfig
 SNAPSHOT = "p01_moo.json"
 CONDITION_S = 120
 STEADY_STATE_S = 60
-N_CONDITIONS = 24
+N_CONDITIONS = 12
 MASS_KG = 70.0
 STANDING_W_PER_KG = 1.3
 MIN_COMFORT_SEM = 0.25
@@ -60,7 +60,7 @@ def run_condition(params: dict, exo, tablet) -> dict[str, tuple[float, float]]:
     # ratings = tablet.drain()
     # print(params)
     # quit()
-    return {"metabolic_cost": np.square(params['peak_pct'] - 50.0), "comfort": np.square(params['rise_pct'] - 20.0)}
+    return {"metabolic_cost": -np.square(params['peak_pct'] - 50.0), "comfort": -np.square(params['rise_pct'] - 20.0)}
 
 
 def main(exo, tablet) -> pd.DataFrame:

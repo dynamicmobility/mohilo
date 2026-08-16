@@ -27,6 +27,13 @@ from pypolar.feedback import (
     construct_function,
     truth_at
 )
+from pypolar.experiment import (
+    Ledger,
+    Probe,
+    SyntheticProbe,
+    fingerprint,
+    read_events
+)
 from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
 from pypolar.performance.loo import loo
 from pypolar.performance.regret import regret, action_distance
@@ -65,6 +72,12 @@ __all__ = [
     "get_nondominated_tol",
     "hypervolume_from_nondominated",
     "sparsity_from_normalized_nondominated",
+    # experiment
+    "Ledger",
+    "Probe",
+    "SyntheticProbe",
+    "fingerprint",
+    "read_events",
     # plotting
     "plot_test_function",
     "plot_fit_1d",

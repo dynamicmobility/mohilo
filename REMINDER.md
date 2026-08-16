@@ -145,12 +145,6 @@ Newest entries go at the top.
 
 ### Write out the LOO R^2 metric and validate against a series of 1D GPs with worse and worse fits
 
-- **Time:** 2026-08-12 2:45 EDT
-- **Priority:** 1
-- **File:** fill in @claude
-- **Why:** fill in @claude
-
-
 ### Create a script for 1D acquisition function testing and fitting. Use the same noise profile as the collected data.
 
 ### Create a multi objective version with mo acq f
