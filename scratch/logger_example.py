@@ -1,9 +1,12 @@
 """Two trials end to end, against a fake device and two fake instruments.
 """
 
+import sys
 import time
-import numpy as np
 from functools import partial
+from pathlib import Path
+
+import numpy as np
 from botorch.acquisition import (
     LogExpectedImprovement,
     LogNoisyExpectedImprovement,
@@ -15,6 +18,10 @@ from botorch.sampling import SobolQMCNormalSampler
 import torch
 import pypolar as plr
 
+# tablet/ is not a package, so it goes on the path by hand
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tablet'))
+from survey import Survey
+
 DIM             = 3
 BOX             = 5.0
 SEED            = 95
@@ -22,6 +29,8 @@ GP_NOISE        = plr.NoiseModel.pinned(0.5)
 MIN_LENGTHSCALE = 0.2
 NUM_QUERIES     = 15
 ACQ_STRAT       = 'lognei'
+REPEATS         = 4     # surveys per trial
+SURVEY_TIMEOUT  = 25.0  # seconds the subject has to answer each one
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
@@ -63,10 +72,11 @@ def get_data_from_cart(action: np.ndarray):
 def ask_subject(action: np.ndarray):
     return COMFORT_TRUTH(action)
 
-def make_probes():
+def make_probes(survey: Survey):
     probes = [
-        plr.Probe(name='Metabolic Cart', caller=get_data_from_cart, obj_name='cost'),
-        # plr.Probe(name='Survey', caller=ask_subject, repeats=4, obj_name='comfort'),
+        # plr.Probe(name='Metabolic Cart', caller=get_data_from_cart, obj_name='cost'),
+        plr.Probe(name='Survey', caller=survey.ask, repeats=REPEATS,
+                  obj_name='comfort'),
     ]
     return probes
 
@@ -74,12 +84,10 @@ def make_probes():
 def make_experiment(probes: list[plr.Probe]):
     experiment = plr.Logger(
         objectives   = [
-            # pinned so the normalized frame, and so MIN_LENGTHSCALE, holds
-            # still as measurements arrive
-            plr.Objective.from_empty(name='cost', maximize=False,
-                                     action_bounds=(-BOX, BOX)),
-            # plr.Objective.from_empty(name='comfort', maximize=True,
-            #                          action_bounds=(-BOX, BOX))
+            # plr.Objective.from_empty(name='cost', maximize=False,
+            #                          action_bounds=(-BOX, BOX)),
+            plr.Objective.from_empty(name='comfort', maximize=True,
+                                     action_bounds=(-BOX, BOX))
         ],
         probes       = probes,
         device       = Exo(),
@@ -117,18 +125,20 @@ def fit_gp(objective):
 
 def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
     for i in range(NUM_QUERIES):
-        if i == 0:
-            # Random action for the first
-            action = plr.sample_actions(bounds=np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float), n=1, kind='uniform', seed=SEED)[0]
+        objective = experiment.objectives['comfort']
+        if not len(objective.ydata):
+            # nothing measured yet, or every survey of the last trial timed out,
+            # so there is no posterior to maximize
+            action = plr.sample_actions(bounds=np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float), n=1, kind='uniform', seed=SEED + i)[0]
         else:
             # fit gp + Acquisition strategy for the rest
-            gp = fit_gp(experiment.objectives['cost'])
+            gp = fit_gp(objective)
             action = acqf.query(gp, q=1)[0]
-        
+
         experiment.begin_trial(
             action=action,
             args={
-                'Metabolic Cart': (action,),
+                # 'Metabolic Cart': (action,),
                 'Survey'        : (action,)
             }
         )
@@ -145,14 +155,21 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
 def main():
     torch.manual_seed(SEED)     # optimize_acqf seeds its restarts from this
 
-    probes = make_probes()
+    survey = Survey(timeout=SURVEY_TIMEOUT)
+    print('Waiting for the iPad...')
+    survey.wait_for_ipad()
+
+    probes = make_probes(survey)
     experiment = make_experiment(probes)
     acqf = plr.AcquisitionFunction(
         acqf      = acquisition_factory(strategy=ACQ_STRAT, seed=SEED),
-        objective = experiment.objectives['cost']
+        objective = experiment.objectives['comfort']
     )
 
-    experiment = run_experiment(experiment, acqf)
+    try:
+        experiment = run_experiment(experiment, acqf)
+    finally:
+        survey.close()
 
     for name in experiment.objectives.names:
         objective = experiment.objectives[name]

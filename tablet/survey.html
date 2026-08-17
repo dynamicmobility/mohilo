@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Survey</title>
+<style>
+  :root {
+    --bg:      #17191d;
+    --surface: #1f2228;
+    --edge:    #2c3037;
+    --ink:     #8b929e;
+    --ink-dim: #575d68;
+    --signal:  #7fb2e5;
+    --urgent:  #e5a06a;
+    --thumb:   54px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    padding: max(20px, env(safe-area-inset-top)) 32px max(20px, env(safe-area-inset-bottom));
+    gap: 20px;
+    font-family: "Avenir Next Condensed", "Avenir Next", system-ui, sans-serif;
+    color: var(--ink);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* --- status bar --- */
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    flex: 0 0 auto;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ink-dim);
+    transition: background .2s;
+  }
+
+  .status.live .dot { background: var(--signal); }
+  .status.live     { color: var(--ink); }
+
+  /* --- the countdown --- */
+
+  .stage {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+    min-height: 0;
+  }
+
+  .timer {
+    width:  min(30vh, 42vw);
+    height: min(30vh, 42vw);
+    border-radius: 50%;
+    background: var(--surface);
+    border: 3px solid var(--edge);
+    box-shadow: inset 0 3px 14px rgba(0,0,0,.6);
+    display: grid;
+    place-items: center;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: min(13vh, 18vw);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-dim);
+    transition: color .2s, border-color .2s, box-shadow .2s;
+  }
+
+  body.armed .timer {
+    color: var(--signal);
+    border-color: var(--signal);
+    box-shadow: 0 0 60px 4px rgba(127,178,229,.18);
+  }
+
+  body.armed .timer.urgent {
+    color: var(--urgent);
+    border-color: var(--urgent);
+    box-shadow: 0 0 60px 4px rgba(229,160,106,.20);
+  }
+
+  /* --- rating scale --- */
+  /* Greyed and untouchable until the computer arms a question. */
+
+  .control {
+    flex: 0 0 auto;
+    opacity: .28;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+
+  body.armed .control { opacity: 1; pointer-events: auto; }
+
+  .row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .label {
+    font-size: 13px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+
+  .readout {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 30px;
+    font-variant-numeric: tabular-nums;
+    color: var(--signal);
+  }
+
+  .scale { position: relative; }
+
+  /* faces above the track, numbers below; both pinned to thumb centres */
+
+  .faces, .ticks { position: relative; }
+  .faces { height: 58px; }
+  .ticks { height: 26px; }
+
+  .faces > *, .ticks > * {
+    position: absolute;
+    transform: translateX(-50%);
+    transition: color .15s, opacity .15s;
+  }
+
+  .face {
+    top: 0;
+    width: 46px; height: 46px;
+    color: var(--ink-dim);
+    opacity: .5;
+    cursor: pointer;
+  }
+
+  .face svg {
+    width: 100%; height: 100%;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+  }
+
+  .face svg .eye { fill: currentColor; stroke: none; }
+
+  .face.on {
+    color: var(--signal);
+    opacity: 1;
+    transform: translateX(-50%) scale(1.18);
+  }
+
+  .tick {
+    top: 6px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 15px;
+    color: var(--ink-dim);
+    cursor: pointer;
+  }
+
+  .tick.on { color: var(--signal); }
+
+  /* nothing picked yet: the handle is dimmed and the track unfilled */
+  .scale:not(.chosen) input[type=range] { opacity: .45; }
+
+  .send {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    padding: 20px;
+    border: none;
+    border-radius: 12px;
+    background: var(--signal);
+    color: #10242f;
+    font-family: inherit;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s, color .15s, opacity .15s;
+  }
+
+  .send:active { opacity: .75; }
+
+  .send:focus-visible {
+    outline: 3px solid var(--signal);
+    outline-offset: 3px;
+  }
+
+  .send.done, .send:disabled {
+    background: var(--surface);
+    color: var(--ink-dim);
+    cursor: default;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: var(--thumb);
+    background: transparent;
+    margin: 0;
+  }
+
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 18px;
+    border-radius: 9px;
+    background:
+      linear-gradient(var(--signal), var(--signal)) left / var(--fill, 0%) 100% no-repeat,
+      var(--surface);
+    border: 1px solid var(--edge);
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: var(--thumb); height: var(--thumb);
+    margin-top: -19px;
+    border-radius: 50%;
+    background: #eef1f5;
+    border: 1px solid #b9c0ca;
+    box-shadow: 0 3px 10px rgba(0,0,0,.5);
+  }
+
+  input[type=range]:active::-webkit-slider-thumb { background: #fff; }
+
+  input[type=range]::-moz-range-track {
+    height: 18px; border-radius: 9px;
+    background: var(--surface); border: 1px solid var(--edge);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #eef1f5; border: 1px solid #b9c0ca;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .timer, .faces > *, .ticks > * { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="status" id="status">
+    <span class="dot"></span><span id="statusText">Connecting</span>
+  </div>
+
+  <div class="stage">
+    <div class="timer" id="timer"><span id="clock">&ndash;&ndash;</span></div>
+  </div>
+
+  <div class="control">
+    <div class="row">
+      <span class="label">Comfort</span>
+      <span class="readout" id="readout">&ndash;</span>
+    </div>
+    <div class="scale" id="scale">
+      <div class="faces" id="faces"></div>
+      <input type="range" id="slider" min="1" max="5" step="1" value="3">
+      <div class="ticks" id="ticks"></div>
+    </div>
+    <button class="send" id="send" type="button" disabled>Submit</button>
+  </div>
+
+<script>
+(() => {
+  const slider  = document.getElementById('slider');
+  const scale   = document.getElementById('scale');
+  const readout = document.getElementById('readout');
+  const status  = document.getElementById('status');
+  const statusText = document.getElementById('statusText');
+  const sendBtn = document.getElementById('send');
+  const facesRow = document.getElementById('faces');
+  const ticksRow = document.getElementById('ticks');
+  const timer   = document.getElementById('timer');
+  const clock   = document.getElementById('clock');
+
+  const WS_PORT = 8765;
+  const STEPS = [1, 2, 3, 4, 5];
+  const BLANK = '–';
+
+  let ws = null;
+  let chosen = false;        // has the subject picked a position this question
+  let deadline = null;       // performance.now() the question closes at
+  let tick = null;
+
+  // ---- faces ---------------------------------------------------------------
+  // Mouth curves only; everything else is shared. 1 frowns, 5 smiles.
+
+  const MOUTH = {
+    1: 'M15 34 Q24 25 33 34',   // frown
+    2: 'M15 33 Q24 28 33 33',
+    3: 'M15 31 H33',            // flat
+    4: 'M15 29 Q24 34 33 29',
+    5: 'M15 28 Q24 37 33 28',   // smile
+  };
+
+  const faceSVG = v => `
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <circle cx="24" cy="24" r="21"></circle>
+      <circle class="eye" cx="17" cy="19" r="2.4"></circle>
+      <circle class="eye" cx="31" cy="19" r="2.4"></circle>
+      <path d="${MOUTH[v]}"></path>
+    </svg>`;
+
+  // Thumb centre for step v, so faces and numbers line up with the handle.
+  const pos = v => `calc(var(--thumb) / 2 + ${(v - 1) / 4} * (100% - var(--thumb)))`;
+
+  const faceEls = {}, tickEls = {};
+
+  for (const v of STEPS) {
+    const f = document.createElement('div');
+    f.className = 'face';
+    f.style.left = pos(v);
+    f.innerHTML = faceSVG(v);
+    f.addEventListener('click', () => select(v));
+    facesRow.appendChild(f);
+    faceEls[v] = f;
+
+    const t = document.createElement('div');
+    t.className = 'tick';
+    t.style.left = pos(v);
+    t.textContent = v;
+    t.addEventListener('click', () => select(v));
+    ticksRow.appendChild(t);
+    tickEls[v] = t;
+  }
+
+  function select(v) {
+    slider.value = v;
+    slider.dispatchEvent(new Event('input'));
+  }
+
+  // ---- slider --------------------------------------------------------------
+
+  const armed = () => document.body.classList.contains('armed');
+
+  function paint() {
+    const v = parseInt(slider.value, 10);
+    slider.style.setProperty('--fill', chosen ? ((v - 1) / 4 * 100) + '%' : '0%');
+    readout.textContent = chosen ? v : BLANK;
+    for (const s of STEPS) {
+      faceEls[s].classList.toggle('on', chosen && s === v);
+      tickEls[s].classList.toggle('on', chosen && s === v);
+    }
+  }
+
+  slider.addEventListener('input', () => {
+    if (!armed()) return;
+    chosen = true;
+    scale.classList.add('chosen');
+    paint();
+    sendBtn.disabled = false;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ slider: parseInt(slider.value, 10) }));
+    }
+  });
+
+  // ---- the question window -------------------------------------------------
+
+  function arm(seconds) {
+    chosen = false;
+    scale.classList.remove('chosen');
+    slider.value = 3;
+    paint();
+
+    sendBtn.classList.remove('done');
+    sendBtn.textContent = 'Submit';
+    sendBtn.disabled = true;               // until a position is picked
+
+    document.body.classList.add('armed');
+    deadline = performance.now() + seconds * 1000;
+    clearInterval(tick);
+    tick = setInterval(count, 100);
+    count();
+  }
+
+  function count() {
+    const left = Math.max(0, deadline - performance.now());
+    clock.textContent = Math.ceil(left / 1000);
+    timer.classList.toggle('urgent', left <= 5000);
+    if (left <= 0) disarm();               // out of time, nothing recorded
+  }
+
+  function disarm() {
+    document.body.classList.remove('armed');
+    clearInterval(tick);
+    tick = null;
+    deadline = null;
+    clock.textContent = BLANK + BLANK;
+    timer.classList.remove('urgent');
+    sendBtn.disabled = true;
+  }
+
+  sendBtn.addEventListener('click', () => {
+    if (!armed() || !chosen) return;
+    const v = parseInt(slider.value, 10);
+    if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ submit: v }));
+
+    sendBtn.classList.add('done');
+    sendBtn.textContent = 'Sent';
+    disarm();                              // one answer per question
+  });
+
+  // ---- socket --------------------------------------------------------------
+
+  function apply(msg) {
+    if ('arm' in msg) arm(Number(msg.arm));
+    if ('disarm' in msg) disarm();
+  }
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
+
+    ws.onopen = () => {
+      status.classList.add('live');
+      statusText.textContent = 'Connected';
+    };
+
+    ws.onmessage = e => {
+      try { apply(JSON.parse(e.data)); } catch (_) {}
+    };
+
+    ws.onclose = () => {
+      status.classList.remove('live');
+      statusText.textContent = 'Reconnecting';
+      disarm();               // an answer the computer cannot hear is no answer
+      setTimeout(connect, 1000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  paint();
+  connect();
+
+  // Safari drops the socket when the tab is backgrounded; reconnect on return.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && (!ws || ws.readyState === WebSocket.CLOSED)) connect();
+  });
+
+  // ---- keep the screen awake ----------------------------------------------
+
+  let wakeLock = null;
+  async function keepAwake() {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+  }
+  if ('wakeLock' in navigator) {
+    keepAwake();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) keepAwake();
+    });
+  }
+})();
+</script>
+</body>
+</html>
