@@ -1,7 +1,3 @@
-"""Two trials end to end, against a fake device and two fake instruments.
-"""
-
-import sys
 import time
 from functools import partial
 from pathlib import Path
@@ -10,17 +6,13 @@ import numpy as np
 from botorch.acquisition import (
     LogExpectedImprovement,
     LogNoisyExpectedImprovement,
-    PosteriorMean,
     UpperConfidenceBound,
     qLogNoisyExpectedImprovement,
 )
 from botorch.sampling import SobolQMCNormalSampler
 import torch
 import pypolar as plr
-
-# tablet/ is not a package, so it goes on the path by hand
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'tablet'))
-from survey import Survey
+from tablet.survey import Survey
 
 DIM             = 3
 BOX             = 5.0
@@ -68,7 +60,6 @@ class Exo(plr.Device):
 
 def get_data_from_cart(action: np.ndarray):
     return METABOLIC_TRUTH(action)
-
 
 def ask_subject(action: np.ndarray):
     return COMFORT_TRUTH(action)

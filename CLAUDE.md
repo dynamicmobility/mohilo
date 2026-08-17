@@ -45,7 +45,7 @@ pyPolar/
 │   └── output/                     # Figures and recorded runs
 ├── scratch/                        # Scratch/experimentation files (not maintained)
 ├── docs/                           # LaTeX writeup and handoff record from the pre-BoTorch GP
-├── tablet/                         # iPad control panel (panel.py + index.html), no pypolar import
+├── tablet/                         # iPad comfort survey (survey.py + survey.html), no pypolar import
 ├── human_data/                     # Pilot CSVs consumed by plot_pilot.py
 └── tests/                          # pytest test suite
     ├── test_public_api.py          # Every __all__ name imports
