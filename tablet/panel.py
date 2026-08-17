@@ -32,6 +32,7 @@ import http.server
 import json
 import queue
 import socket
+import subprocess
 import threading
 
 import websockets
@@ -40,8 +41,8 @@ HTTP_PORT = 8000
 WS_PORT = 8765
 
 
-def local_ip():
-    """Best guess at this machine's LAN address (no traffic is actually sent)."""
+def _route_ip():
+    """Source address the OS would route to the internet (no traffic is sent)."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         s.connect(("192.0.2.1", 1))
@@ -50,6 +51,44 @@ def local_ip():
         return "127.0.0.1"
     finally:
         s.close()
+
+
+def _lan_rank(ip):
+    """Sort key preferring the address ranges a home/office Wi-Fi actually uses."""
+    for i, prefix in enumerate(("192.168.", "172.", "10.")):
+        if ip.startswith(prefix):
+            return i
+    return 3
+
+
+def local_ips():
+    """This machine's LAN IPv4 addresses, likeliest first, VPN tunnels excluded.
+
+    The route trick alone returns the VPN's tunnel address when a VPN is up, and
+    the iPad cannot reach that; so enumerate every interface instead and drop the
+    point-to-point (VPN) ones. Which of the remaining is the right Wi-Fi is not
+    always decidable here (a VM bridge looks like a LAN), so all are reported.
+    """
+    try:
+        out = subprocess.check_output(["ifconfig"], text=True)
+    except (OSError, subprocess.CalledProcessError):
+        return [_route_ip()]
+
+    addrs = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("inet ") or "-->" in line:   # skip IPv6 and point-to-point (VPN) links
+            continue
+        ip = line.split()[1]
+        if ip == "127.0.0.1" or ip.startswith("169.254."):
+            continue
+        addrs.append(ip)
+
+    addrs.sort(key=_lan_rank)
+    route = _route_ip()                                      # promote the routed one if it isn't a tunnel
+    if route in addrs:
+        addrs.insert(0, addrs.pop(addrs.index(route)))
+    return addrs or [route]
 
 
 class Panel:
@@ -81,7 +120,13 @@ class Panel:
         self._thread.start()
         self._ready.wait(5)
 
-        print(f"Open this on the iPad:  http://{local_ip()}:{http_port}")
+        ips = local_ips()
+        if len(ips) == 1:
+            print(f"Open this on the iPad:  http://{ips[0]}:{http_port}")
+        else:
+            print("Open one of these on the iPad (whichever shares its Wi-Fi):")
+            for ip in ips:
+                print(f"    http://{ip}:{http_port}")
 
     # ---- the bits you call -------------------------------------------------
 
