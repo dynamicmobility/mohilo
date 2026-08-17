@@ -28,9 +28,10 @@ from pypolar.feedback import (
     truth_at
 )
 from pypolar.experiment import (
+    Device,
     Ledger,
+    Logger,
     Probe,
-    SyntheticProbe,
     fingerprint,
     read_events
 )
@@ -73,9 +74,10 @@ __all__ = [
     "hypervolume_from_nondominated",
     "sparsity_from_normalized_nondominated",
     # experiment
+    "Device",
     "Ledger",
+    "Logger",
     "Probe",
-    "SyntheticProbe",
     "fingerprint",
     "read_events",
     # plotting

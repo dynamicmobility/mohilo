@@ -3,9 +3,7 @@
 The properties each name promises: an *append-only* log never rewrites a line
 and so survives being killed at any point, a *fingerprinted* one refuses to be
 continued under a configuration it was not recorded under, and a *replay*
-rebuilds exactly the objectives the recorded trials had built. A `Probe` is the
-interface a study and a simulation share, so the synthetic one is tested for
-the shapes and the streaming a hardware one must also provide.
+rebuilds exactly the objectives the recorded trials had built.
 """
 
 import json
@@ -14,7 +12,6 @@ import numpy as np
 import pytest
 
 from pypolar.experiment.ledger import Ledger, fingerprint, read_events
-from pypolar.experiment.probe import SyntheticProbe
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
 
@@ -322,82 +319,3 @@ def test_trials_reports_the_completed_ones(path):
     assert trials[0]['source'] == 'seed'
     np.testing.assert_allclose(trials[0]['action'], [1.0, 2.0])
     np.testing.assert_allclose(trials[0]['values']['cost'], [10.0])
-
-
-# ---- probes ----------------------------------------------------------------
-
-def quadratic(X):
-    return -np.sum(np.asarray(X, dtype=float) ** 2, axis=1)
-
-
-def test_probe_reports_one_value_per_objective():
-    probe = SyntheticProbe({'cost': quadratic})
-    values = probe.measure([1.0, 2.0])
-
-    assert set(values) == {'cost'}
-    np.testing.assert_allclose(values['cost'], [-5.0])
-
-
-def test_probe_repeats_are_separate_draws():
-    """Four ratings of one condition are four measurements, not one copied."""
-    rng   = np.random.default_rng(0)
-    probe = SyntheticProbe({'comfort': lambda X: rng.standard_normal(len(X))},
-                           repeats=4)
-    values = probe.measure([1.0, 2.0])
-
-    assert len(values['comfort']) == 4
-    assert len(np.unique(values['comfort'])) == 4
-
-
-def test_probe_repeats_are_per_objective():
-    probe = SyntheticProbe({'cost': quadratic, 'comfort': quadratic},
-                           repeats={'comfort': 4})
-    values = probe.measure([1.0, 2.0])
-
-    assert len(values['cost']) == 1
-    assert len(values['comfort']) == 4
-
-
-def test_probe_names_are_the_objectives_it_reports():
-    assert SyntheticProbe({'cost': quadratic, 'comfort': quadratic}).names == \
-        ('cost', 'comfort')
-
-
-def test_probe_rejects_repeats_below_one():
-    with pytest.raises(ValueError):
-        SyntheticProbe({'cost': quadratic}, repeats=0)
-
-
-def test_probe_measures_one_action():
-    with pytest.raises(ValueError):
-        SyntheticProbe({'cost': quadratic}).measure([[1.0, 2.0], [3.0, 4.0]])
-
-
-def test_probe_streams_through_record():
-    recorded = []
-    probe    = SyntheticProbe({'cost': quadratic, 'comfort': quadratic},
-                              repeats={'comfort': 2})
-    probe.measure([1.0, 2.0], record=lambda kind, **f: recorded.append((kind, f)))
-
-    assert [kind for kind, _ in recorded] == ['sample'] * 3
-    assert [f['objective'] for _, f in recorded] == ['cost', 'comfort', 'comfort']
-
-
-def test_a_probe_and_a_ledger_make_a_trial(path):
-    """The two pieces together, as a loop would use them: the probe streams its
-    observations into the log as they arrive, and the trial closes with the
-    values that replay will rebuild."""
-    probe = SyntheticProbe({'cost': quadratic, 'comfort': quadratic},
-                           repeats={'comfort': 2})
-
-    with Ledger(path, CONFIG) as ledger:
-        action = np.array([1.0, 2.0])
-        ledger.open_trial(action, source='seed')
-        ledger.close_trial(probe.measure(action, record=ledger.record))
-
-        assert len(ledger.samples(0)) == 3
-
-    objs = objectives()
-    Ledger(path, CONFIG).replay(objs)
-    np.testing.assert_allclose(objs['cost'].ydata, [-5.0])
-    np.testing.assert_allclose(objs['comfort'].ydata, [-5.0, -5.0])

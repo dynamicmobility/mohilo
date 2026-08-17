@@ -3,15 +3,19 @@ from pypolar.experiment.ledger import (
     fingerprint,
     read_events,
 )
+from pypolar.experiment.logger import (
+    Device,
+    Logger,
+)
 from pypolar.experiment.probe import (
     Probe,
-    SyntheticProbe,
 )
 
 __all__ = [
     "Ledger",
     "fingerprint",
     "read_events",
+    "Device",
+    "Logger",
     "Probe",
-    "SyntheticProbe",
 ]

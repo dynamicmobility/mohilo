@@ -1,91 +1,78 @@
 """What a measurement is: one action in, values out, over however long the
 instrument takes."""
 
-import time
-from abc import ABC, abstractmethod
+import threading
+from collections.abc import Callable
 
 import numpy as np
 
 
-class Probe(ABC):
-    """One measurement of one or more objectives at one action.
-
-    This is the interface a study and a simulation share. Both are handed an
-    action and both hand back values; only the duration and the plumbing
-    differ. A loop written against a `Probe` therefore runs unchanged against
-    synthetic groundtruth, which is what lets a whole session be rehearsed
-    before a subject arrives.
-
-    Attributes:
-        names: the objectives this probe reports.
-        duration: nominal seconds one measurement takes.
-    """
-
-    names   : tuple
-    duration: float = 0.0
-    repeats : int   = 1
-
-    @abstractmethod
-    def measure(self, action, record=None):
-        """Values at one action, as name -> (k,) array.
-
-        An objective may report any number of values per measurement. One
-        metabolic cost and four comfort ratings from the same trial is the
-        decoupled case, and both sets of values belong to this one action.
-
-        Args:
-            action: (d,) action, in raw units.
-            record: called as `record(kind, **fields)` for each observation as
-                it arrives. A probe that streams through this loses nothing
-                when the process dies partway through the measurement.
-
-        Returns:
-            dict of objective name -> (k,) values.
-        """
-
-
-class SyntheticProbe(Probe):
-    """Callables standing in for instruments.
+class Probe:
+    """One instrument, measured in a background thread.
 
     Args:
-        functions: objective name -> callable taking (n, d) actions and
-            returning (n,) values. `SyntheticFunction` is the intended one.
-        repeats: values drawn per measurement, an int for every objective or a
-            dict keyed by name. A probe reporting four comfort ratings a trial
-            sets four for that objective. Each repeat is a separate call, so
-            each carries its own noise draw.
-        duration: seconds one measurement takes, spread evenly over the values
-            it reports. 0.0 returns immediately; a real duration makes a dress
-            rehearsal take as long as the session it rehearses, and makes an
-            interruption land partway through a trial as it would in the lab.
+        name: what this probe is called.
+        caller: called once per repeat, returning that measurement's value.
+        repeats: measurements taken per trial. 0 and 1 both take one; above
+            that the probe reports several values at the one action, which is
+            what a subject rating a condition four times produces.
+        obj_name: the objective these values belong to.
     """
 
-    def __init__(self, functions: dict, repeats=1, duration=0.0):
-        self.functions = dict(functions)
-        self.duration  = float(duration)
-        self.names     = tuple(self.functions)
-        self.repeats   = ({name: int(repeats.get(name, 1)) for name in self.names}
-                          if isinstance(repeats, dict) else
-                          {name: int(repeats) for name in self.names})
+    def __init__(
+        self,
+        name    : str,
+        caller  : Callable[..., float],
+        repeats : int = 0,
+        obj_name: str = None
+    ):
+        self.name     = name
+        self.obj_name = obj_name
+        self.caller   = caller
+        self.repeats  = repeats
+        self.finished = False
 
-        if any(k < 1 for k in self.repeats.values()):
-            raise ValueError(f'repeats must be at least 1, got {self.repeats}')
+        self._values    = []
+        self.thread     = None
+        self.stop_event = None
 
-    def measure(self, action, record=None):
-        action = np.atleast_2d(np.asarray(action, dtype=float))
-        if len(action) != 1:
-            raise ValueError(f'a probe measures one action, got {len(action)}')
+    @property
+    def n_values(self) -> int:
+        """Measurements one trial asks for."""
+        return max(self.repeats, 1)
 
-        values = {name: np.concatenate([np.atleast_1d(f(action))
-                                        for _ in range(self.repeats[name])])
-                  for name, f in self.functions.items()}
+    def call_and_detect(self, *args, **kwargs):
+        while len(self._values) < self.n_values and not self.stop_event.is_set():
+            self._values.append(np.atleast_1d(self.caller(*args, **kwargs)))
 
-        pause = self.duration / sum(self.repeats.values())
-        for name, drawn in values.items():
-            for value in drawn:
-                if pause:
-                    time.sleep(pause)
-                if record is not None:
-                    record('sample', objective=name, value=float(value))
+        self.finished = len(self._values) == self.n_values
 
-        return values
+    def measure(self, *args, **kwargs):
+        """Starts measuring. The values arrive in `data`, `finished` says when."""
+        self.reset()
+        self.stop_event = threading.Event()
+        self.thread     = threading.Thread(target=self.call_and_detect,
+                                           args=args, kwargs=kwargs, daemon=True)
+        self.thread.start()
+
+    @property
+    def data(self) -> np.ndarray:
+        """(k,) values collected so far, k = `n_values` once finished."""
+        if not self._values:
+            return np.empty(0)
+
+        return np.concatenate(self._values).astype(float)
+
+    def end_measurement_thread(self):
+        """Stops after the call in flight, and waits for the thread to exit."""
+        if self.thread is None:
+            return
+
+        self.stop_event.set()
+        self.thread.join()
+        self.thread = None
+
+    def reset(self):
+        self.end_measurement_thread()
+        self.finished = False
+        self._values  = []
