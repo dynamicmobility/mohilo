@@ -12,6 +12,7 @@ from botorch.utils.sampling import draw_sobol_samples
 
 BOUNDS_SLACK = 1e-9   # float round-off allowed outside a declared action box
 
+# TODO: make the bounds easier to pass in
 def sample_actions(bounds, n, kind, seed):
     """n actions over the box: Sobol is space-filling, uniform is iid."""
     bounds = torch.as_tensor(bounds, dtype=torch.float64)

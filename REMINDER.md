@@ -160,3 +160,5 @@ Newest entries go at the top.
 ### Move objective.py to feedback/ and move truth_at as well?
 
 ### Make random acquisition function compatible
+
+### Look into why it keeps sampling at the edge of the action space
