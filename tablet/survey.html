@@ -62,6 +62,12 @@
   .status.live .dot { background: var(--signal); }
   .status.live     { color: var(--ink); }
 
+  /* pushed to the far end of the status row */
+  .trial {
+    margin-left: auto;
+    color: var(--ink);
+  }
+
   /* --- the countdown --- */
 
   .stage {
@@ -110,6 +116,15 @@
   }
 
   body.armed .control { opacity: 1; pointer-events: auto; }
+
+  /* only up on a repeat: the same action, rated again */
+  .again {
+    font-size: 17px;
+    color: var(--urgent);
+    margin-bottom: 10px;
+  }
+
+  .again[hidden] { display: none; }
 
   .row {
     display: flex;
@@ -263,6 +278,7 @@
 
   <div class="status" id="status">
     <span class="dot"></span><span id="statusText">Connecting</span>
+    <span class="trial" id="trial"></span>
   </div>
 
   <div class="stage">
@@ -270,6 +286,7 @@
   </div>
 
   <div class="control">
+    <div class="again" id="again" hidden>Want to change your answer?</div>
     <div class="row">
       <span class="label">Comfort</span>
       <span class="readout" id="readout">&ndash;</span>
@@ -294,6 +311,8 @@
   const ticksRow = document.getElementById('ticks');
   const timer   = document.getElementById('timer');
   const clock   = document.getElementById('clock');
+  const trialEl = document.getElementById('trial');
+  const again   = document.getElementById('again');
 
   const WS_PORT = 8765;
   const STEPS = [1, 2, 3, 4, 5];
@@ -378,11 +397,14 @@
 
   // ---- the question window -------------------------------------------------
 
-  function arm(seconds) {
+  function arm(seconds, trial, repeat) {
     chosen = false;
     scale.classList.remove('chosen');
     slider.value = 3;
     paint();
+
+    label(trial, repeat);
+    again.hidden = !(repeat > 1);          // a repeat is the same action again
 
     sendBtn.classList.remove('done');
     sendBtn.textContent = 'Submit';
@@ -393,6 +415,14 @@
     clearInterval(tick);
     tick = setInterval(count, 100);
     count();
+  }
+
+  // "Trial 3 · Q2", dropping either half the host did not name.
+  function label(trial, repeat) {
+    const parts = [];
+    if (trial != null) parts.push('Trial ' + trial);
+    if (repeat != null) parts.push('Q' + repeat);
+    trialEl.textContent = parts.join(' · ');
   }
 
   function count() {
@@ -410,6 +440,26 @@
     clock.textContent = BLANK + BLANK;
     timer.classList.remove('urgent');
     sendBtn.disabled = true;
+    again.hidden = true;                   // the trial label stays, this does not
+  }
+
+  // ---- the wait between questions ------------------------------------------
+  // Same clock, but the body stays unarmed, so it reads dim and the scale is
+  // locked: the subject sees the pause is deliberate rather than a hang.
+
+  function hold(seconds) {
+    disarm();
+    if (seconds <= 0) return;
+
+    deadline = performance.now() + seconds * 1000;
+    tick = setInterval(countHold, 100);
+    countHold();
+  }
+
+  function countHold() {
+    const left = Math.max(0, deadline - performance.now());
+    clock.textContent = Math.ceil(left / 1000);
+    if (left <= 0) disarm();
   }
 
   sendBtn.addEventListener('click', () => {
@@ -425,8 +475,9 @@
   // ---- socket --------------------------------------------------------------
 
   function apply(msg) {
-    if ('arm' in msg) arm(Number(msg.arm));
+    if ('arm' in msg) arm(Number(msg.arm), msg.trial, msg.repeat);
     if ('disarm' in msg) disarm();
+    if ('hold' in msg) hold(Number(msg.hold));
   }
 
   function connect() {

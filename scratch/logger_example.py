@@ -31,6 +31,7 @@ NUM_QUERIES     = 15
 ACQ_STRAT       = 'lognei'
 REPEATS         = 4     # surveys per trial
 SURVEY_TIMEOUT  = 25.0  # seconds the subject has to answer each one
+SURVEY_PERIOD   = 30.0  # seconds each survey occupies, answered early or not
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
@@ -139,7 +140,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
             action=action,
             args={
                 # 'Metabolic Cart': (action,),
-                'Survey'        : (action,)
+                'Survey'        : (action, i + 1)   # every repeat gets this trial
             }
         )
         
@@ -155,7 +156,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
 def main():
     torch.manual_seed(SEED)     # optimize_acqf seeds its restarts from this
 
-    survey = Survey(timeout=SURVEY_TIMEOUT)
+    survey = Survey(timeout=SURVEY_TIMEOUT, period=SURVEY_PERIOD)
     print('Waiting for the iPad...')
     survey.wait_for_ipad()
 

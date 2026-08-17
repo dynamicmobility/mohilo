@@ -94,7 +94,8 @@ def local_ips():
 class Panel:
     """A slider and a light, living on an iPad, driven from here."""
 
-    def __init__(self, http_port=HTTP_PORT, ws_port=WS_PORT, directory=".", quiet=False):
+    def __init__(self, http_port=HTTP_PORT, ws_port=WS_PORT, directory=".", quiet=False,
+                 page=None):
         self.slider = 3              # where the slider is right now, 1 - 5
         self.submitted = None        # value from the last Send tap
         self.on_slider = None        # optional callback: f(value) on every move
@@ -110,7 +111,7 @@ class Panel:
         self._ready = threading.Event()
 
         handler = functools.partial(
-            _QuietHTTPHandler if quiet else http.server.SimpleHTTPRequestHandler,
+            type("_Handler", (_PageHandler,), {"quiet": quiet, "page": page}),
             directory=directory,
         )
         self._http = http.server.ThreadingHTTPServer(("", http_port), handler)
@@ -120,13 +121,14 @@ class Panel:
         self._thread.start()
         self._ready.wait(5)
 
+        suffix = f"/{page}" if page else ""
         ips = local_ips()
         if len(ips) == 1:
-            print(f"Open this on the iPad:  http://{ips[0]}:{http_port}")
+            print(f"Open this on the iPad:  http://{ips[0]}:{http_port}{suffix}")
         else:
             print("Open one of these on the iPad (whichever shares its Wi-Fi):")
             for ip in ips:
-                print(f"    http://{ip}:{http_port}")
+                print(f"    http://{ip}:{http_port}{suffix}")
 
     # ---- the bits you call -------------------------------------------------
 
@@ -245,9 +247,28 @@ class Panel:
         self._loop.close()
 
 
-class _QuietHTTPHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *args):
-        pass
+class _PageHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves the directory, sending the bare root to `page` when one is set.
+
+    Without the redirect the root serves index.html, which is the lamp panel and
+    ignores the survey's messages, so a subclass with its own page says so here.
+    """
+
+    quiet = False       # both set per Panel, on a subclass made in __init__
+    page  = None
+
+    def do_GET(self):
+        if self.page and self.path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/" + self.page)
+            self.end_headers()
+            return
+
+        super().do_GET()
+
+    def log_message(self, fmt, *args):
+        if not self.quiet:
+            super().log_message(fmt, *args)
 
 
 if __name__ == "__main__":
