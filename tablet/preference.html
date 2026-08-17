@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Preference</title>
+<style>
+  :root {
+    --bg:      #17191d;
+    --surface: #1f2228;
+    --edge:    #2c3037;
+    --ink:     #8b929e;
+    --ink-dim: #575d68;
+    --signal:  #7fb2e5;
+    --warm:    #e5a06a;
+    --thumb:   54px;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    padding: max(20px, env(safe-area-inset-top)) 32px max(20px, env(safe-area-inset-bottom));
+    gap: 20px;
+    font-family: "Avenir Next Condensed", "Avenir Next", system-ui, sans-serif;
+    color: var(--ink);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* --- status bar --- */
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    flex: 0 0 auto;
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ink-dim);
+    transition: background .2s;
+  }
+
+  .status.live .dot { background: var(--signal); }
+  .status.live     { color: var(--ink); }
+
+  /* --- the two percentages --- */
+
+  .stage {
+    flex: 1 1 auto;
+    display: grid;
+    place-items: center;
+    min-height: 0;
+  }
+
+  .split {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: min(10vw, 90px);
+    width: 100%;
+  }
+
+  .half { text-align: center; }
+
+  .pct {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: min(14vh, 17vw);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    transition: color .15s;
+  }
+
+  .half .name {
+    margin-top: 14px;
+    font-size: 22px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  #effPct  { color: var(--signal); }
+  #comfPct { color: var(--warm); }
+
+  /* --- slider --- */
+
+  .control { flex: 0 0 auto; }
+
+  .ends {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    font-size: 20px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+  }
+
+  .ends .eff  { color: var(--signal); }
+  .ends .comf { color: var(--warm); }
+
+  .send {
+    display: block;
+    width: 100%;
+    margin-top: 14px;
+    padding: 20px;
+    border: none;
+    border-radius: 12px;
+    background: var(--signal);
+    color: #10242f;
+    font-family: inherit;
+    font-size: 19px;
+    font-weight: 600;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background .15s, color .15s, opacity .15s;
+  }
+
+  .send:active { opacity: .75; }
+
+  .send:focus-visible {
+    outline: 3px solid var(--signal);
+    outline-offset: 3px;
+  }
+
+  .send:disabled {
+    background: var(--surface);
+    color: var(--ink-dim);
+    cursor: default;
+  }
+
+  input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: var(--thumb);
+    background: transparent;
+    margin: 0;
+  }
+
+  /* the track reads as the split itself: signal left of the thumb, warm right */
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 18px;
+    border-radius: 9px;
+    background: linear-gradient(
+      to right,
+      var(--signal) 0 var(--fill, 50%),
+      var(--warm)   var(--fill, 50%) 100%);
+    border: 1px solid var(--edge);
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: var(--thumb); height: var(--thumb);
+    margin-top: -19px;
+    border-radius: 50%;
+    background: #eef1f5;
+    border: 1px solid #b9c0ca;
+    box-shadow: 0 3px 10px rgba(0,0,0,.5);
+  }
+
+  input[type=range]:active::-webkit-slider-thumb { background: #fff; }
+
+  input[type=range]::-moz-range-track {
+    height: 18px; border-radius: 9px;
+    background: var(--surface); border: 1px solid var(--edge);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: #eef1f5; border: 1px solid #b9c0ca;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .pct { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="status" id="status">
+    <span class="dot"></span><span id="statusText">Connecting</span>
+  </div>
+
+  <div class="stage">
+    <div class="split">
+      <div class="half">
+        <div class="pct" id="effPct">50%</div>
+        <div class="name">Efficiency</div>
+      </div>
+      <div class="half">
+        <div class="pct" id="comfPct">50%</div>
+        <div class="name">Comfort</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="control">
+    <div class="ends">
+      <span class="eff">Efficiency</span>
+      <span class="comf">Comfort</span>
+    </div>
+    <input type="range" id="slider" min="0" max="100" step="1" value="50">
+    <button class="send" id="send" type="button">Send</button>
+  </div>
+
+<script>
+(() => {
+  const slider  = document.getElementById('slider');
+  const effPct  = document.getElementById('effPct');
+  const comfPct = document.getElementById('comfPct');
+  const status  = document.getElementById('status');
+  const statusText = document.getElementById('statusText');
+  const sendBtn = document.getElementById('send');
+
+  const WS_PORT = 8766;
+
+  let ws = null;
+
+  // ---- slider --------------------------------------------------------------
+  // Index 0 is all Efficiency, 100 all Comfort; the two shares sum to 100.
+
+  function paint() {
+    const v = parseInt(slider.value, 10);
+    slider.style.setProperty('--fill', v + '%');
+    effPct.textContent  = (100 - v) + '%';
+    comfPct.textContent = v + '%';
+  }
+
+  slider.addEventListener('input', () => {
+    paint();
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ slider: parseInt(slider.value, 10) }));
+    }
+  });
+
+  sendBtn.addEventListener('click', () => {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ submit: parseInt(slider.value, 10) }));
+
+    sendBtn.textContent = 'Sent';
+    setTimeout(() => { sendBtn.textContent = 'Send'; }, 700);
+  });
+
+  // ---- socket --------------------------------------------------------------
+
+  function connect() {
+    ws = new WebSocket(`ws://${location.hostname}:${WS_PORT}`);
+
+    ws.onopen = () => {
+      status.classList.add('live');
+      statusText.textContent = 'Connected';
+      sendBtn.disabled = false;
+    };
+
+    ws.onclose = () => {
+      status.classList.remove('live');
+      statusText.textContent = 'Reconnecting';
+      sendBtn.disabled = true;   // an action the computer cannot hear is no action
+      setTimeout(connect, 1000);
+    };
+
+    ws.onerror = () => ws.close();
+  }
+
+  paint();
+  sendBtn.disabled = true;
+  connect();
+
+  // Safari drops the socket when the tab is backgrounded; reconnect on return.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && (!ws || ws.readyState === WebSocket.CLOSED)) connect();
+  });
+
+  // ---- keep the screen awake ----------------------------------------------
+
+  let wakeLock = null;
+  async function keepAwake() {
+    try { wakeLock = await navigator.wakeLock.request('screen'); } catch (_) {}
+  }
+  if ('wakeLock' in navigator) {
+    keepAwake();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) keepAwake();
+    });
+  }
+})();
+</script>
+</body>
+</html>

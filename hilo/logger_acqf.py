@@ -22,9 +22,6 @@ MIN_LENGTHSCALE  = 0.3
 NUM_QUERIES      = 30
 ACQ_STRAT        = 'lognei'
 REPEATS          = 1
-SURVEY_TIMEOUT   = 5.0 
-SURVEY_PERIOD    = 10.0
-METABOLIC_PERIOD = 20.0
 COMFORT          = 'Comfort'
 METABOLIC        = 'Cost'
 
@@ -154,7 +151,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
         
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
-        gp = fit_gp(objective)
+    gp = fit_gp(objective)
     
     return experiment, gp
 
