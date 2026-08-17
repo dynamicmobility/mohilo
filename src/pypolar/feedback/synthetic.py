@@ -123,7 +123,7 @@ class SyntheticFunction:
         self.spread    = y.std() if measure == 'std' else np.ptp(y)
         self.noise_std = rel_noise_std * self.spread
 
-    def __call__(self, X, noise=True):
+    def __call__(self, X, noise=True): # TODO: type annotate and make this work with floats
         """Values at the (n, d) actions X, returned (n,).
 
         The noise is drawn from the instance's own generator, so repeated calls
@@ -134,3 +134,5 @@ class SyntheticFunction:
             return y
 
         return y + self.noise_std * self.rng.standard_normal(y.shape)
+    
+    # TODO: add estimate range function

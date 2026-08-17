@@ -12,9 +12,9 @@ from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
 class Device(ABC):
 
-    @abstractmethod
     def send(self, action):
         """Sends an action to the device."""
+        pass
 
 
 class Logger:
@@ -91,6 +91,10 @@ class Logger:
     def all_measurements_completed(self) -> bool:
         """Goes true when the current trial is done collecting measurements"""
         return all(probe.finished for probe in self.probes.values())
+    
+    def wait_for_measurements(self):
+        while not self.all_measurements_completed:
+            pass
 
     def end_trial(self, force=False):
         """Ends a trial, adding each probe's values to the objective it reports.

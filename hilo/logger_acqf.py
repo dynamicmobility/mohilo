@@ -11,15 +11,15 @@ from botorch.acquisition import (
 )
 from botorch.sampling import SobolQMCNormalSampler
 import torch
+from pathlib import Path
 import pypolar as plr
-from tablet.survey import Survey
 
 DIM              = 3
 BOX              = 5.0
 SEED             = 95
-GP_NOISE         = plr.NoiseModel.pinned(0.5)
-MIN_LENGTHSCALE  = 0.2
-NUM_QUERIES      = 15
+GP_NOISE         = plr.NoiseModel.prior(0.3)
+MIN_LENGTHSCALE  = 0.3
+NUM_QUERIES      = 30
 ACQ_STRAT        = 'lognei'
 REPEATS          = 1
 SURVEY_TIMEOUT   = 5.0 
@@ -46,7 +46,7 @@ METABOLIC_TRUTH = plr.SyntheticFunction(
 
 COMFORT_TRUTH = plr.SyntheticFunction(
     truth = plr.construct_function(
-        func = plr.SYNTHETIC_1D_FUNCTIONS['DixonPrice'],
+        func = plr.SYNTHETIC_1D_FUNCTIONS['Levy'],
         dim  = DIM,
         box  = BOX,
         seed = SEED
@@ -54,27 +54,16 @@ COMFORT_TRUTH = plr.SyntheticFunction(
     rel_noise_std = 0.3,
 )
 
-class Exo(plr.Device):
-
-    def send(self, action):
-        print('Exo got action', action)
-        input('Send action? ')
-
-
-def get_data_from_cart(action: np.ndarray):
-    time.sleep(METABOLIC_PERIOD)
-    return METABOLIC_TRUTH(action)
-
-def make_probes(survey: Survey):
+def make_probes():
     probes = [
         plr.Probe(
             name     = METABOLIC,
-            caller   = get_data_from_cart,
+            caller   = METABOLIC_TRUTH,
             obj_name = METABOLIC,
         ),
         plr.Probe(
             name     = COMFORT,
-            caller   = survey.ask,
+            caller   = COMFORT_TRUTH,
             repeats  = REPEATS,
             obj_name = COMFORT
         ),
@@ -92,13 +81,13 @@ def make_experiment(probes: list[plr.Probe]):
             ),
             plr.Objective.from_empty(
                 name          = COMFORT,
-                maximize      = True,
+                maximize      = False,
                 action_bounds = (-BOX, BOX)
             )
         ],
         probes       = probes,
-        device       = Exo(),
-        action_names = ['x', 'y', 'z']
+        device       = plr.Device(),
+        action_names = [f'x{i}' for i in range(DIM)]
     )
     return experiment
 
@@ -134,6 +123,8 @@ def fit_gp(objective):
         noise               = GP_NOISE,
         fit_hyperparameters = True,
         min_length_scale    = MIN_LENGTHSCALE,
+        # signal_var=1.0,
+        # length_scale=0.5
     )
 
 def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
@@ -152,6 +143,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
             gp = fit_gp(objective)
             action = acqf.query(gp, q=1)[0]
 
+        print(action)
         experiment.begin_trial(
             action=action,
             args={
@@ -160,42 +152,72 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
             }
         )
         
-        start = time.time()
-        while not experiment.all_measurements_completed:
-            print('Waiting...', round(time.time() - start, 1), end='\t\t\r')
-            time.sleep(0.1)
-
+        experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
+        gp = fit_gp(objective)
     
-    return experiment
+    return experiment, gp
 
-def connect_to_ipad():
-    ipad = Survey(timeout=SURVEY_TIMEOUT, period=SURVEY_PERIOD)
-    print('Waiting for the iPad...')
-    ipad.wait_for_ipad()
-    return ipad
+def make_fit_figure(truth, objective, gp, inferred, box, output):
+    """The 1D fit: the GP and the truth evaluated on a grid, drawn by
+    `plr.plot_fit_1d`.
+    """
+    output = Path(output)
+    grid    = np.linspace(box[0, 0], box[1, 0], 1024)[:, None]
+    mu, std = gp.posterior_at(grid, raw=True)
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    plr.plot_fit_1d(
+        ax       = ax,
+        x        = grid[:, 0],
+        mu       = mu[:, 0],
+        std      = std[:, 0],
+        xdata    = objective.xdata[:, 0],
+        ydata    = objective.ydata,
+        truth    = plr.truth_at(truth, grid),
+        # one objective, so the single column is the path itself
+        paths    = gp.sample_paths(grid, 16, raw=True)[:, :, 0],
+        vlines   = {'recommended action': inferred[0],
+                    'true optimizer'    : truth.optimizers[0, 0].item()},
+        band_std = 1.0,
+        title    = f'{'f'} on Levy, 1D, after {len(objective.ydata)} measurements'
+    )
+
+    fig.tight_layout()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output, dpi=200)
+    print(f'wrote {output}')
+
 
 def main():
     torch.manual_seed(SEED)
 
-    ipad       = connect_to_ipad()
-    probes     = make_probes(ipad)
-    
+    probes     = make_probes()
     experiment = make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
-        acqf      = acquisition_factory(strategy=ACQ_STRAT, seed=SEED),
-        objective = experiment.objectives[COMFORT]
+        acqf      = acquisition_factory(strategy='qlognei', seed=SEED),
+        objective = experiment.objectives[COMFORT],
+        raw_samples=2048,
+        num_restarts=32
     )
 
-    try:
-        experiment = run_experiment(experiment, acqf)
-    finally:
-        ipad.close()
+    experiment, gp = run_experiment(experiment, acqf)
+    best, mu, std = gp.best_actions(raw=True)
+    # (2, DIM) of [lower; upper] rows
+    box = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float)
 
-    for name in experiment.objectives.names:
-        objective = experiment.objectives[name]
-        print(name, 'values ', objective.ydata)
-        print(name, 'actions', objective.xdata.tolist())
+    if DIM == 1:
+        make_fit_figure(COMFORT_TRUTH.truth, experiment.objectives[COMFORT], gp, inferred=best, box=box, output='here.svg')
+    print('here', best)
+    print('here2', COMFORT_TRUTH(best, noise=False))
+    actions = plr.sample_actions(
+        bounds = [[-BOX]*DIM, [BOX]*DIM],
+        n=1024,
+        kind='sobol',
+        seed=SEED
+    )
+    values = COMFORT_TRUTH([actions], noise=False)
+    print(values.max() - values.min())
 
 
 if __name__ == '__main__':
