@@ -1,7 +1,7 @@
 import time
 from functools import partial
 from pathlib import Path
-
+import socketio
 import numpy as np
 from botorch.acquisition import (
     LogExpectedImprovement,
@@ -27,12 +27,33 @@ SURVEY_PERIOD    = 15.0
 METABOLIC_PERIOD = 15.0
 COMFORT          = 'Comfort'
 METABOLIC        = 'Cost'
+CONNECT          = True
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
 NUM_FANTASIES  = 20     # lognei: noiseless incumbents drawn; cost is linear in it
 MC_SAMPLES     = 128    # qlognei: QMC samples per acquisition evaluation
 PRUNE_BASELINE = True   # qlognei: drop measured points that cannot be the best
+
+EXO_IP = "192.168.1.122:5000"
+
+sio = socketio.Client()
+
+if CONNECT:
+    i = 0
+    while True:
+        try:
+            i += 1
+            sio.connect(f"ws://{EXO_IP}")
+            break
+        except socketio.exceptions.ConnectionError:
+            if i > 5:
+                print("Exceeded maximum number of retries. Exiting...")
+                exit()
+            print("Connection failed. Retrying...")
+            time.sleep(1)
+    else:
+        sio = None
 
 METABOLIC_TRUTH = plr.SyntheticFunction(
     truth = plr.construct_function(
@@ -55,11 +76,57 @@ COMFORT_TRUTH = plr.SyntheticFunction(
 )
 
 class Exo(plr.Device):
+    
+    def __init__(self, exo_ip, connect=True):
+        global sio
+        self.exo_ip = None
+        if connect:
+            i = 0
+            while True:
+                try:
+                    i += 1
+                    sio.connect(f"ws://{self.exo_ip}")
+                    break
+                except socketio.exceptions.ConnectionError:
+                    if i > 5:
+                        print("Exceeded maximum number of retries. Exiting...")
+                        exit()
+                    print("Connection failed. Retrying...")
+                    time.sleep(1)
+        else:
+            sio = None
+        
 
     def send(self, action):
+        global sio
         print('Exo got action', action)
-        input('Send action? ')
+        
+        if self.sio:
+            action_dict = {
+                'h_flex_torque_scale': action[0],
+                'h_ext_torque_scale' : action[1],
+                'hip_delay_idx'      : action[2]
+            }
+            sio.emit("update_inputs", action_dict)
+            print('Successfully sent action.')
+        
+        
+    def get(self):
+        pass
 
+def send_to_exo(action):
+    print('Exo got action', action)
+        
+    if sio:
+        action_dict = {
+            'h_flex_torque_scale': action[0],
+            'h_ext_torque_scale' : action[1],
+            'hip_delay_idx'      : action[2]
+        }
+        sio.emit("update_inputs", action_dict)
+        print('Successfully sent action.')
+    else:
+        print('Disabled!')
 
 def get_data_from_cart(action: np.ndarray):
     time.sleep(METABOLIC_PERIOD)
@@ -88,16 +155,16 @@ def make_experiment(probes: list[plr.Probe]):
             plr.Objective.from_empty(
                 name          = METABOLIC,
                 maximize      = False,
-                action_bounds = (-BOX, BOX)
+                action_bounds = (0, BOX)
             ),
             plr.Objective.from_empty(
                 name          = COMFORT,
                 maximize      = True,
-                action_bounds = (-BOX, BOX)
+                action_bounds = (0, BOX)
             )
         ],
         probes       = probes,
-        device       = Exo(),
+        # device       = Exo(exo_ip=EXO_IP, connect=CONNECT),
         action_names = ['x', 'y', 'z']
     )
     return experiment
@@ -142,7 +209,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
         if not len(objective.ydata):
             # randomly sample if no data is collected
             action = plr.sample_actions(
-                bounds = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float),
+                bounds = np.array([[0] * DIM, [BOX] * DIM], dtype=float),
                 n      = 1,
                 kind   = 'uniform',
                 seed   = SEED + i
@@ -154,6 +221,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
 
         experiment.begin_trial(
             action=action,
+            device_send_fn=send_to_exo,
             args={
                 METABOLIC: (action,),
                 COMFORT:   (action, i + 1)
@@ -177,7 +245,7 @@ def connect_to_ipad():
 
 def main():
     torch.manual_seed(SEED)
-
+    
     ipad       = connect_to_ipad()
     probes     = make_probes(ipad)
     

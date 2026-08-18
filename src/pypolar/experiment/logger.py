@@ -33,7 +33,7 @@ class Logger:
         self,
         objectives  : DecoupledObjectives | list[Objective],
         probes      : list[Probe],
-        device      : Device,
+        # device      : Device,
         action_names: list[str] = None,
         aux_metrics : list[str] = None,
     ):
@@ -43,7 +43,7 @@ class Logger:
         self.objectives     = objectives
         self.action_names   = action_names
         self.aux_metrics    = aux_metrics
-        self.device         = device
+        # self.device         = device
         self.current_action = None
 
         self.probes = {probe.name: probe for probe in probes}
@@ -63,7 +63,7 @@ class Logger:
                 )
             self.obj2probes.setdefault(probe.obj_name, []).append(probe)
 
-    def begin_trial(self, action: np.ndarray, args: dict = None,
+    def begin_trial(self, action: np.ndarray, device_send_fn, args: dict = None,
                     kwargs: dict[str, dict] = None):
         """Applies an action and starts every probe measuring at it.
 
@@ -82,7 +82,8 @@ class Logger:
                              f'{len(self.action_names)}: {self.action_names}')
 
         self.current_action = action
-        self.device.send(action)
+        # self.device.send(action)
+        device_send_fn(action)
 
         for name, probe in self.probes.items():
             probe.measure(*args.get(name, ()), **kwargs.get(name, {}))
