@@ -12,10 +12,20 @@ from botorch.utils.sampling import draw_sobol_samples
 
 BOUNDS_SLACK = 1e-9   # float round-off allowed outside a declared action box
 
-# TODO: make the bounds easier to pass in
-def sample_actions(bounds, n, kind, seed):
+def sample_actions(
+    bounds    : list | np.ndarray | float,
+    n         : int,
+    kind      : str,
+    seed      : int,
+    dim       : int = None
+): 
     """n actions over the box: Sobol is space-filling, uniform is iid."""
+    if isinstance(bounds, float):
+        # TODO: make tests for this case
+        if dim is None: raise Exception('dim must be provided if bounds is a float')
+        bounds = np.array([[-bounds] * dim] + [[bounds] * dim], dtype=float)
     bounds = torch.as_tensor(bounds, dtype=torch.float64)
+    
     if kind == 'sobol':
         return draw_sobol_samples(bounds=bounds, n=n, q=1, seed=seed).squeeze(1).numpy()
 

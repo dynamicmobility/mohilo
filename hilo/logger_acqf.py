@@ -14,16 +14,17 @@ import torch
 from pathlib import Path
 import pypolar as plr
 
-DIM              = 3
+DIM              = 1
 BOX              = 5.0
 SEED             = 95
-GP_NOISE         = plr.NoiseModel.prior(0.3)
-MIN_LENGTHSCALE  = 0.3
-NUM_QUERIES      = 30
-ACQ_STRAT        = 'lognei'
+GP_NOISE         = plr.NoiseModel.prior(0.5)
+MIN_LENGTHSCALE  = 0.1
+NUM_QUERIES      = DIM * 12
+ACQ_STRAT        = 'qlognei'
 REPEATS          = 1
 COMFORT          = 'Comfort'
 METABOLIC        = 'Cost'
+MULTITHREAD      = False
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
@@ -48,21 +49,23 @@ COMFORT_TRUTH = plr.SyntheticFunction(
         box  = BOX,
         seed = SEED
     ),
-    rel_noise_std = 0.3,
+    rel_noise_std = 0.5,
 )
 
 def make_probes():
     probes = [
         plr.Probe(
-            name     = METABOLIC,
-            caller   = METABOLIC_TRUTH,
-            obj_name = METABOLIC,
+            name              = METABOLIC,
+            caller            = METABOLIC_TRUTH,
+            obj_name          = METABOLIC,
+            separate_thread   = MULTITHREAD
         ),
         plr.Probe(
-            name     = COMFORT,
-            caller   = COMFORT_TRUTH,
-            repeats  = REPEATS,
-            obj_name = COMFORT
+            name              = COMFORT,
+            caller            = COMFORT_TRUTH,
+            repeats           = REPEATS,
+            obj_name          = COMFORT,
+            separate_thread   = MULTITHREAD
         ),
     ]
     return probes
@@ -84,7 +87,7 @@ def make_experiment(probes: list[plr.Probe]):
         ],
         probes       = probes,
         device       = plr.Device(),
-        action_names = [f'x{i}' for i in range(DIM)]
+        action_names = [f'x{i}' for i in range(DIM)],
     )
     return experiment
 
@@ -130,7 +133,8 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
         if not len(objective.ydata):
             # randomly sample if no data is collected
             action = plr.sample_actions(
-                bounds = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float),
+                bounds = BOX,
+                dim    = DIM,
                 n      = 1,
                 kind   = 'uniform',
                 seed   = SEED + i
@@ -141,6 +145,7 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
             action = acqf.query(gp, q=1)[0]
 
         print(action)
+        t = time.time()
         experiment.begin_trial(
             action=action,
             args={
@@ -148,9 +153,10 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
                 COMFORT:   (action, i + 1)
             }
         )
-        
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
+        print(time.time() - t)
+
     gp = fit_gp(objective)
     
     return experiment, gp
@@ -192,10 +198,10 @@ def main():
     probes     = make_probes()
     experiment = make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
-        acqf      = acquisition_factory(strategy='qlognei', seed=SEED),
+        acqf      = acquisition_factory(strategy=ACQ_STRAT, seed=SEED),
         objective = experiment.objectives[COMFORT],
-        raw_samples=2048,
-        num_restarts=32
+        # raw_samples=2048,
+        # num_restarts=32
     )
 
     experiment, gp = run_experiment(experiment, acqf)

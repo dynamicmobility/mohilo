@@ -57,6 +57,7 @@ SYNTHETIC_1D_FUNCTIONS = {
 
 def truth_at(truth: SyntheticTestFunction, X):
     """Noiseless values of the truth at the (n, d) actions X."""
+    X = np.asarray(X)
     with torch.no_grad():
         return truth(torch.as_tensor(X, dtype=DTYPE), noise=False).numpy()
 
