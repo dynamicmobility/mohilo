@@ -1,4 +1,4 @@
-from pypolar.feedback.acquisition import AcquisitionFunction
+from pypolar.feedback.acquisition import AcquisitionFunction, acquisition_factory_1d
 from pypolar.feedback.oracles import (
     BradleyTerryOracle,
     MultiObjectiveOracle,
@@ -21,6 +21,7 @@ from pypolar.feedback.synthetic import (
 
 __all__ = [
     "AcquisitionFunction",
+    "acquisition_factory_1d",
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
     "NoisyRegressionOracle",

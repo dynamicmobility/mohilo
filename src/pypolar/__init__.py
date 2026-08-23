@@ -15,6 +15,7 @@ from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_no
 from pypolar.utils.plotting import plot_test_function, plot_fit_1d
 from pypolar.feedback import (
     AcquisitionFunction,
+    acquisition_factory_1d,
     BradleyTerryOracle,
     MultiObjectiveOracle,
     NoisyRegressionOracle,
@@ -54,6 +55,7 @@ __all__ = [
     "sample_actions",
     # acquisition
     "AcquisitionFunction",
+    "acquisition_factory_1d",
     # feedback oracles
     "BradleyTerryOracle",
     "MultiObjectiveOracle",

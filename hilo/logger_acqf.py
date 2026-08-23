@@ -1,36 +1,32 @@
 import time
+import warnings
 from functools import partial
 from pathlib import Path
-
+from dataclasses import dataclass
 import numpy as np
-from botorch.acquisition import (
-    LogExpectedImprovement,
-    LogNoisyExpectedImprovement,
-    UpperConfidenceBound,
-    qLogNoisyExpectedImprovement,
-)
-from botorch.sampling import SobolQMCNormalSampler
+import matplotlib.pyplot as plt
+from linear_operator.utils.warnings import NumericalWarning
 import torch
 from pathlib import Path
 import pypolar as plr
+from tqdm import tqdm
+warnings.filterwarnings('ignore', category=NumericalWarning)
 
 DIM              = 1
 BOX              = 5.0
 SEED             = 95
-GP_NOISE         = plr.NoiseModel.prior(0.5)
+TRUE_NOISE       = 0.5
+GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
+# GP_NOISE         = plr.NoiseModel.pinned(TRUE_NOISE)
 MIN_LENGTHSCALE  = 0.1
-NUM_QUERIES      = DIM * 12
-ACQ_STRAT        = 'qlognei'
+NUM_QUERIES      = DIM * 13
+ACQ_STRATS       = ['ucb', 'logei', 'qlognei']
 REPEATS          = 1
 COMFORT          = 'Comfort'
 METABOLIC        = 'Cost'
 MULTITHREAD      = False
 
-# Acquisition function stuff
-UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
-NUM_FANTASIES  = 20     # lognei: noiseless incumbents drawn; cost is linear in it
-MC_SAMPLES     = 128    # qlognei: QMC samples per acquisition evaluation
-PRUNE_BASELINE = True   # qlognei: drop measured points that cannot be the best
+RUNS_PER_ACQF = 10
 
 METABOLIC_TRUTH = plr.SyntheticFunction(
     truth = plr.construct_function(
@@ -39,7 +35,7 @@ METABOLIC_TRUTH = plr.SyntheticFunction(
         box  = BOX,
         seed = SEED
     ),
-    rel_noise_std = 0.5,
+    rel_noise_std = TRUE_NOISE,
 )
 
 COMFORT_TRUTH = plr.SyntheticFunction(
@@ -49,8 +45,12 @@ COMFORT_TRUTH = plr.SyntheticFunction(
         box  = BOX,
         seed = SEED
     ),
-    rel_noise_std = 0.5,
+    rel_noise_std = TRUE_NOISE,
 )
+GROUND_TRUTHS = {
+    METABOLIC   : METABOLIC_TRUTH,
+    COMFORT     : COMFORT_TRUTH
+}
 
 def make_probes():
     probes = [
@@ -91,32 +91,6 @@ def make_experiment(probes: list[plr.Probe]):
     )
     return experiment
 
-def acquisition_factory(strategy, seed):
-    if strategy == 'lognei' and plr.NoiseModel.coerce(GP_NOISE).is_fitted:
-        raise ValueError("'lognei' needs a FixedNoiseGaussianLikelihood, so set "
-                         'GP_NOISE = plr.NoiseModel.pinned(...) to use it')
-
-    factories = {
-        'ucb'    : partial(
-            UpperConfidenceBound, 
-            beta = UCB_BETA
-        ),
-        'logei'  : LogExpectedImprovement,
-        'lognei' : partial(
-            LogNoisyExpectedImprovement, 
-            num_fantasies = NUM_FANTASIES
-        ),
-        'qlognei': partial(
-            qLogNoisyExpectedImprovement,
-            sampler        = SobolQMCNormalSampler(torch.Size([MC_SAMPLES]), seed=seed),
-            prune_baseline = PRUNE_BASELINE
-        )
-    }
-    if strategy not in factories:
-        raise ValueError(f'no acquisition for {strategy!r}')
-
-    return factories[strategy]
-
 def fit_gp(objective):
     return plr.BoTorchGP(
         objective           = objective,
@@ -127,10 +101,18 @@ def fit_gp(objective):
         # length_scale=0.5
     )
 
-def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
-    for i in range(NUM_QUERIES):
+def run_experiment(
+    experiment        : plr.Logger,
+    acqf              : plr.AcquisitionFunction,
+    optimal_actions   : dict[str, np.ndarray],
+    ground_truths     : dict[str, plr.SyntheticFunction],
+    gt_spread         : dict[str, float]
+):
+    gp = None
+    regrets = []
+    for i in tqdm(range(NUM_QUERIES)):
         objective = experiment.objectives[COMFORT]
-        if not len(objective.ydata):
+        if len(objective.ydata) < 1:
             # randomly sample if no data is collected
             action = plr.sample_actions(
                 bounds = BOX,
@@ -142,10 +124,20 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
         else:
             # fit gp + Acquisition strategy for the rest
             gp = fit_gp(objective)
+            degenerate_gp = gp.get_fitted_hyperparameters().signal_var < 1e-2
             action = acqf.query(gp, q=1)[0]
+            if degenerate_gp:
+                print(action, i)
+                print('IT HAPPENED\n\n')
 
-        print(action)
-        t = time.time()
+            recommended_action, _, _  = gp.recommend(raw=True)
+            comfort_gt                = ground_truths[COMFORT]
+            optimal_val               = comfort_gt(optimal_actions[COMFORT], noise=False)
+            inferred_val              = comfort_gt(recommended_action, noise=False)
+            scaled_regret             = (inferred_val - optimal_val) / gt_spread[COMFORT]
+            
+            regrets.append(scaled_regret)
+
         experiment.begin_trial(
             action=action,
             args={
@@ -155,11 +147,10 @@ def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
         )
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
-        print(time.time() - t)
 
     gp = fit_gp(objective)
     
-    return experiment, gp
+    return experiment, gp, np.asarray(regrets)
 
 def make_fit_figure(truth, objective, gp, inferred, box, output):
     """The 1D fit: the GP and the truth evaluated on a grid, drawn by
@@ -191,26 +182,91 @@ def make_fit_figure(truth, objective, gp, inferred, box, output):
     fig.savefig(output, dpi=200)
     print(f'wrote {output}')
 
-
-def main():
-    torch.manual_seed(SEED)
-
+def setup_experiment(acq_strat, seed):
     probes     = make_probes()
     experiment = make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
-        acqf      = acquisition_factory(strategy=ACQ_STRAT, seed=SEED),
+        acqf      = plr.acquisition_factory_1d(strategy=acq_strat, seed=seed),
         objective = experiment.objectives[COMFORT],
-        # raw_samples=2048,
-        # num_restarts=32
     )
 
-    experiment, gp = run_experiment(experiment, acqf)
+    return experiment, acqf
+
+
+def get_groundtruth_optimum(
+    seed,
+    num_samples=4096
+):
+    actions = plr.sample_actions(
+        bounds    = BOX,
+        dim       = DIM,
+        n         = num_samples,
+        kind      = 'sobol',
+        seed      = seed,
+    )
+    gt_values = np.array([GROUND_TRUTHS[obj_name](actions, noise=False) for obj_name in GROUND_TRUTHS.keys()])
+    idxs = np.argmin(gt_values, axis=1)
+    spread = gt_values.max(axis=1) - gt_values.min(axis=1)
+    return (
+        {name: actions[i] for name, i in zip(GROUND_TRUTHS.keys(), idxs, strict=True)},
+        {name: sp for name, sp in zip(GROUND_TRUTHS.keys(), spread, strict=True)}
+    )
+
+@dataclass
+class ExperimentDataset:
+    pass
+    # the model at each iteration, use model.state_dict()!!
+    # the feedback points and actions (this might already be included in the model state dict?) --> construct an objective from this?
+    # where the sampled actions came from (acquisition or random) list[str]
+    # the acquistion function and its inputs (str + kwargs [str, float])
+    # the regret list[float]
+    # the groundtruth functions and their inputs list[str] of func names and list[kwargs (str, float)] of inputs 
+
+def main():
+    torch.manual_seed(SEED)
+    optimal_actions, gt_spread = get_groundtruth_optimum(
+        seed = SEED,
+        num_samples=8192
+    )
+    
+    data = []
+    fig, ax = plt.subplots()
+    for acq_strat in ACQ_STRATS:
+        experiment, acqf = setup_experiment(
+            acq_strat   = acq_strat,
+            seed        = SEED
+        )
+        experiment, gp, regrets = run_experiment(
+            experiment        = experiment,
+            acqf              = acqf,
+            optimal_actions   = optimal_actions,
+            ground_truths     = GROUND_TRUTHS,
+            gt_spread         = gt_spread
+        )
+        data.append(regrets)
+        ax.plot(regrets, label=acq_strat)
+
+        if DIM == 1:
+            box = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float)
+            make_fit_figure( # TODO: make gif version of this
+                truth       = COMFORT_TRUTH.truth,
+                objective   = experiment.objectives[COMFORT],
+                gp          = gp,
+                inferred    = gp.recommend()[0],
+                box         = box,
+                output      = f'hilo/output/{acq_strat}-fit.svg'
+            )
+            # TODO: find out way to save data including gp model + fit
+            # so we can plot it later? maybe save every iteration gp...
+    fig.legend()
+    plt.show()
+
+
+
     best, mu, std = gp.best_actions(raw=True)
     # (2, DIM) of [lower; upper] rows
-    box = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float)
+    
 
-    if DIM == 1:
-        make_fit_figure(COMFORT_TRUTH.truth, experiment.objectives[COMFORT], gp, inferred=best, box=box, output='here.svg')
     print('here', best)
     print('here2', COMFORT_TRUTH(best, noise=False))
     actions = plr.sample_actions(
@@ -221,6 +277,8 @@ def main():
     )
     values = COMFORT_TRUTH([actions], noise=False)
     print(values.max() - values.min())
+    print(values.min())
+    print(actions[np.argmin(values)])
 
 
 if __name__ == '__main__':

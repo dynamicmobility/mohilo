@@ -5,11 +5,64 @@ from inspect import signature
 
 import numpy as np
 import torch
+from functools import partial
 from botorch.acquisition import AcquisitionFunction as BoTorchAcqf
 from botorch.optim import optimize_acqf
+from botorch.acquisition import (
+    LogExpectedImprovement,
+    LogNoisyExpectedImprovement,
+    UpperConfidenceBound,
+    qLogNoisyExpectedImprovement,
+)
+from botorch.sampling import SobolQMCNormalSampler
 
-from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES
+
+from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES, BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
+
+# Acquisition function stuff
+UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
+NUM_FANTASIES  = 20     # lognei: noiseless incumbents drawn; cost is linear in it
+MC_SAMPLES     = 128    # qlognei: QMC samples per acquisition evaluation
+PRUNE_BASELINE = True   # qlognei: drop measured points that cannot be the best
+
+def acquisition_factory_1d(
+        strategy        : str,
+        seed            : int,
+        ucb_beta        : float = UCB_BETA,
+        num_fantasies   : int = NUM_FANTASIES,
+        mc_samples      : int = MC_SAMPLES,
+        prune_baseline  : bool = PRUNE_BASELINE
+    ):
+    # TODO: use better guard than is_fitted..
+    # if strategy == 'lognei' and NoiseModel.coerce(GP_NOISE).is_fitted:
+    #     raise ValueError("'lognei' needs a FixedNoiseGaussianLikelihood, so set "
+    #                      'GP_NOISE = plr.NoiseModel.pinned(...) to use it')
+
+    factories = {
+        'ucb'    : partial(
+            UpperConfidenceBound, 
+            beta = ucb_beta
+        ),
+        'logei'  : LogExpectedImprovement,
+        'lognei' : partial(
+            LogNoisyExpectedImprovement, 
+            num_fantasies = num_fantasies
+        ),
+        'qlognei': partial(
+            qLogNoisyExpectedImprovement,
+            sampler        = SobolQMCNormalSampler(torch.Size([mc_samples]), seed=seed),
+            prune_baseline = prune_baseline
+        )
+    }
+    if strategy not in factories:
+        raise ValueError(f'no acquisition for {strategy!r}')
+
+    return factories[strategy]
+
+def acqusition_factory_2d():
+    # TODO: implement this when doing MOGP
+    pass
 
 
 class AcquisitionFunction:
@@ -34,8 +87,8 @@ class AcquisitionFunction:
                 dimension. Defaults to the objective's own `action_bounds`.
         """
         if bounds is None:
-            bounds = objective.action_bounds
-        if bounds is None:
+            self.bounds = objective.action_bounds
+        if self.bounds is None:
             raise ValueError(
                 'without action_bounds the normalized frame is the box of the '
                 'points measured so far, which moves as they arrive; pin '
@@ -45,12 +98,6 @@ class AcquisitionFunction:
         self.acqf         = acqf
         self.num_restarts = num_restarts
         self.raw_samples  = raw_samples
-
-        # (2, d) in raw units, broadcast so a scalar bound covers every
-        # action dimension
-        self.action_box = np.broadcast_to(
-            np.asarray(bounds, dtype=float).reshape(2, -1), (2, objective.action_dim)
-        )
 
     def _incumbent(self, model):
         """The measurement-dependent arguments `self.acqf` takes, read off the
@@ -76,7 +123,7 @@ class AcquisitionFunction:
 
         return args
 
-    def query(self, model, q=1, raw=True):
+    def query(self, model: BoTorchGP, q=1, raw=True):
         """The q actions jointly maximizing the acquisition over the box.
 
         Args:
@@ -90,7 +137,9 @@ class AcquisitionFunction:
         Returns:
             (q, d) actions.
         """
-        box = self.action_box
+        box = np.broadcast_to(
+            np.asarray(self.bounds, dtype=float).reshape(2, -1), (2, model.objective.action_dim)
+        )
 
         candidate, _ = optimize_acqf(
             acq_function = self.acqf(model.model, **self._incumbent(model)),

@@ -379,8 +379,12 @@ class BoTorchGP:
         paths = _sample_paths(self.model, self.frame, action, num_paths, normalized)
         return self.objective.to_raw(paths) if raw else paths
 
-    def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
-                     raw=False):
+    def recommend(
+        self, 
+        num_restarts=NUM_RESTARTS, 
+        raw_samples=RAW_SAMPLES,
+        raw=False
+    ):
         """The action maximizing each objective's posterior mean.
 
         Args:
@@ -411,6 +415,7 @@ class BoTorchGP:
         # (m, m) evaluated at m actions; the diagonal is each objective at its own
         mu, std = self.posterior_at(actions, normalized=True, raw=raw)
         return self.objective.xtransform.inv(actions), np.diag(mu), np.diag(std)
+
 
     @property
     def frame(self):

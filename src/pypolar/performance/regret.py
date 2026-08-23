@@ -11,6 +11,7 @@ from pypolar.optimization.objectives import Objective
 
 def regret(truth: SyntheticTestFunction, objective: Objective, inferred,
            maximize=False):
+    # TODO: this only samples over xdata, which is bad. fix.
     """Simple and inference regret, both against the true optimum, in the
     objective's own units.
 
