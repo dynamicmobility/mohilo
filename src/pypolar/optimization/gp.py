@@ -1,10 +1,11 @@
 """Gaussian process modelling of decoupled objectives, on BoTorch."""
-
+# TODO: clean up these comments in this file.
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 from botorch.acquisition import PosteriorMean
+from botorch.acquisition.objective import ScalarizedPosteriorTransform
 from botorch.fit import fit_gpytorch_mll
 from botorch.models import ModelListGP, SingleTaskGP
 from botorch.models.transforms.outcome import Standardize
@@ -215,9 +216,68 @@ def gp_hyperparameters(model: SingleTaskGP) -> GPHyperparameters:
     )
 
 
+def _posterior_at(model, frame, action, normalized, chunk, transform=None):
+    """Posterior mean and standard deviation at arbitrary actions.
+
+    Args:
+        model: the BoTorch model to read.
+        frame: the `AffineTransform` normalizing raw actions.
+        action: a single (d,) action or an (n, d) array of them.
+        normalized: True if `action` is already in the [0, 1]^d frame.
+        chunk: actions evaluated per posterior call.
+        transform: a BoTorch `PosteriorTransform`, or None.
+
+    Returns:
+        (mean, std), each (n, m), in maximization space.
+    """
+    X = np.atleast_2d(np.asarray(action, dtype=float))
+    if not normalized:
+        X = frame(X)
+
+    # fed as q=1 batch elements, so each posterior is 1x1 per objective and
+    # gpytorch never forms the n x n test-test block
+    X = torch.as_tensor(X, dtype=DTYPE).unsqueeze(1)
+    with torch.no_grad():
+        posteriors = [model.posterior(X[i:i + chunk], posterior_transform=transform)
+                      for i in range(0, X.shape[0], chunk)]
+        mu  = torch.cat([p.mean.squeeze(1)     for p in posteriors])
+        var = torch.cat([p.variance.squeeze(1) for p in posteriors])
+
+    return mu.numpy(), var.sqrt().numpy()
+
+
+def _sample_paths(model, frame, action, num_paths, normalized, transform=None):
+    """Joint posterior draws over arbitrary actions.
+
+    Args:
+        model: the BoTorch model to read.
+        frame: the `AffineTransform` normalizing raw actions.
+        action: a single (d,) action or an (n, d) array of them.
+        num_paths: paths drawn.
+        normalized: True if `action` is already in the [0, 1]^d frame.
+        transform: a BoTorch `PosteriorTransform`, or None.
+
+    Returns:
+        (num_paths, n, m) draws, in maximization space.
+    """
+    X = np.atleast_2d(np.asarray(action, dtype=float))
+    if not normalized:
+        X = frame(X)
+
+    # fed as one batch element rather than n of them, the opposite of
+    # `_posterior_at`, so the test-test covariance is formed and sampled
+    X = torch.as_tensor(X, dtype=DTYPE)
+    with torch.no_grad():
+        posterior = model.posterior(X, posterior_transform=transform)
+        return posterior.rsample(torch.Size([num_paths])).numpy()
+
+
 class BoTorchGP:
     """BoTorch GP in a convenient wrapper.
     """
+
+    # nothing to read the posterior through: this model is already single-output
+    transform = None
 
     def __init__(self, objective: Objective, noise, fit_hyperparameters=True,
                  length_scale=LENGTH_SCALE, signal_var=SIGNAL_VAR,
@@ -287,20 +347,7 @@ class BoTorchGP:
             standardized, matching `objectives.feedback()`. With `raw=True`, in
             the units the measurements were taken in.
         """
-        X = np.atleast_2d(np.asarray(action, dtype=float))
-        if not normalized:
-            X = self.objective.xtransform(X)
-
-        # fed as q=1 batch elements, so each posterior is 1x1 per objective and
-        # gpytorch never forms the n x n test-test block
-        X = torch.as_tensor(X, dtype=DTYPE).unsqueeze(1)
-        with torch.no_grad():
-            posteriors = [self.model.posterior(X[i:i + chunk])
-                          for i in range(0, X.shape[0], chunk)]
-            mu  = torch.cat([p.mean.squeeze(1)     for p in posteriors])
-            var = torch.cat([p.variance.squeeze(1) for p in posteriors])
-
-        mu, std = mu.numpy(), var.sqrt().numpy()
+        mu, std = _posterior_at(self.model, self.frame, action, normalized, chunk)
         return self.objective.to_raw(mu, std) if raw else (mu, std)
 
     def sample_paths(self, action, num_paths, normalized=False, raw=False):
@@ -329,16 +376,7 @@ class BoTorchGP:
             standardized, matching `objective.standard_y`. With `raw=True`, in
             the units the measurements were taken in.
         """
-        X = np.atleast_2d(np.asarray(action, dtype=float))
-        if not normalized:
-            X = self.objective.xtransform(X)
-
-        # fed as one batch element rather than n of them, the opposite of
-        # `posterior_at`, so the test-test covariance is formed and sampled
-        X = torch.as_tensor(X, dtype=DTYPE)
-        with torch.no_grad():
-            paths = self.model.posterior(X).rsample(torch.Size([num_paths])).numpy()
-
+        paths = _sample_paths(self.model, self.frame, action, num_paths, normalized)
         return self.objective.to_raw(paths) if raw else paths
 
     def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
@@ -373,7 +411,21 @@ class BoTorchGP:
         # (m, m) evaluated at m actions; the diagonal is each objective at its own
         mu, std = self.posterior_at(actions, normalized=True, raw=raw)
         return self.objective.xtransform.inv(actions), np.diag(mu), np.diag(std)
-    
+
+    @property
+    def frame(self):
+        """The `AffineTransform` normalizing actions into the GP's own frame."""
+        return self.objective.xtransform
+
+    @property
+    def measured_x(self):
+        """(n, d) measured actions, in the normalized frame."""
+        return self.objective.normalized_x
+
+    def incumbent(self):
+        """The best value measured so far, in maximization space."""
+        return self.objective.standard_y.max()
+
     def get_fitted_hyperparameters(self):
         """The GP's hyperparameters, as described by `gp_hyperparameters`."""
         return gp_hyperparameters(self.model)
@@ -456,20 +508,7 @@ class DecoupledMOGP:
             standardized, matching `objectives.feedback()`. With `raw=True`, in
             the units the measurements were taken in.
         """
-        X = np.atleast_2d(np.asarray(action, dtype=float))
-        if not normalized:
-            X = self.objectives.xtransform(X)
-
-        # fed as q=1 batch elements, so each posterior is 1x1 per objective and
-        # gpytorch never forms the n x n test-test block
-        X = torch.as_tensor(X, dtype=DTYPE).unsqueeze(1)
-        with torch.no_grad():
-            posteriors = [self.model.posterior(X[i:i + chunk])
-                          for i in range(0, X.shape[0], chunk)]
-            mu  = torch.cat([p.mean.squeeze(1)     for p in posteriors])
-            var = torch.cat([p.variance.squeeze(1) for p in posteriors])
-
-        mu, std = mu.numpy(), var.sqrt().numpy()
+        mu, std = _posterior_at(self.model, self.frame, action, normalized, chunk)
         return self.objectives.to_raw(mu, std) if raw else (mu, std)
 
     def sample_paths(self, action, num_paths, normalized=False, raw=False):
@@ -502,16 +541,7 @@ class DecoupledMOGP:
             standardized, matching `objectives.feedback()`. With `raw=True`, in
             the units the measurements were taken in.
         """
-        X = np.atleast_2d(np.asarray(action, dtype=float))
-        if not normalized:
-            X = self.objectives.xtransform(X)
-
-        # fed as one batch element rather than n of them, the opposite of
-        # `posterior_at`, so the test-test covariance is formed and sampled
-        X = torch.as_tensor(X, dtype=DTYPE)
-        with torch.no_grad():
-            paths = self.model.posterior(X).rsample(torch.Size([num_paths])).numpy()
-
+        paths = _sample_paths(self.model, self.frame, action, num_paths, normalized)
         return self.objectives.to_raw(paths) if raw else paths
 
     def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
@@ -544,6 +574,15 @@ class DecoupledMOGP:
         mu, std = self.posterior_at(actions, normalized=True, raw=raw)
         return self.objectives.xtransform.inv(actions), np.diag(mu), np.diag(std)
 
+    @property
+    def frame(self):
+        """The `AffineTransform` normalizing actions into the shared frame."""
+        return self.objectives.xtransform
+
+    def scalarized(self, weights) -> 'ScalarizedGP':
+        """These GPs read through fixed weights, as one single-output GP."""
+        return ScalarizedGP(self, weights)
+
     def get_fitted_hyperparameters(self):
         """Each objective's GP hyperparameters, in objective order.
 
@@ -552,3 +591,149 @@ class DecoupledMOGP:
             decoupled, so no entry is shared between them.
         """
         return [gp_hyperparameters(gp) for gp in self.model.models]
+
+
+class ScalarizedGP:
+    """One `DecoupledMOGP` read through fixed weights, as a single-output GP.
+
+    A linear functional of a GP is itself a GP, so `g(x) = w^T f(x)` has
+
+        mean      w^T mu(x)
+        variance  w^T Sigma(x) w = sum_j w_j^2 sigma_j^2(x)
+        kernel    k_w(x, x') = sum_j w_j^2 k_j(x, x')
+
+    where the cross terms vanish because `DecoupledMOGP`'s objectives are
+    independent and `Sigma` is therefore diagonal. This is exact rather than an
+    approximation, and it is a read-out of models that are already fit: changing
+    `weights` refits nothing and adds no hyperparameters.
+
+    `feedback()` is standardized and sign-flipped to larger-is-better before any
+    GP sees it, which is what makes `w^T f` dimensionally meaningful -- on raw
+    units a weighted sum of a speed, a power and a height would mean nothing.
+
+    Attributes:
+        mogp: the `DecoupledMOGP` being read.
+        objectives: its `DecoupledObjectives`.
+        model: its `ModelListGP`, unchanged and shared.
+        weights: (m,) weights, in maximization space.
+        transform: the `ScalarizedPosteriorTransform` BoTorch reads them through.
+    """
+
+    def __init__(self, mogp: DecoupledMOGP, weights):
+        """
+        Args:
+            mogp: the fitted per-objective GPs to scalarize.
+            weights: (m,) weights, in maximization space, one per objective.
+        """
+        weights = np.asarray(weights, dtype=float).ravel()
+        if weights.size != len(mogp.objectives):
+            raise ValueError(
+                f'{len(mogp.objectives)} objectives take {len(mogp.objectives)} '
+                f'weights, got {weights.size}'
+            )
+
+        self.mogp       = mogp
+        self.objectives = mogp.objectives
+        self.model      = mogp.model
+        self.weights    = weights
+        self.transform  = ScalarizedPosteriorTransform(
+            torch.as_tensor(weights, dtype=DTYPE)
+        )
+
+    def posterior_at(self, action, normalized=False, chunk=2048):
+        """Posterior mean and standard deviation of `w^T f` at arbitrary actions.
+
+        There is deliberately no `raw` flag: `w^T y` mixes the objectives' units
+        and has no single objective's frame to invert into.
+
+        Args:
+            action: a single (d,) action or an (n, d) array of them.
+            normalized: True if `action` is already in the shared [0, 1]^d frame.
+            chunk: actions evaluated per posterior call.
+
+        Returns:
+            (mean, std), each (n, 1), in maximization space.
+        """
+        return _posterior_at(self.model, self.frame, action, normalized, chunk,
+                             transform=self.transform)
+
+    def sample_paths(self, action, num_paths, normalized=False):
+        """Sample paths of `w^T f` over arbitrary actions.
+
+        Drawn from the joint posterior over the whole set of actions, exactly as
+        `DecoupledMOGP.sample_paths` is, so each draw is a function rather than
+        noise. There is no `raw` flag, for the reason `posterior_at` gives.
+
+        Args:
+            action: a single (d,) action or an (n, d) array of them.
+            num_paths: paths drawn.
+            normalized: True if `action` is already in the shared [0, 1]^d frame.
+
+        Returns:
+            (num_paths, n, 1) draws, in maximization space.
+        """
+        return _sample_paths(self.model, self.frame, action, num_paths, normalized,
+                             transform=self.transform)
+
+    def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES):
+        """The action maximizing the scalarized posterior mean.
+
+        One optimization rather than `DecoupledMOGP`'s m of them, since the
+        weights have already collapsed the m objectives to one.
+
+        Args:
+            num_restarts: L-BFGS-B starting points.
+            raw_samples: Sobol samples scanned to pick them.
+
+        Returns:
+            (actions, mu, std): a (1, d) action in raw units, and the length-1
+            posterior mean and standard deviation there, in maximization space.
+        """
+        d = self.objectives.action_dim
+        bounds = torch.stack([torch.zeros(d, dtype=DTYPE), torch.ones(d, dtype=DTYPE)])
+
+        actions, _ = optimize_acqf(
+            acq_function = PosteriorMean(self.model, posterior_transform=self.transform),
+            bounds       = bounds,
+            q            = 1,
+            num_restarts = num_restarts,
+            raw_samples  = raw_samples
+        )
+        actions = actions.detach().numpy()
+
+        mu, std = self.posterior_at(actions, normalized=True)
+        return self.frame.inv(actions), np.diag(mu), np.diag(std)
+
+    @property
+    def frame(self):
+        """The `AffineTransform` normalizing actions into the shared frame."""
+        return self.objectives.xtransform
+
+    @property
+    def measured_x(self):
+        """(n, d) union of every objective's measured actions, normalized.
+
+        A union rather than one objective's actions because the objectives are
+        decoupled: nothing requires them to share a design.
+        """
+        return np.unique(
+            np.vstack([self.objectives.actions(i) for i in range(len(self.objectives))]),
+            axis=0
+        )
+
+    def incumbent(self):
+        """The best scalarized value inferred so far, in maximization space.
+
+        Read off the posterior mean rather than the measurements: with decoupled
+        data no action generally carries all m of them, so there is no observed
+        `w^T y` to take a max over. This is the standard noisy-EI incumbent.
+        """
+        return self.posterior_at(self.measured_x, normalized=True)[0].max()
+
+    def get_fitted_hyperparameters(self):
+        """Each objective's GP hyperparameters, as `DecoupledMOGP` reports them.
+
+        The scalarization is a read-out, not a fit, so the weights appear
+        nowhere in them.
+        """
+        return self.mogp.get_fitted_hyperparameters()

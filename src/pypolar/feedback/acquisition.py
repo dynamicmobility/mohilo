@@ -8,15 +8,9 @@ import torch
 from botorch.acquisition import AcquisitionFunction as BoTorchAcqf
 from botorch.optim import optimize_acqf
 
-from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES, BoTorchGP
-from pypolar.optimization.objectives import Objective
-from botorch.acquisition import (
-    AcquisitionFunction
-)
+from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES
+from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
-class UniformRandom(AcquisitionFunction):
-    def __init__(self):
-        raise NotImplementedError()
 
 class AcquisitionFunction:
     """A BoTorch acquisition bound to a search box rather than to a model.
@@ -25,14 +19,15 @@ class AcquisitionFunction:
     model was trained in, and the box is mapped into it at every query.
     """
 
-    def __init__(self, acqf: type[BoTorchAcqf], objective: Objective,
+    def __init__(self, acqf: type[BoTorchAcqf],
+                 objective: Objective | DecoupledObjectives,
                  num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES, bounds=None):
         """
         Args:
             acqf: a BoTorch acquisition class, or a partial of one. Called as
                 `acqf(model, **incumbent)`.
-            objective: the objective the box defaults to, and whose normalized
-                frame the search runs in.
+            objective: the objective, or collection of them, the box defaults
+                to and whose action dimension it is broadcast against.
             num_restarts: L-BFGS-B starting points per optimization.
             raw_samples: Sobol samples scanned to pick them.
             bounds: (low, high) actions in raw units, scalar or one per action
@@ -42,45 +37,52 @@ class AcquisitionFunction:
             bounds = objective.action_bounds
         if bounds is None:
             raise ValueError(
-                f'{objective.name}: without action_bounds the normalized frame is '
-                'the box of the points measured so far, which moves as they '
-                'arrive; pin action_bounds or pass bounds'
+                'without action_bounds the normalized frame is the box of the '
+                'points measured so far, which moves as they arrive; pin '
+                'action_bounds or pass bounds'
             )
 
         self.acqf         = acqf
-        self.action_box   = bounds
         self.num_restarts = num_restarts
         self.raw_samples  = raw_samples
 
-    def _box(self, objective):
-        """The search box in raw units, (2, d), broadcast so a scalar bound
-        covers every action dimension."""
-        d = objective.xdata.shape[1]
-        return np.broadcast_to(
-            np.asarray(self.action_box, dtype=float).reshape(2, -1), (2, d)
+        # (2, d) in raw units, broadcast so a scalar bound covers every
+        # action dimension
+        self.action_box = np.broadcast_to(
+            np.asarray(bounds, dtype=float).reshape(2, -1), (2, objective.action_dim)
         )
 
-    def _incumbent(self, objective):
-        """The measurement-dependent arguments `self.acqf` takes, from the
-        objective's current data. Names a partial already bound are left to it."""
-        X = torch.as_tensor(objective.normalized_x, dtype=DTYPE)
-        available = {
-            'best_f'     : objective.standard_y.max(),
-            'X_observed' : X,
-            'X_baseline' : X
-        }
+    def _incumbent(self, model):
+        """The measurement-dependent arguments `self.acqf` takes, read off the
+        model. Names a partial already bound are left to it.
 
-        taken = signature(self.acqf).parameters
-        bound = getattr(self.acqf, 'keywords', {})
-        return {name: value for name, value in available.items()
-                if name in taken and name not in bound}
+        Built lazily: a scalarized incumbent costs a posterior evaluation over
+        every measured action, and no UCB-family acquisition wants one.
+        """
+        # TODO: get rid of this if possible. looks for args in botorch acquisition function, automatically comes up with best f for logei
+        taken  = signature(self.acqf).parameters
+        bound  = getattr(self.acqf, 'keywords', {})
+        wanted = lambda name: name in taken and name not in bound
 
-    def query(self, model: BoTorchGP, q=1, raw=True):
+        args = {}
+        if wanted('posterior_transform') and model.transform is not None:
+            args['posterior_transform'] = model.transform
+        if wanted('X_observed') or wanted('X_baseline'):
+            X = torch.as_tensor(model.measured_x, dtype=DTYPE)
+            args.update({name: X for name in ('X_observed', 'X_baseline')
+                         if wanted(name)})
+        if wanted('best_f'):
+            args['best_f'] = model.incumbent()
+
+        return args
+
+    def query(self, model, q=1, raw=True):
         """The q actions jointly maximizing the acquisition over the box.
 
         Args:
             model: the GP the acquisition reads, and whose measurements supply
-                its incumbent.
+                its incumbent. A `BoTorchGP` or a `ScalarizedGP`; a
+                `DecoupledMOGP` is multi-output and has no scalar to maximize.
             q: actions returned per call. Only the q-acquisitions take q > 1.
             raw: report in the objective's own units rather than the normalized
                 frame.
@@ -88,12 +90,11 @@ class AcquisitionFunction:
         Returns:
             (q, d) actions.
         """
-        objective = model.objective
-        box       = self._box(objective)
+        box = self.action_box
 
         candidate, _ = optimize_acqf(
-            acq_function = self.acqf(model.model, **self._incumbent(objective)),
-            bounds       = torch.as_tensor(objective.xtransform(box), dtype=DTYPE),
+            acq_function = self.acqf(model.model, **self._incumbent(model)),
+            bounds       = torch.as_tensor(model.frame(box), dtype=DTYPE),
             q            = q,
             num_restarts = self.num_restarts,
             raw_samples  = self.raw_samples
@@ -103,6 +104,7 @@ class AcquisitionFunction:
         if not raw:
             return action
 
+        # TODO: check this still works with current setup
         # optimize_acqf is box-constrained, so the round trip through the
         # transform leaves the box only by float round-off
-        return np.clip(objective.xtransform.inv(action), box[0], box[1])
+        return np.clip(model.frame.inv(action), box[0], box[1])

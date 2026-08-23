@@ -160,6 +160,11 @@ class Objective:
         return None
 
     @property
+    def action_dim(self):
+        """K, the action dimension."""
+        return self.xdata.shape[1]
+
+    @property
     def sign(self):
         return 1.0 if self.maximize else -1.0
 
@@ -220,13 +225,21 @@ class Objective:
         )
     
     @classmethod
-    def from_data(cls, actions, values, maximize, name=None):
+    def from_data(cls, actions, values, maximize, name=None, action_bounds=None):
+        """Measurements already in hand.
+
+        Args:
+            action_bounds: (low, high) actions, in raw units, scalar or one per
+                action dimension. Pins the [0, 1]^K frame so it does not move as
+                points arrive, and measurements outside the box are rejected.
+        """
         return cls(
-            name        = name,
-            maximize    = maximize,
-            ydata       = values,
-            xdata       = actions,
-            column      = None
+            name          = name,
+            maximize      = maximize,
+            ydata         = values,
+            xdata         = actions,
+            column        = None,
+            action_bounds = action_bounds
         )
         
     @classmethod
@@ -315,6 +328,25 @@ class DecoupledObjectives:
     @property
     def num_objectives(self):
         return len(self.objectives)
+
+    # TODO: check over this later
+    @property
+    def action_dim(self):
+        """K, the action dimension shared by every objective."""
+        return self.objectives[0].action_dim
+
+    @property
+    def action_bounds(self):
+        """(low, high) spanning every objective's pinned bounds, or None when
+        any of them is unpinned and so leaves the shared frame free to move."""
+        bounds = [o.action_bounds for o in self.objectives]
+        if not bounds or any(b is None for b in bounds):
+            return None
+
+        # reduce rather than np.min(axis=0), so a scalar bound broadcasts
+        # against a per-dimension one
+        return (reduce(np.minimum, [b[0] for b in bounds]),
+                reduce(np.maximum, [b[1] for b in bounds]))
 
     def __len__(self):
         return len(self.objectives)

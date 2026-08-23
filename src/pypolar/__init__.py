@@ -1,6 +1,7 @@
 from pypolar.optimization.gp import (
     BoTorchGP,
     DecoupledMOGP,
+    ScalarizedGP,
     GPHyperparameters,
     NoiseModel
 )
@@ -43,6 +44,7 @@ __all__ = [
     # optimization
     "BoTorchGP",
     "DecoupledMOGP",
+    "ScalarizedGP",
     "GPHyperparameters",
     "NoiseModel",
     # objectives

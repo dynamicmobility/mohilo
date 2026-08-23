@@ -111,8 +111,8 @@ def plot_fit_1d(
         color, ls = VLINE_STYLES[i % len(VLINE_STYLES)]
         ax.axvline(action, color=color, ls=ls, lw=1.2, zorder=5, label=label)
 
-    ax.scatter(np.ravel(xdata), np.ravel(ydata), s=22, color=TRUTH_COLOR,
-               zorder=6, label='measurements')
+    ax.scatter(np.ravel(xdata), np.ravel(ydata), s=8, color=TRUTH_COLOR,
+               zorder=-1, label='measurements')
 
     ax.set_xlabel('action')
     ax.set_ylabel('objective')
