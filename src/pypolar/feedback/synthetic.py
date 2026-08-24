@@ -137,3 +137,17 @@ class SyntheticFunction:
         return y + self.noise_std * self.rng.standard_normal(y.shape)
     
     # TODO: add estimate range function
+
+
+def make_synthetic(func, dim, box, seed=0, rel_noise_std=0.0):
+    """One `SyntheticFunction`, from arguments plain enough to store.
+
+    Returns:
+        the `SyntheticFunction`, or None when `func` has no instance at `dim`.
+    """
+    truth = construct_function(func=SYNTHETIC_FUNCTIONS[func], dim=dim, box=box,
+                               seed=seed)
+    if truth is None:
+        return None
+
+    return SyntheticFunction(truth=truth, rel_noise_std=rel_noise_std, seed=seed)

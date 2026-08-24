@@ -617,6 +617,37 @@ class TestUpdateFeedback:
         assert not returned.training
 
 
+class TestStateDict:
+    """A state dict is the fit, so a model restored from one is not fitted
+    again: the same measurements plus the same tensors give back the same
+    posterior, and a fitted noise no longer needs a fit to determine it."""
+
+    def test_restores_the_posterior_it_was_fitted_to(self, gp, reward, actions):
+        restored = BoTorchGP(reward, noise=NOISE_STD, fit_hyperparameters=False,
+                             state_dict=gp.model.state_dict())
+        mu, std = gp.posterior_at(actions)
+        mu_restored, std_restored = restored.posterior_at(actions)
+
+        np.testing.assert_allclose(mu_restored, mu)
+        np.testing.assert_allclose(std_restored, std)
+
+    def test_a_fitted_noise_needs_no_fit_when_restored(self, reward):
+        """The marginal likelihood determines a fitted noise, so a fit is
+        normally required; a state dict carries the value it landed on."""
+        fitted = BoTorchGP(reward, noise=NoiseModel.prior(0.3))
+
+        restored = BoTorchGP(reward, noise=NoiseModel.prior(0.3),
+                             fit_hyperparameters=False,
+                             state_dict=fitted.model.state_dict())
+
+        assert (restored.get_fitted_hyperparameters().noise_var
+                == fitted.get_fitted_hyperparameters().noise_var)
+
+    def test_without_one_a_fitted_noise_still_refuses_not_to_fit(self, reward):
+        with pytest.raises(ValueError):
+            BoTorchGP(reward, noise=NoiseModel.fitted(), fit_hyperparameters=False)
+
+
 # ---- hyperparameters -------------------------------------------------------
 
 FIELDS = {'lengthscale', 'signal_var', 'noise_var', 'standardize_scale'}

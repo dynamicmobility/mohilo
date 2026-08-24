@@ -1,7 +1,7 @@
 """Objective bookkeeping: raw measurements, their actions, and the affine
 rescalings applied before they reach a GP."""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from functools import reduce
 
 import numpy as np
@@ -196,6 +196,17 @@ class Objective:
         std = self.ytransform.inv_scale(std)
         return mu, std
     
+    def to_record(self):
+        """Everything this objective is, as plain data.
+        """
+        return asdict(self)
+
+    @classmethod
+    def from_record(cls, record):
+        """The inverse of `to_record`.
+        """
+        return cls(**record)
+
     @classmethod
     def from_empty(cls, name, maximize, action_bounds=None):
         """An objective declared before any measurement.

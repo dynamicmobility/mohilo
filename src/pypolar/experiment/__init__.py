@@ -1,3 +1,7 @@
+from pypolar.experiment.dataset import (
+    ExperimentDataset,
+    TrialDataset,
+)
 from pypolar.experiment.ledger import (
     Ledger,
     fingerprint,
@@ -12,6 +16,8 @@ from pypolar.experiment.probe import (
 )
 
 __all__ = [
+    "ExperimentDataset",
+    "TrialDataset",
     "Ledger",
     "fingerprint",
     "read_events",

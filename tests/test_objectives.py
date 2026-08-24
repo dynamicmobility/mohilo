@@ -640,6 +640,61 @@ class TestObjectiveActionsMustLieInTheBox:
         Objective('cost', False, y, x * 1e6)
 
 
+class TestObjectiveRecordRoundTrip:
+    """`to_record` is what a saved run stores an objective as, and
+    `from_record` is its inverse. What makes the pair honest is that a record
+    holds only the raw measurements and what fixes their frames: the transforms
+    are re-derived on the way back, so a record cannot disagree with itself."""
+
+    def test_a_record_holds_the_fields_and_not_the_transforms(self, objective):
+        record = objective.to_record()
+
+        assert set(record) == {'name', 'maximize', 'ydata', 'xdata', 'column',
+                               'action_bounds'}
+
+    def test_the_round_trip_returns_the_same_measurements(self, objective):
+        back = Objective.from_record(objective.to_record())
+
+        assert back.name == objective.name
+        assert back.maximize == objective.maximize
+        np.testing.assert_array_equal(back.xdata, objective.xdata)
+        np.testing.assert_array_equal(back.ydata, objective.ydata)
+
+    def test_the_transforms_come_back_with_it(self, objective):
+        back = Objective.from_record(objective.to_record())
+
+        np.testing.assert_allclose(back.standard_y, objective.standard_y)
+        np.testing.assert_allclose(back.normalized_x, objective.normalized_x)
+
+    def test_a_pinned_action_frame_survives(self, x, y):
+        pinned = Objective(name='cost', maximize=False, ydata=y, xdata=x,
+                           action_bounds=(-10.0, 10.0))
+        back = Objective.from_record(pinned.to_record())
+
+        np.testing.assert_allclose(back.normalized_x, pinned.normalized_x)
+
+    def test_lists_are_taken_as_readily_as_arrays(self, objective):
+        # what a record read back from json is made of
+        record = {key: value.tolist() if isinstance(value, np.ndarray) else value
+                  for key, value in objective.to_record().items()}
+        back = Objective.from_record(record)
+
+        np.testing.assert_allclose(back.standard_y, objective.standard_y)
+
+    def test_an_empty_objective_round_trips(self):
+        empty = Objective.from_empty('cost', maximize=False, action_bounds=(-5.0, 5.0))
+        back  = Objective.from_record(empty.to_record())
+
+        assert back.xdata.size == 0
+        assert back.ydata.size == 0
+
+    def test_the_record_is_a_copy(self, objective):
+        record = objective.to_record()
+        record['ydata'][0] = 999.0
+
+        assert objective.ydata[0] != 999.0
+
+
 class TestObjectiveFromDataFrame:
 
     @pytest.fixture

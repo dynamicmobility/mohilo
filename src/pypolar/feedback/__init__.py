@@ -16,6 +16,7 @@ from pypolar.feedback.synthetic import (
     SYNTHETIC_1D_FUNCTIONS,
     SyntheticFunction,
     construct_function,
+    make_synthetic,
     truth_at
 )
 
@@ -34,5 +35,6 @@ __all__ = [
     "SYNTHETIC_1D_FUNCTIONS",
     "SyntheticFunction",
     "construct_function",
+    "make_synthetic",
     "truth_at",
 ]

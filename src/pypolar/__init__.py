@@ -27,10 +27,13 @@ from pypolar.feedback import (
     SYNTHETIC_1D_FUNCTIONS,
     SyntheticFunction,
     construct_function,
+    make_synthetic,
     truth_at
 )
 from pypolar.experiment import (
     Device,
+    ExperimentDataset,
+    TrialDataset,
     Ledger,
     Logger,
     Probe,
@@ -70,6 +73,7 @@ __all__ = [
     "SYNTHETIC_1D_FUNCTIONS",
     "SyntheticFunction",
     "construct_function",
+    "make_synthetic",
     "truth_at",
     # pareto
     "get_pareto_statistics",
@@ -79,6 +83,8 @@ __all__ = [
     "sparsity_from_normalized_nondominated",
     # experiment
     "Device",
+    "ExperimentDataset",
+    "TrialDataset",
     "Ledger",
     "Logger",
     "Probe",
