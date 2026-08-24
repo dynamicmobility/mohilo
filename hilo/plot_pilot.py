@@ -12,6 +12,9 @@ from botorch.utils.multi_objective.box_decompositions.dominated import (
 import pypolar as plr
 from pypolar.optimization.gp import DTYPE
 
+# TODO: this needs to be remade with up-to-date code and plot metrics + LOO + recommendations etc...
+# you should create an example dataset using synthetics for testing.
+
 ACTIONS         = ['h_flex_torque_scale', 'h_ext_torque_scale', 'hip_delay_idx']
 OBJS_PATH       = Path('human_data/pilot_mohilo.csv')
 ACTIONS_PATH    = Path('human_data/MH01_walk.csv')
@@ -99,7 +102,7 @@ def main():
     fig.savefig('hilo/output/test.png', dpi=500)
     
     # print best of each
-    actions, mu, std = mogp.best_actions(raw=True)
+    actions, mu, std = mogp.recommend(raw=True)
     width = max(len(name) for name in mogp.objectives.names) + 6   # room for ' (min)'
 
     print('\n=== best action per objective ===')

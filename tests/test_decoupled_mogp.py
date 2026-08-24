@@ -308,23 +308,23 @@ class TestSamplePaths:
         assert paths.std(axis=0).max() < 0.02
 
 
-# ---- best_actions ----------------------------------------------------------
+# ---- recommend ----------------------------------------------------------
 
-class TestBestActions:
+class TestRecommend:
 
     def test_shapes(self, mogp, objectives, actions):
-        best, mu, std = mogp.best_actions(num_restarts=4, raw_samples=128)
+        best, mu, std = mogp.recommend(num_restarts=4, raw_samples=128)
         assert best.shape == (len(objectives), actions.shape[1])
         assert mu.shape == (len(objectives),)
         assert std.shape == (len(objectives),)
 
     def test_returns_raw_units_inside_the_action_box(self, mogp):
-        best, _, _ = mogp.best_actions(num_restarts=4, raw_samples=128)
+        best, _, _ = mogp.recommend(num_restarts=4, raw_samples=128)
         assert np.all(best >= LOW - 1e-9)
         assert np.all(best <= HIGH + 1e-9)
 
     def test_recovers_the_maximized_objectives_peak(self, mogp, objectives):
-        best, _, _ = mogp.best_actions(num_restarts=8, raw_samples=256)
+        best, _, _ = mogp.recommend(num_restarts=8, raw_samples=256)
         # compared in the normalized frame, where one tolerance covers both
         # dimensions; GRID_SPACING is the distance between measured actions
         np.testing.assert_allclose(objectives.xtransform(best)[0],
@@ -334,31 +334,31 @@ class TestBestActions:
     def test_recovers_the_minimized_objectives_valley(self, mogp, objectives):
         """A minimized objective is handled by the sign in ytransform, so the
         argmax of the posterior is the *lowest* raw cost."""
-        best, _, _ = mogp.best_actions(num_restarts=8, raw_samples=256)
+        best, _, _ = mogp.recommend(num_restarts=8, raw_samples=256)
         np.testing.assert_allclose(objectives.xtransform(best)[1],
                                    objectives.xtransform(VALLEY)[0],
                                    atol=GRID_SPACING)
 
     def test_values_match_the_posterior_at_those_actions(self, mogp):
-        best, mu, std = mogp.best_actions(num_restarts=4, raw_samples=128)
+        best, mu, std = mogp.recommend(num_restarts=4, raw_samples=128)
         mu_full, std_full = mogp.posterior_at(best)
         np.testing.assert_allclose(mu, np.diag(mu_full))
         np.testing.assert_allclose(std, np.diag(std_full))
 
     def test_beats_every_measured_action(self, mogp, actions):
         """Optimizing the continuous box can only match or beat the grid."""
-        best, mu, _ = mogp.best_actions(num_restarts=8, raw_samples=256)
+        best, mu, _ = mogp.recommend(num_restarts=8, raw_samples=256)
         on_grid = mogp.posterior_at(actions)[0].max(axis=0)
         assert np.all(mu >= on_grid - 1e-6)
 
     def test_raw_units_leave_the_actions_alone(self, mogp):
         """Only the values change; the actions are in raw units either way."""
-        best, _, _ = mogp.best_actions(num_restarts=4, raw_samples=128)
-        best_raw, _, _ = mogp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        best, _, _ = mogp.recommend(num_restarts=4, raw_samples=128)
+        best_raw, _, _ = mogp.recommend(num_restarts=4, raw_samples=128, raw=True)
         np.testing.assert_allclose(best, best_raw, atol=1e-6)
 
     def test_raw_values_match_the_posterior_at_those_actions(self, mogp):
-        best, mu, std = mogp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        best, mu, std = mogp.recommend(num_restarts=4, raw_samples=128, raw=True)
         mu_full, std_full = mogp.posterior_at(best, raw=True)
         np.testing.assert_allclose(mu, np.diag(mu_full))
         np.testing.assert_allclose(std, np.diag(std_full))

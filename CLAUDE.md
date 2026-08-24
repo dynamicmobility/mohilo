@@ -280,7 +280,7 @@ standardized values.
 `to_raw(mu, std=None, objs=None)` is the way back out: it maps posterior moments
 from maximization space into each objective's own units, column by column, using
 `inv()` on the means and `inv_scale()` on the standard deviations. This is what
-`posterior_at(raw=True)` and `best_actions(raw=True)` call.
+`posterior_at(raw=True)` and `recommend(raw=True)` call.
 
 ### The GP layer (`optimization/gp.py`)
 
@@ -382,7 +382,7 @@ min_length_scale=None)`** — the
 single-objective wrapper: one `Objective` rather than a collection, so the action
 frame is that objective's own normalization instead of a shared one, and the
 marginal likelihood is a plain `ExactMarginalLogLikelihood`. `posterior_at`,
-`sample_paths`, `best_actions`, `update_feedback` and `get_fitted_hyperparameters`
+`sample_paths`, `recommend`, `update_feedback` and `get_fitted_hyperparameters`
 carry the same signatures and contracts as on `DecoupledMOGP` below with `m = 1`,
 so the returned arrays keep their column axis. `BoTorchGP.model` **is** the
 `SingleTaskGP` — there is no sub-model beneath it, unlike `ModelListGP.models`.
@@ -400,7 +400,7 @@ mogp = DecoupledMOGP(objectives, fit_hyperparameters=True,
                      noise=NoiseModel.prior(0.3), min_length_scale=0.3)
 mu, std     = mogp.posterior_at(X)          # (n, m) each
 paths = mogp.sample_paths(X, num_paths=20)  # (num_paths, n, m), joint over X
-best, mu, s = mogp.best_actions()           # (m, d), (m,), (m,)
+best, mu, s = mogp.recommend()              # (m, d), (m,), (m,)
 mogp.update_feedback(objectives)            # rebuild after new measurements
 ```
 
@@ -490,9 +490,9 @@ covariance with column `k`, which is the same decoupling claim the class makes
 everywhere else.
 
 Draws come from torch's global generator (`rsample`), so `torch.manual_seed` is
-what makes them repeatable — the same way `best_actions`' restarts are seeded.
+what makes them repeatable — the same way `recommend`'s restarts are seeded.
 
-**`best_actions(num_restarts=8, raw_samples=512, raw=False)`** — the action maximizing each
+**`recommend(num_restarts=8, raw_samples=512, raw=False)`** — the action maximizing each
 objective's posterior mean, over the **continuous box**, not over the measured
 actions. Two stages, which is what `optimize_acqf` does internally: a Sobol scan
 of `raw_samples` points to locate the basins, then box-constrained L-BFGS-B from
@@ -667,7 +667,7 @@ for a new measurement would be wider by the observation noise.
    and collect them in a `DecoupledObjectives`.
 2. Select the subset you want to model: `objectives[['Cost', 'Comfort']]`.
 3. `DecoupledMOGP(subset, fit_hyperparameters=True)`.
-4. Read the posterior with `posterior_at`, the optima with `best_actions`, and
+4. Read the posterior with `posterior_at`, the optima with `recommend`, and
    the front with `get_nondominated` over a scan of `posterior_at`.
 5. After new measurements: `objectives.add_point(...)` then
    `mogp.update_feedback(objectives)`.

@@ -20,6 +20,8 @@ import pypolar as plr
 import pandas as pd
 from hilo.read_data import read_MH01_data, read_MT0x_data
 
+# TODO: remove once gp diagnostics have been moved to a dedicated script with more modern data collection capability
+
 DIM          = 1        # action dimension
 NUM_SAMPLES  = 15       # measurements drawn from the objective
 NOISE        = 0.5      # noise added, as a fraction of the truth's spread

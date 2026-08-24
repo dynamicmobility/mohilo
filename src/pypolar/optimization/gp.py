@@ -558,8 +558,8 @@ class DecoupledMOGP:
         paths = _sample_paths(self.model, self.frame, action, num_paths, normalized)
         return self.objectives.to_raw(paths) if raw else paths
 
-    def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
-                     raw=False):
+    def recommend(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES,
+                  raw=False):
         """The action maximizing each objective's posterior mean.
 
         Args:
@@ -689,7 +689,7 @@ class ScalarizedGP:
         return _sample_paths(self.model, self.frame, action, num_paths, normalized,
                              transform=self.transform)
 
-    def best_actions(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES):
+    def recommend(self, num_restarts=NUM_RESTARTS, raw_samples=RAW_SAMPLES):
         """The action maximizing the scalarized posterior mean.
 
         One optimization rather than `DecoupledMOGP`'s m of them, since the

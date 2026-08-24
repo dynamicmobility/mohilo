@@ -87,8 +87,8 @@ class AcquisitionFunction:
                 dimension. Defaults to the objective's own `action_bounds`.
         """
         if bounds is None:
-            self.bounds = objective.action_bounds
-        if self.bounds is None:
+            bounds = objective.action_bounds
+        if bounds is None:
             raise ValueError(
                 'without action_bounds the normalized frame is the box of the '
                 'points measured so far, which moves as they arrive; pin '
@@ -96,8 +96,20 @@ class AcquisitionFunction:
             )
 
         self.acqf         = acqf
+        self.objective    = objective
+        self.bounds       = bounds
         self.num_restarts = num_restarts
         self.raw_samples  = raw_samples
+
+    @property
+    def action_box(self):
+        """(2, d) box in raw units, broadcast so a scalar bound covers every
+        action dimension. Read lazily: an objective declared before its first
+        measurement has no action dimension yet."""
+        return np.broadcast_to(
+            np.asarray(self.bounds, dtype=float).reshape(2, -1),
+            (2, self.objective.action_dim)
+        )
 
     def _incumbent(self, model):
         """The measurement-dependent arguments `self.acqf` takes, read off the
@@ -137,9 +149,7 @@ class AcquisitionFunction:
         Returns:
             (q, d) actions.
         """
-        box = np.broadcast_to(
-            np.asarray(self.bounds, dtype=float).reshape(2, -1), (2, model.objective.action_dim)
-        )
+        box = self.action_box
 
         candidate, _ = optimize_acqf(
             acq_function = self.acqf(model.model, **self._incumbent(model)),

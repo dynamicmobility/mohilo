@@ -529,25 +529,25 @@ class TestSamplePaths:
         assert paths.std(axis=0).max() < 0.02 * reward.standard_y.std()
 
 
-# ---- best_actions ----------------------------------------------------------
+# ---- recommend ----------------------------------------------------------
 
-class TestBestActions:
+class TestRecommend:
 
     def test_shapes(self, gp, actions):
         """One objective, so m = 1: a single row of actions and length-1
         moments, keeping the same contract as DecoupledMOGP."""
-        best, mu, std = gp.best_actions(num_restarts=4, raw_samples=128)
+        best, mu, std = gp.recommend(num_restarts=4, raw_samples=128)
         assert best.shape == (1, actions.shape[1])
         assert mu.shape == (1,)
         assert std.shape == (1,)
 
     def test_returns_raw_units_inside_the_action_box(self, gp):
-        best, _, _ = gp.best_actions(num_restarts=4, raw_samples=128)
+        best, _, _ = gp.recommend(num_restarts=4, raw_samples=128)
         assert np.all(best >= LOW - 1e-9)
         assert np.all(best <= HIGH + 1e-9)
 
     def test_recovers_the_maximized_objectives_peak(self, gp, reward):
-        best, _, _ = gp.best_actions(num_restarts=8, raw_samples=256)
+        best, _, _ = gp.recommend(num_restarts=8, raw_samples=256)
         # compared in the normalized frame, where one tolerance covers both
         # dimensions; GRID_SPACING is the distance between measured actions
         np.testing.assert_allclose(reward.xtransform(best)[0],
@@ -557,37 +557,37 @@ class TestBestActions:
     def test_recovers_the_minimized_objectives_valley(self, cost_gp, cost):
         """A minimized objective is handled by the sign in ytransform, so the
         argmax of the posterior is the *lowest* raw cost."""
-        best, _, _ = cost_gp.best_actions(num_restarts=8, raw_samples=256)
+        best, _, _ = cost_gp.recommend(num_restarts=8, raw_samples=256)
         np.testing.assert_allclose(cost.xtransform(best)[0],
                                    cost.xtransform(VALLEY)[0],
                                    atol=GRID_SPACING)
 
     def test_values_match_the_posterior_at_those_actions(self, gp):
-        best, mu, std = gp.best_actions(num_restarts=4, raw_samples=128)
+        best, mu, std = gp.recommend(num_restarts=4, raw_samples=128)
         mu_full, std_full = gp.posterior_at(best)
         np.testing.assert_allclose(mu, np.diag(mu_full))
         np.testing.assert_allclose(std, np.diag(std_full))
 
     def test_beats_every_measured_action(self, gp, actions):
         """Optimizing the continuous box can only match or beat the grid."""
-        _, mu, _ = gp.best_actions(num_restarts=8, raw_samples=256)
+        _, mu, _ = gp.recommend(num_restarts=8, raw_samples=256)
         assert np.all(mu >= gp.posterior_at(actions)[0].max(axis=0) - 1e-6)
 
     def test_raw_units_leave_the_actions_alone(self, gp):
         """Only the values change; the actions are in raw units either way."""
-        best, _, _     = gp.best_actions(num_restarts=4, raw_samples=128)
-        best_raw, _, _ = gp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        best, _, _     = gp.recommend(num_restarts=4, raw_samples=128)
+        best_raw, _, _ = gp.recommend(num_restarts=4, raw_samples=128, raw=True)
         np.testing.assert_allclose(best, best_raw, atol=1e-6)
 
     def test_raw_values_match_the_posterior_at_those_actions(self, cost_gp):
-        best, mu, std = cost_gp.best_actions(num_restarts=4, raw_samples=128, raw=True)
+        best, mu, std = cost_gp.recommend(num_restarts=4, raw_samples=128, raw=True)
         mu_full, std_full = cost_gp.posterior_at(best, raw=True)
         np.testing.assert_allclose(mu, np.diag(mu_full))
         np.testing.assert_allclose(std, np.diag(std_full))
 
     def test_the_raw_optimum_is_the_smallest_predicted_cost(self, cost_gp):
         """Reported in raw units, a minimized objective's optimum is a minimum."""
-        _, mu, _ = cost_gp.best_actions(num_restarts=8, raw_samples=256, raw=True)
+        _, mu, _ = cost_gp.recommend(num_restarts=8, raw_samples=256, raw=True)
         assert np.all(mu <= cost_gp.posterior_at(_grid(5), raw=True)[0].min() + 1e-6)
 
 

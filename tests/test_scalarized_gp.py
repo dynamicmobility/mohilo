@@ -169,25 +169,25 @@ class TestSamplePaths:
 
 # ---- one optimization rather than m ----------------------------------------
 
-class TestBestActions:
+class TestRecommend:
 
     def test_shapes(self, scalar_gp):
-        actions, mu, std = scalar_gp.best_actions()
+        actions, mu, std = scalar_gp.recommend()
         assert actions.shape == (1, 2)
         assert mu.shape == (1,) and std.shape == (1,)
 
     def test_action_is_in_the_raw_box(self, scalar_gp):
-        actions, _, _ = scalar_gp.best_actions()
+        actions, _, _ = scalar_gp.recommend()
         assert np.all(actions >= LOW) and np.all(actions <= HIGH)
 
     def test_a_one_hot_weight_recovers_that_objectives_optimum(self, mogp):
-        best_mo, _, _ = mogp.best_actions(raw_samples=1024)
+        best_mo, _, _ = mogp.recommend(raw_samples=1024)
         for j in range(len(mogp.objectives)):
-            best_w, _, _ = mogp.scalarized(np.eye(2)[j]).best_actions(raw_samples=1024)
+            best_w, _, _ = mogp.scalarized(np.eye(2)[j]).recommend(raw_samples=1024)
             assert np.allclose(best_w[0], best_mo[j], atol=1e-2)
 
     def test_values_match_the_posterior_there(self, scalar_gp):
-        actions, mu, std = scalar_gp.best_actions()
+        actions, mu, std = scalar_gp.recommend()
         mu_at, std_at = scalar_gp.posterior_at(actions)
         assert np.allclose(mu, mu_at[:, 0]) and np.allclose(std, std_at[:, 0])
 
@@ -212,7 +212,7 @@ class TestAcquisitionInterface:
         assert scalar_gp.incumbent() == mu.max()
 
     def test_incumbent_is_at_most_the_best_action(self, scalar_gp):
-        # best_actions searches the continuous box, the incumbent only the
+        # recommend searches the continuous box, the incumbent only the
         # measured actions, so the former can only be better
-        _, best, _ = scalar_gp.best_actions(raw_samples=1024)
+        _, best, _ = scalar_gp.recommend(raw_samples=1024)
         assert scalar_gp.incumbent() <= best[0] + 1e-6

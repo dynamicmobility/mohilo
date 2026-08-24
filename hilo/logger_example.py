@@ -14,6 +14,8 @@ import torch
 import pypolar as plr
 from tablet.survey import Survey
 
+# TODO: rename and setup for the actual hardware run. make an emulation mode
+
 DIM              = 3
 BOX              = 5.0
 SEED             = 95
