@@ -18,6 +18,7 @@ dependencies = [
 dev = [
     "pytest",
     "matplotlib",
+    "pandas",
 ]
 
 [tool.setuptools.packages.find]

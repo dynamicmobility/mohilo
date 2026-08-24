@@ -29,7 +29,7 @@ MULTITHREAD      = False
 
 RUNS_PER_ACQF = 10
 
-OUTPUT_DIR       = Path('hilo/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
+OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
 # the arguments `plr.make_synthetic` builds each groundtruth from, rather than

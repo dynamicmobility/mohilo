@@ -352,8 +352,14 @@ class TestRecommend:
         assert np.all(mu >= on_grid - 1e-6)
 
     def test_raw_units_leave_the_actions_alone(self, mogp):
-        """Only the values change; the actions are in raw units either way."""
+        """Only the values change; the actions are in raw units either way.
+
+        Both calls are seeded, so optimize_acqf draws the same restarts and any
+        difference is `raw`'s doing rather than the optimizer's own wobble.
+        """
+        torch.manual_seed(0)
         best, _, _ = mogp.recommend(num_restarts=4, raw_samples=128)
+        torch.manual_seed(0)
         best_raw, _, _ = mogp.recommend(num_restarts=4, raw_samples=128, raw=True)
         np.testing.assert_allclose(best, best_raw, atol=1e-6)
 

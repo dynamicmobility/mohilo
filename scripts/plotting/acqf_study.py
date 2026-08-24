@@ -34,7 +34,7 @@ def plot_study(path: Path):
             ax.plot(regret_in_trial, color=c, lw=0.1)
     
     fig.legend()
-    fig.savefig('hilo/output/acqf_study.svg')
+    fig.savefig('scripts/output/acqf_study.svg')
         
 
 if __name__ == '__main__':

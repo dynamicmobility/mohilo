@@ -76,8 +76,15 @@ conda activate pypolar
 python -m pytest tests/ -v
 ```
 
-398 tests: public API surface (43), dangling references (8), objectives (169),
-`BoTorchGP` (110), `DecoupledMOGP` (56), `loo` (12).
+515 tests: objectives (176), `BoTorchGP` (113), `DecoupledMOGP` (56), public
+API surface (54), `experiment` (31), `ScalarizedGP` (24), `dataset` (20),
+`AcquisitionFunction` (19), `loo` (12), dangling references (10).
+
+`.github/workflows/tests.yml` runs the same command on every push and on every
+pull request into main. It installs the CPU torch wheel before the package,
+since a runner has no GPU and the default build is a multi-gigabyte download
+that nothing here would use. Nothing is pinned, so CI resolves newer numpy and
+scipy than a long-lived conda env will have.
 
 ## How to run experiments
 
