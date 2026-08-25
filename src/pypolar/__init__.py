@@ -9,6 +9,7 @@ from pypolar.optimization.objectives import (
     AffineTransform,
     Objective,
     DecoupledObjectives,
+    as_bounds,
     sample_actions
 )
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
@@ -58,6 +59,7 @@ __all__ = [
     "AffineTransform",
     "Objective",
     "DecoupledObjectives",
+    "as_bounds",
     "sample_actions",
     # acquisition
     "AcquisitionFunction",

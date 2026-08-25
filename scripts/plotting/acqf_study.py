@@ -41,4 +41,4 @@ def plot_study(path: Path):
         
 
 if __name__ == '__main__':
-    plot_study(Path('scripts/output/experiments/20260824_161017'))
+    plot_study(Path('scripts/output/experiments/20260825_144729'))

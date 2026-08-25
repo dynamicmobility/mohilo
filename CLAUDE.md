@@ -133,7 +133,7 @@ the noise is not a substitute for a design that can identify it.
 ```python
 from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
 from pypolar import DecoupledObjectives, Objective, AffineTransform
-from pypolar import sample_actions
+from pypolar import sample_actions, as_bounds
 from pypolar import loo
 from pypolar import normalized_inference_regret
 from pypolar import truth_at, construct_function, SyntheticFunction
@@ -145,7 +145,7 @@ Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is th
 boundary in both directions: every public method takes and returns numpy arrays,
 and torch never escapes the module. Three arguments are the exception, all inputs
 only: `Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
-subclass; `sample_actions`'s `bounds`, anything `torch.as_tensor` accepts; and
+subclass; `sample_actions`'s `bounds`, anything `as_bounds` accepts; and
 the `truth` taken by `feedback/synthetic.py`, a `SyntheticTestFunction`
 *instance*. All are consumed internally and only numpy comes back out.
 
@@ -154,10 +154,23 @@ the `truth` taken by `feedback/synthetic.py`, a `SyntheticTestFunction`
 The bookkeeping layer. It owns the two coordinate changes that the GP assumes
 have already happened, so nothing downstream has to think about units or signs.
 
-**`sample_actions(bounds, n, kind, seed)`** — `n` actions over a box, returned
-`(n, d)`. `bounds` is `(2, d)` of `[lower; upper]` rows, the form BoTorch states
-bounds in, and is coerced with `torch.as_tensor`, so a torch tensor, a numpy
-array and a nested list all give the same design. `kind='sobol'` draws a
+**`as_bounds(bounds, dim=None)`** — the one place a box is spelled. Every
+`bounds` in the package is a `(2, d)` array of `[[low, ...], [high, ...]]` rows,
+the orientation BoTorch states bounds in, and this is what coerces anything else
+onto it: a bare scalar is the half-width of the zero-centered box
+`[-bounds, bounds]`, and a `(2,)` or `(2, 1)` pair is one low and one high shared
+by every dimension, widened to `dim` columns. A `(d, 2)` list of per-dimension
+`(low, high)` pairs — what a BoTorch `SyntheticTestFunction` *constructor* takes,
+though its own `.bounds` attribute reports the other orientation — raises rather
+than being reshaped, since reshaping it would silently scramble the two rows.
+That transposed form survives only on the lines that call such a constructor
+(`construct_function`, `Objective.from_synthetic`), where botorch requires it.
+
+**`sample_actions(bounds, n, kind, seed, dim=None)`** — `n` actions over a box,
+returned `(n, d)`. `bounds` is anything `as_bounds` takes, so a torch tensor, a
+numpy array, a nested list and a scalar all give the same design; `dim` is needed
+only when the box states one low and one high for every dimension rather than a
+column per dimension. `kind='sobol'` draws a
 space-filling Sobol sequence and `kind='uniform'` draws iid uniform points; the
 branch is a whitelist, so any other value raises `ValueError` rather than
 silently returning a design you did not ask for. Sobol is the default worth
@@ -207,8 +220,14 @@ new mean.
 **`action_bounds`** pins the action frame. Without it, `xtransform` is
 `make_normalized(xdata, axis=0)` — the bounding box of the points measured *so
 far*, which moves every time a point is added. With it, the frame is
-`make_normalized_from_bounds(low, high)` and holds still. `low` and `high` are
-in raw action units, scalar or one per action dimension.
+`make_normalized_from_bounds(low, high)` and holds still. It is stored as the
+`(2, K)` box `as_bounds` returns, in raw action units — a scalar or a shared
+`(low, high)` pair is accepted and widened to one column per action dimension.
+An objective declared by `from_empty` has no `K` yet, so its bounds stay `(2, 1)`
+until the first measurement states one; `action_box()` and
+`DecoupledObjectives.action_bounds` report the same `(2, K)` form, and the union
+across objectives is taken with `reduce(np.minimum, ...)` precisely so a
+still-`(2, 1)` box broadcasts against a per-dimension one.
 
 This matters because the x frame is the one the GP's hyperparameters are stated
 in. `LENGTH_SCALE = 0.2` means "20% of the box", `min_length_scale = 0.3` floors
@@ -263,7 +282,7 @@ formula, so the values are identical whichever bounds are used.
 Nothing requires them to share a design. What they do share is one action frame:
 
 ```
-boxes      = [o.action_box() for o in objectives]   # bounds if pinned, else data range
+boxes      = [o.action_box() for o in objectives]   # (2, K): bounds if pinned, else data range
 xtransform = AffineTransform.make_normalized_from_bounds(min of lows, max of highs)
 ```
 

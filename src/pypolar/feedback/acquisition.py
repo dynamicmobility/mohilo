@@ -28,6 +28,7 @@ from botorch.utils.multi_objective.box_decompositions import NondominatedPartiti
 
 
 from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES, BoTorchGP, NoiseModel
+from pypolar.optimization.objectives import as_bounds
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
@@ -162,8 +163,9 @@ class AcquisitionFunction:
                 `acqf(model, **incumbent)`.
             num_restarts: L-BFGS-B starting points per optimization.
             raw_samples: Sobol samples scanned to pick them.
-            bounds: (low, high) actions in raw units, scalar or one per action
-                dimension. Defaults to the queried model's `action_bounds`.
+            bounds: (2, d) [[low, ...], [high, ...]] actions in raw units, or
+                any spelling `as_bounds` takes. Defaults to the queried model's
+                `action_bounds`.
         """
         self.acqf         = acqf
         self.bounds       = bounds
@@ -239,9 +241,7 @@ class AcquisitionFunction:
                 'action_bounds on the objective or pass bounds'
             )
 
-        # broadcast so a scalar bound covers every action dimension
-        box = np.broadcast_to(np.asarray(bounds, dtype=float).reshape(2, -1),
-                              (2, model.action_dim))
+        box = as_bounds(bounds, model.action_dim)
 
         candidate, _ = optimize_acqf(
             acq_function = self.acqf(model.model, **self._incumbent(model)),

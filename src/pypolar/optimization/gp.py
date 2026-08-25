@@ -428,8 +428,8 @@ class BoTorchGP:
 
     @property
     def action_bounds(self):
-        """(low, high) actions the objective declares, in raw units, or None
-        when nothing pins them and the frame moves with the measurements."""
+        """(2, d) box the objective declares, in raw units, or None when
+        nothing pins them and the frame moves with the measurements."""
         return self.objective.action_bounds
 
     @property
@@ -601,8 +601,8 @@ class DecoupledMOGP:
 
     @property
     def action_bounds(self):
-        """(low, high) actions the objective declares, in raw units, or None
-        when nothing pins them and the frame moves with the measurements."""
+        """(2, d) box the objective declares, in raw units, or None when
+        nothing pins them and the frame moves with the measurements."""
         return self.objectives.action_bounds
 
     @property
@@ -754,8 +754,8 @@ class ScalarizedGP:
 
     @property
     def action_bounds(self):
-        """(low, high) actions the objective declares, in raw units, or None
-        when nothing pins them and the frame moves with the measurements."""
+        """(2, d) box the objective declares, in raw units, or None when
+        nothing pins them and the frame moves with the measurements."""
         return self.objectives.action_bounds
 
     @property

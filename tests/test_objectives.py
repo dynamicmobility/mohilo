@@ -16,6 +16,7 @@ from pypolar.optimization.objectives import (
     AffineTransform,
     DecoupledObjectives,
     Objective,
+    as_bounds,
     sample_actions,
 )
 
@@ -62,6 +63,50 @@ def ragged(y, x):
         Objective(name='cost',    maximize=False, ydata=y.copy(),           xdata=x.copy()),
         Objective(name='comfort', maximize=True,  ydata=y[:3].copy() * 2.0, xdata=x[:3].copy()),
     ])
+
+
+# ---- as_bounds -------------------------------------------------------------
+
+class TestAsBounds:
+    """Every bounds spelling in the package collapses onto one form: a (2, d)
+    [[low, ...], [high, ...]] array, the orientation BoTorch states them in."""
+
+    def test_a_2_by_d_box_passes_through(self):
+        box = np.array([[-5.0, 0.0], [5.0, 2.0]])
+        assert as_bounds(box, dim=2) == pytest.approx(box)
+
+    @pytest.mark.parametrize('dim', [1, 2, 5])
+    def test_a_scalar_is_a_zero_centered_box(self, dim):
+        assert as_bounds(3.0, dim=dim) == pytest.approx(
+            np.array([[-3.0] * dim, [3.0] * dim]))
+
+    @pytest.mark.parametrize('spelling', [(0.0, 10.0), [0.0, 10.0], [[0.0], [10.0]]])
+    def test_a_shared_pair_broadcasts_across_the_dimensions(self, spelling):
+        assert as_bounds(spelling, dim=3) == pytest.approx(
+            np.array([[0.0] * 3, [10.0] * 3]))
+
+    def test_without_a_dim_a_shared_pair_stays_one_column(self):
+        assert as_bounds((0.0, 10.0)).shape == (2, 1)
+
+    def test_the_result_is_always_float64(self):
+        assert as_bounds([[0, 0], [1, 1]]).dtype == np.float64
+
+    def test_a_transposed_box_raises(self):
+        # (d, 2) is what a BoTorch test-function constructor takes, and
+        # reshaping it would silently scramble the low and high rows
+        with pytest.raises(ValueError, match='must be'):
+            as_bounds([(0.0, 1.0), (0.0, 2.0), (0.0, 3.0)], dim=3)
+
+    def test_a_box_of_the_wrong_width_raises(self):
+        with pytest.raises(ValueError, match='action dimensions'):
+            as_bounds([[0.0, 0.0], [1.0, 1.0]], dim=3)
+
+    def test_the_result_does_not_alias_its_input(self):
+        # broadcast_to returns a read-only view, so a caller writing into the
+        # box it gets back would otherwise raise
+        box = as_bounds(1.0, dim=2)
+        box[0, 0] = -2.0
+        assert box[0] == pytest.approx([-2.0, -1.0])
 
 
 # ---- sample_actions --------------------------------------------------------
@@ -136,6 +181,31 @@ class TestSampleActions:
         expected = sample_actions(bounds, 4, kind, 0)
         assert sample_actions(bounds.numpy(), 4, kind, 0) == pytest.approx(expected)
         assert sample_actions(bounds.tolist(), 4, kind, 0) == pytest.approx(expected)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_a_scalar_bound_is_a_zero_centered_box(self, kind):
+        actions = sample_actions(2.0, 64, kind, 0, dim=3)
+        assert actions.shape == (64, 3)
+        assert np.all(np.abs(actions) <= 2.0)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_a_shared_pair_covers_every_dimension(self, kind):
+        # the pair an objective declares its box with; without `dim` it would
+        # be read as a one-dimensional box rather than broadcast across three
+        actions = sample_actions((0.0, 10.0), 64, kind, 0, dim=3)
+        assert actions.shape == (64, 3)
+        assert np.all(actions >= 0.0) and np.all(actions <= 10.0)
+
+    @pytest.mark.parametrize('kind', ['sobol', 'uniform'])
+    def test_an_objectives_action_bounds_are_a_valid_box(self, kind):
+        # what a sequential run does: the box it samples over is read straight
+        # off the objectives, so the two spellings have to be the same one
+        objectives = DecoupledObjectives([
+            Objective.from_empty('cost', maximize=False, action_bounds=(-2.0, 2.0))
+        ])
+        actions = sample_actions(objectives.action_bounds, 8, kind, 0, dim=1)
+        assert actions.shape == (8, 1)
+        assert np.all(np.abs(actions) <= 2.0)
 
 
 # ---- AffineTransform -------------------------------------------------------
@@ -561,7 +631,8 @@ class TestObjectiveActionBounds:
     def test_action_box_reports_the_bounds_when_pinned(self, x, y):
         pinned = Objective('cost', False, y.copy(), x.copy(),
                            action_bounds=(0.0, 20.0))
-        assert pinned.action_box() == (0.0, 20.0)
+        # widened to one column per action dimension, the package's one form
+        assert pinned.action_box() == pytest.approx(np.array([[0.0] * 3, [20.0] * 3]))
 
     def test_action_box_falls_back_to_the_measured_range(self, objective, x):
         low, high = objective.action_box()

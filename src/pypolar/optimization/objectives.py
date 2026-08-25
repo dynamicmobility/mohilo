@@ -12,26 +12,60 @@ from botorch.utils.sampling import draw_sobol_samples
 
 BOUNDS_SLACK = 1e-9   # float round-off allowed outside a declared action box
 
+def as_bounds(bounds, dim=None):
+    """Any bounds spelling as the one form the package uses: a `(2, d)` array
+    `[[low, ...], [high, ...]]`, the orientation BoTorch states bounds in.
+
+    Args:
+        bounds: a scalar, read as the half-width of the zero-centered box
+            `[-bounds, bounds]`; a `(2,)` or `(2, 1)` pair, one low and one high
+            shared by every dimension; or an already-`(2, d)` box.
+        dim: d, broadcasting a shared pair across the action dimensions. None
+            leaves the box at whatever width it was stated in.
+
+    Returns:
+        (2, d) low/high rows, in raw action units.
+    """
+    if np.ndim(bounds) == 0:
+        bounds = [-bounds, bounds]
+
+    box = np.asarray(bounds, dtype=float)
+    if box.ndim == 1:
+        box = box[:, None]
+    if box.ndim != 2 or box.shape[0] != 2:
+        raise ValueError('bounds must be (2, d) [[low, ...], [high, ...]], got '
+                         f'shape {box.shape}')
+    if dim is not None and box.shape[1] not in (1, dim):
+        raise ValueError(f'bounds state {box.shape[1]} action dimensions, not {dim}')
+
+    return box if dim is None else np.broadcast_to(box, (2, dim)).copy()
+
+
 def sample_actions(
     bounds    : list | np.ndarray | float,
     n         : int,
     kind      : str,
     seed      : int,
     dim       : int = None
-): 
-    """n actions over the box: Sobol is space-filling, uniform is iid."""
-    if isinstance(bounds, float):
-        # TODO: make tests for this case
-        if dim is None: raise Exception('dim must be provided if bounds is a float')
-        bounds = np.array([[-bounds] * dim] + [[bounds] * dim], dtype=float)
-    bounds = torch.as_tensor(bounds, dtype=torch.float64)
-    
+):
+    """n actions over the box: Sobol is space-filling, uniform is iid.
+
+    Args:
+        bounds: the box, in any spelling `as_bounds` takes.
+        dim: d, needed only when `bounds` states one low and one high for every
+            dimension rather than a column per dimension.
+
+    Returns:
+        (n, d) actions.
+    """
+    box = as_bounds(bounds, dim)
+
     if kind == 'sobol':
-        return draw_sobol_samples(bounds=bounds, n=n, q=1, seed=seed).squeeze(1).numpy()
+        return draw_sobol_samples(bounds=torch.as_tensor(box, dtype=torch.float64),
+                                  n=n, q=1, seed=seed).squeeze(1).numpy()
 
     if kind == 'uniform':
-        lo, hi = bounds.numpy()
-        return np.random.default_rng(seed).uniform(lo, hi, size=(n, len(lo)))
+        return np.random.default_rng(seed).uniform(*box, size=(n, box.shape[1]))
 
     raise ValueError(f"kind must be 'sobol' or 'uniform', got {kind!r}")
 
@@ -109,7 +143,7 @@ class Objective:
     ydata:    np.ndarray        # (N,)
     xdata:    np.ndarray        # (N, K), where K is the action dimension
     column:   str | None = None # source dataframe column, when read from one
-    action_bounds: tuple | None = None      # (low, high) actions, pins xtransform
+    action_bounds: np.ndarray | None = None # (2, K) actions, pins xtransform
 
     def __post_init__(self):
         self.ydata = np.asarray(self.ydata, dtype=float)
@@ -120,6 +154,12 @@ class Objective:
         # declared bounds pin the [0, 1]^K frame so it does not move as points
         # arrive; without them it is the measured actions' own box
         if self.action_bounds is not None:
+            # widened to K only once there are points to state K; an objective
+            # declared before its first measurement holds the shared pair
+            self.action_bounds = as_bounds(
+                self.action_bounds,
+                self.xdata.shape[1] if self.xdata.size else None
+            )
             self._check_inside_bounds()
             self.xtransform = AffineTransform.make_normalized_from_bounds(*self.action_bounds)
         elif self.xdata.size:
@@ -141,7 +181,7 @@ class Objective:
         if not self.xdata.size:
             return
 
-        low, high = (np.asarray(b, dtype=float) for b in self.action_bounds)
+        low, high = self.action_bounds
         slack   = BOUNDS_SLACK * (high - low)
         outside = (self.xdata < low - slack) | (self.xdata > high + slack)
         if np.any(outside):
@@ -150,12 +190,12 @@ class Objective:
                              f'action_bounds {self.action_bounds}')
 
     def action_box(self):
-        """(low, high) over this objective's actions: action_bounds when they
+        """(2, K) box over this objective's actions: action_bounds when they
         pin it, the measured actions' own range otherwise, None when empty."""
         if self.action_bounds is not None:
             return self.action_bounds
         if self.xdata.size:
-            return self.xdata.min(axis=0), self.xdata.max(axis=0)
+            return np.stack([self.xdata.min(axis=0), self.xdata.max(axis=0)])
 
         return None
 
@@ -212,9 +252,10 @@ class Objective:
         """An objective declared before any measurement.
 
         Args:
-            action_bounds: (low, high) actions, in raw units, scalar or one per
-                action dimension. Pins the [0, 1]^K frame so it does not move as
-                points arrive, and measurements outside the box are rejected.
+            action_bounds: (2, K) [[low, ...], [high, ...]] actions, in raw
+                units, or any spelling `as_bounds` takes. Pins the [0, 1]^K
+                frame so it does not move as points arrive, and measurements
+                outside the box are rejected.
         """
         return cls(
             name          = name,
@@ -240,9 +281,10 @@ class Objective:
         """Measurements already in hand.
 
         Args:
-            action_bounds: (low, high) actions, in raw units, scalar or one per
-                action dimension. Pins the [0, 1]^K frame so it does not move as
-                points arrive, and measurements outside the box are rejected.
+            action_bounds: (2, K) [[low, ...], [high, ...]] actions, in raw
+                units, or any spelling `as_bounds` takes. Pins the [0, 1]^K
+                frame so it does not move as points arrive, and measurements
+                outside the box are rejected.
         """
         return cls(
             name          = name,
@@ -321,8 +363,8 @@ class DecoupledObjectives:
             self.xtransform = None
             return
 
-        # reduce rather than np.min(axis=0), so a scalar bound broadcasts
-        # against a per-dimension one
+        # reduce rather than np.min(axis=0), so a box declared before its first
+        # measurement -- still (2, 1) -- broadcasts against a per-dimension one
         self.xtransform = AffineTransform.make_normalized_from_bounds(
             low  = reduce(np.minimum, [box[0] for box in boxes]),
             high = reduce(np.maximum, [box[1] for box in boxes])
@@ -348,16 +390,16 @@ class DecoupledObjectives:
 
     @property
     def action_bounds(self):
-        """(low, high) spanning every objective's pinned bounds, or None when
+        """(2, K) box spanning every objective's pinned bounds, or None when
         any of them is unpinned and so leaves the shared frame free to move."""
         bounds = [o.action_bounds for o in self.objectives]
         if not bounds or any(b is None for b in bounds):
             return None
 
-        # reduce rather than np.min(axis=0), so a scalar bound broadcasts
-        # against a per-dimension one
-        return (reduce(np.minimum, [b[0] for b in bounds]),
-                reduce(np.maximum, [b[1] for b in bounds]))
+        # reduce rather than np.min(axis=0), so a box declared before its first
+        # measurement -- still (2, 1) -- broadcasts against a per-dimension one
+        return np.stack([reduce(np.minimum, [b[0] for b in bounds]),
+                         reduce(np.maximum, [b[1] for b in bounds])])
 
     def __len__(self):
         return len(self.objectives)
