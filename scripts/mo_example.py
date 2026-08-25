@@ -1,9 +1,9 @@
 import time
 import warnings
 from dataclasses import asdict
-from functools import partial
 from inspect import signature
 from pathlib import Path
+from sklearn.metrics import r2_score
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,55 +11,19 @@ from linear_operator.utils.warnings import NumericalWarning
 import torch
 import pypolar as plr
 from tqdm import tqdm
+import hilo.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 DIM              = 3
-BOX              = 5.0
-SEED             = 95
-TRUE_NOISE       = 0.5
-GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
-# GP_NOISE         = plr.NoiseModel.pinned(TRUE_NOISE)
+GP_NOISE         = plr.NoiseModel.prior(0.5)
 MIN_LENGTHSCALE  = 0.1
 NUM_QUERIES      = DIM * 13
-ACQ_STRATS       = ['ucb', 'logei', 'qlognei']
+ACQ_STRATS       = ['ucb', 'logei', 'qlognei', 'ts']
+
+RUNS_PER_ACQF = 5
 REPEATS          = 1
-COMFORT          = 'Comfort'
-METABOLIC        = 'Cost'
-MULTITHREAD      = False
-
-RUNS_PER_ACQF = 10
-
 OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
-
-# the arguments `plr.make_synthetic` builds each groundtruth from, rather than
-# the instance alone, so a saved run carries what rebuilds it
-GROUND_TRUTH_SPECS = {
-    METABOLIC : {'func': 'Levy', 'dim': DIM, 'box': BOX, 'seed': SEED,
-                 'rel_noise_std': TRUE_NOISE},
-    COMFORT   : {'func': 'Levy', 'dim': DIM, 'box': BOX, 'seed': SEED,
-                 'rel_noise_std': TRUE_NOISE},
-}
-
-
-GROUND_TRUTHS   = {name: plr.SyntheticOracle.from_name(**spec)
-                   for name, spec in GROUND_TRUTH_SPECS.items()}
-METABOLIC_TRUTH = GROUND_TRUTHS[METABOLIC]
-COMFORT_TRUTH   = GROUND_TRUTHS[COMFORT]
-
-
-def run_config():
-    """The constants a run was made under."""
-    return {
-        'dim'             : DIM,
-        'box'             : BOX,
-        'seed'            : SEED,
-        'true_noise'      : TRUE_NOISE,
-        'gp_noise'        : asdict(plr.NoiseModel.coerce(GP_NOISE)),
-        'min_lengthscale' : MIN_LENGTHSCALE,
-        'num_queries'     : NUM_QUERIES,
-        'repeats'         : REPEATS,
-    }
 
 
 def acquisition_spec(strategy, seed, **kwargs):
@@ -70,193 +34,127 @@ def acquisition_spec(strategy, seed, **kwargs):
     bound.apply_defaults()
     return dict(bound.arguments)
 
-def make_probes():
-    probes = [
-        plr.Probe(
-            name              = METABOLIC,
-            caller            = METABOLIC_TRUTH,
-            obj_name          = METABOLIC,
-            separate_thread   = MULTITHREAD
-        ),
-        plr.Probe(
-            name              = COMFORT,
-            caller            = COMFORT_TRUTH,
-            repeats           = REPEATS,
-            obj_name          = COMFORT,
-            separate_thread   = MULTITHREAD
-        ),
-    ]
-    return probes
-
-
-def make_experiment(probes: list[plr.Probe]):
-    experiment = plr.Logger(
-        objectives   = [
-            plr.Objective.from_empty(
-                name          = METABOLIC,
-                maximize      = False,
-                action_bounds = (-BOX, BOX)
-            ),
-            plr.Objective.from_empty(
-                name          = COMFORT,
-                maximize      = False,
-                action_bounds = (-BOX, BOX)
-            )
-        ],
-        probes       = probes,
-        device       = plr.Device(),
-        action_names = [f'x{i}' for i in range(DIM)],
-    )
-    return experiment
-
-def fit_gp(objective):
-    return plr.BoTorchGP(
+def fit_gp(
+    objective   : plr.DecoupledObjectives,
+    noise       : plr.NoiseModel = None,
+    hypers      : plr.GPHyperparameters = None
+):
+    return plr.DecoupledMOGP(
         objective           = objective,
         noise               = GP_NOISE,
         fit_hyperparameters = True,
         min_length_scale    = MIN_LENGTHSCALE,
-        # signal_var=1.0,
-        # length_scale=0.5
     )
 
-def inference_regret(gp, optimal_actions, ground_truths, gt_spread):
-    """The action the GP recommends now, and its groundtruth gap in spreads."""
+def recommendation(gp, ground_truth):
+    """The action the GP recommends now, and its regret in groundtruth spreads."""
     recommended, _, _ = gp.recommend(raw=True)
-    comfort_gt        = ground_truths[COMFORT]
-    optimal_val       = comfort_gt(optimal_actions[COMFORT], noise=False)
-    inferred_val      = comfort_gt(recommended, noise=False)
-    scaled_regret     = (inferred_val - optimal_val) / gt_spread[COMFORT]
 
-    return recommended[0], np.ravel(scaled_regret)[0]
+    return recommended[0], plr.normalized_inference_regret(
+        raw_recommended_action   = recommended[0],
+        ground_truth             = ground_truth
+    )
 
 
 def run_experiment(
     experiment        : plr.Logger,
     acqf              : plr.AcquisitionFunction,
     dataset           : plr.ExperimentDataset,
-    optimal_actions   : dict[str, np.ndarray],
-    ground_truths     : dict[str, plr.SyntheticOracle],
-    gt_spread         : dict[str, float]
+    ground_truths     : dict[str, plr.SyntheticOracle]
 ):
     gp = None
     for i in tqdm(range(NUM_QUERIES)):
-        objective = experiment.objectives[COMFORT]
-        recommended, regret = None, None
         if i < 1:
             # randomly sample if no data is collected
             source = 'random'
             action = plr.sample_actions(
-                bounds = BOX,
                 dim    = DIM,
                 n      = 1,
                 kind   = 'uniform',
-                seed   = SEED + i
+                seed   = hilo.SEED + i,
+                bounds = experiment.objectives.action_bounds
             )[0]
         else:
             # fit gp + Acquisition strategy for the rest
             source = dataset.acquisition['strategy']
-            gp = fit_gp(experiment.objectives)
+            # gp = fit_gp(experiment.objectives)
             action = acqf.query(gp, q=1)[0]
-
-            # recommended, regret = inference_regret(
-            #     gp, 
-            #     optimal_actions,
-            #     ground_truths, 
-            #     gt_spread
-            # )
-
-        # the state the action was chosen from, recorded before it is applied
-        dataset.add_trial(
-            objectives  = experiment.objectives,
-            gp          = gp,
-            action      = action,
-            source      = source,
-            recommended = action, # TODO: FIX
-            regret      = 0.0 # TODO: FIX
-        )
 
         experiment.begin_trial(
             action=action,
             args={
-                METABOLIC: (action,),
-                COMFORT:   (action, i + 1)
+                hilo.METABOLIC: (action,),
+                hilo.COMFORT:   (action, i + 1)
             }
         )
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
 
+        gp = fit_gp(experiment.objectives)
+        # compute hv regret and add to dataset
+
     # the run's final state: every measurement, and the fit to all of them
     gp = fit_gp(experiment.objectives)
-    # recommended, regret = inference_regret(gp, optimal_actions, ground_truths, gt_spread)
-    # dataset.add_trial(
-    #     objectives  = experiment.objectives,
-    #     gp          = gp,
-    #     recommended = recommended,
-    #     regret      = regret
-    # )
+    # compute hv regret and add to dataset
 
     return experiment, gp, dataset
 
 def setup_experiment(acq_strat, seed):
-    probes     = make_probes()
-    experiment = make_experiment(probes)
+    probes     = hilo.make_probes()
+    experiment = hilo.make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
         acqf = plr.acquisition_factory_1d(strategy=acq_strat, seed=seed)
     )
 
     return experiment, acqf
 
+def run_trial(acq_strat, trial):
+    print(f'Trying {acq_strat} on trial {trial}')
+    experiment, acqf = setup_experiment(
+        acq_strat   = acq_strat,
+        seed        = hilo.SEED
+    )
 
-def get_groundtruth_optimum(
-    seed,
-    num_samples=4096
-):
-    actions = plr.sample_actions(
-        bounds    = BOX,
-        dim       = DIM,
-        n         = num_samples,
-        kind      = 'sobol',
-        seed      = seed,
+    dataset = plr.ExperimentDataset(
+        name         = acq_strat,
+        acquisition  = acquisition_spec(
+            strategy    = acq_strat,
+            seed        = hilo.SEED,
+            **ACQ_KWARGS
+        ),
+        groundtruths = hilo.GROUND_TRUTH_SPECS,
+        config       = asdict(
+            hilo.Simulation1D(
+                gp_noise          = plr.NoiseModel.coerce(GP_NOISE),
+                min_lengthscale   = MIN_LENGTHSCALE,
+                num_queries       = NUM_QUERIES,
+                repeats           = REPEATS,
+            )
+        ),
+        path         = OUTPUT_DIR / f'{acq_strat}-{trial}.json'
     )
-    gt_values = np.array([GROUND_TRUTHS[obj_name](actions, noise=False) for obj_name in GROUND_TRUTHS.keys()])
-    idxs = np.argmin(gt_values, axis=1)
-    spread = gt_values.max(axis=1) - gt_values.min(axis=1)
-    return (
-        {name: actions[i] for name, i in zip(GROUND_TRUTHS.keys(), idxs, strict=True)},
-        {name: sp for name, sp in zip(GROUND_TRUTHS.keys(), spread, strict=True)}
+
+    experiment, gp, dataset = run_experiment(
+        experiment        = experiment,
+        acqf              = acqf,
+        dataset           = dataset,
+        ground_truths     = hilo.GROUND_TRUTHS
     )
+    # mu, std, models = plr.loo(gp.objective, fit_gp, noise=GP_NOISE)
+    # resid = mu - gp.objective.ydata
+    # print('SCORE', r2_score(gp.objective.ydata, mu))
+    # print(f'wrote {dataset.save()}')
 
 def main():
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    torch.manual_seed(SEED)
-    optimal_actions, gt_spread = get_groundtruth_optimum(
-        seed = SEED,
-        num_samples=8192
-    )
-    
+
+    # OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    torch.manual_seed(hilo.SEED)
+    # NEIL: generalize the acqusition function to work in MO, then fix the dataset class
     for acq_strat in ACQ_STRATS:
         for trial in range(RUNS_PER_ACQF):
-            print(f'Trying {acq_strat} on trial {trial}')
-            experiment, acqf = setup_experiment(
-                acq_strat   = acq_strat,
-                seed        = SEED
-            )
-            dataset = plr.ExperimentDataset(
-                name         = acq_strat,
-                acquisition  = acquisition_spec(strategy=acq_strat, seed=SEED, **ACQ_KWARGS),
-                groundtruths = GROUND_TRUTH_SPECS,
-                config       = run_config(),
-                path         = OUTPUT_DIR / f'{acq_strat}-{trial}.json'
-            )
-            experiment, gp, dataset = run_experiment(
-                experiment        = experiment,
-                acqf              = acqf,
-                dataset           = dataset,
-                optimal_actions   = optimal_actions,
-                ground_truths     = GROUND_TRUTHS,
-                gt_spread         = gt_spread
-            )
-            print(f'wrote {dataset.save()}')
+            run_trial(acq_strat, trial)
+
+    print('Done')
 
 
 if __name__ == '__main__':
