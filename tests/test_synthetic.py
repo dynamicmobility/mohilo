@@ -30,6 +30,9 @@ SEED = 3
 # a Sobol scan of the whole box, so a spread read off it is the module's own
 N_SPREAD = 256
 
+# above 1D Levy's largest value on [-5, 5] (3.884), so the whole front counts
+LEVY_REF = 4.0
+
 
 @pytest.fixture
 def levy():
@@ -98,7 +101,7 @@ class TestSyntheticOracle:
         rng = SyntheticOracle(levy, measure='range', n_spread=N_SPREAD, seed=SEED)
         std = SyntheticOracle(levy, measure='std', n_spread=N_SPREAD, seed=SEED)
 
-        assert rng.measure_spread == rng.ptp == rng.max - rng.min
+        assert rng.measure_spread == rng.ptp == rng.sample_max - rng.sample_min
         assert 0 < std.measure_spread < rng.measure_spread
 
         # the spread is a property of the scan, not of what is measured after it
@@ -211,7 +214,9 @@ class TestMOSyntheticOracle:
         assert abs(corr) < 0.2
 
     def test_a_list_of_scalar_truths_is_the_same_object(self, levy):
-        oracle = MOSyntheticOracle([levy, levy], n_spread=N_SPREAD, seed=SEED)
+        # a list of functions carries no reference point, so one is required
+        oracle = MOSyntheticOracle([levy, levy], ref_point=LEVY_REF, n_spread=N_SPREAD,
+                                   seed=SEED)
         X = np.linspace(-BOX, BOX, 7)[:, None]
 
         assert len(oracle) == 2
@@ -228,6 +233,67 @@ class TestMOSyntheticOracle:
         oracle = MOSyntheticOracle.from_name(func='DTLZ2', dim=4, box=BOX,
                                              num_objectives=3, n_spread=N_SPREAD)
         assert len(oracle) == 3
+
+
+class TestSampledMaxHypervolume:
+    """The multi-objective analog of `sample_min`: the best a finite scan of
+    the box manages, which is what a hypervolume attained during a run gets
+    normalized by."""
+
+    @pytest.mark.parametrize('func,kwargs', [
+        ('BraninCurrin', {}),
+        ('DTLZ2',        dict(dim=4, num_objectives=2)),
+        ('ZDT1',         dict(dim=4, num_objectives=2)),
+    ])
+    def test_the_scan_finds_most_but_not_all_of_the_true_front(self, func, kwargs):
+        """A finite scan lands on a subset of the true front, so its hypervolume
+        sits below the analytic maximum botorch carries -- and near it, or
+        nothing normalized by it would mean much. The default scan is used
+        rather than this module's coarse one, since the ratio is what a coarse
+        scan degrades: over six seeds it runs 0.918 to 0.972 at 4096 points and
+        drops to 0.70 at 256.
+        """
+        truth  = getattr(multi_objective, func)(**kwargs)
+        oracle = MOSyntheticOracle(truth, seed=SEED)
+
+        assert 0.85 < oracle.sampled_max_hypervolume / truth._max_hv < 1.0
+
+    def test_the_reference_defaults_to_the_truths_own(self, branin_currin):
+        oracle = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
+
+        np.testing.assert_allclose(oracle.ref_point, branin_currin.ref_point.numpy())
+
+    def test_a_looser_reference_admits_more_volume(self, branin_currin):
+        """The reference is the worst value per objective that still counts, so
+        relaxing it can only add volume. This is what pins which way round the
+        front is measured from it."""
+        tight = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
+        loose = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED,
+                                  ref_point=branin_currin.ref_point.numpy() + 10.0)
+
+        assert loose.sampled_max_hypervolume > tight.sampled_max_hypervolume > 0
+
+    def test_a_list_of_functions_requires_a_reference(self, levy):
+        # a MultiObjectiveTestProblem carries one; a list of scalar truths does not
+        with pytest.raises(ValueError, match='ref_point'):
+            MOSyntheticOracle([levy, levy], n_spread=N_SPREAD, seed=SEED)
+
+    def test_one_reference_covers_every_objective(self, levy):
+        spec   = dict(n_spread=N_SPREAD, seed=SEED)
+        scalar = MOSyntheticOracle([levy, levy], ref_point=LEVY_REF, **spec)
+        pair   = MOSyntheticOracle([levy, levy], ref_point=[LEVY_REF] * 2, **spec)
+
+        np.testing.assert_allclose(scalar.ref_point, [LEVY_REF] * 2)
+        assert scalar.sampled_max_hypervolume == pair.sampled_max_hypervolume
+
+    def test_the_scan_ignores_the_observation_noise(self, branin_currin):
+        """The scan reads the truth with noise=False, so how noisy an oracle is
+        cannot move the number its own runs are scored against."""
+        spec  = dict(n_spread=N_SPREAD, seed=SEED)
+        clean = MOSyntheticOracle(branin_currin, rel_noise_std=0.0, **spec)
+        noisy = MOSyntheticOracle(branin_currin, rel_noise_std=0.5, **spec)
+
+        assert clean.sampled_max_hypervolume == noisy.sampled_max_hypervolume
 
 
 class TestRegistries:

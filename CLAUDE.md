@@ -34,7 +34,7 @@ pyPolar/
 │   ├── performance/
 │   │   ├── mo.py                   # groundtruth_hypervolume, pareto_overlay
 │   │   ├── loo.py                  # loo: leave-one-out cross-validation
-│   │   └── regret.py               # regret, action_distance
+│   │   └── regret.py               # normalized_inference_regret
 │   └── utils/                      # pareto.py, plotting.py
 ├── hilo/
 │   ├── plot_pilot.py               # The one live experiment: pilot data -> fronts + optima
@@ -135,7 +135,7 @@ from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
 from pypolar import DecoupledObjectives, Objective, AffineTransform
 from pypolar import sample_actions
 from pypolar import loo
-from pypolar import regret, action_distance
+from pypolar import normalized_inference_regret
 from pypolar import truth_at, construct_function, SyntheticFunction
 from pypolar import SYNTHETIC_FUNCTIONS, SYNTHETIC_1D_FUNCTIONS
 from pypolar import plot_test_function, plot_fit_1d
@@ -146,9 +146,8 @@ boundary in both directions: every public method takes and returns numpy arrays,
 and torch never escapes the module. Three arguments are the exception, all inputs
 only: `Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
 subclass; `sample_actions`'s `bounds`, anything `torch.as_tensor` accepts; and
-the `truth` taken by `feedback/synthetic.py` and `performance/regret.py`, a
-`SyntheticTestFunction` *instance*, whose `optimizers` tensor is converted before
-use. All are consumed internally and only numpy comes back out.
+the `truth` taken by `feedback/synthetic.py`, a `SyntheticTestFunction`
+*instance*. All are consumed internally and only numpy comes back out.
 
 ### Objectives (`optimization/objectives.py`)
 
@@ -605,38 +604,35 @@ differs from the one being evaluated measures nothing. Passing `hypers` freezes
 the full-data fit's hyperparameters across the folds; passing None refits them
 fold by fold, which is the honest but far slower measurement.
 
-**`performance/regret.py`** scores a sequential run against a *known* truth, so
-unlike everything above it takes a BoTorch `SyntheticTestFunction` instance and
-reads its `optimal_value` and `optimizers`. It evaluates that truth through
-`feedback/synthetic.py`'s `truth_at`, which is what keeps the metrics free of
-torch.
+**`normalized_inference_regret(raw_recommended_action, ground_truth,
+maximize=False)`** (`performance/regret.py`) — how far the action a run would
+recommend right now sits from the truth's optimum, as a fraction of the truth's
+own range.
 
-- `regret(truth, objective, inferred, maximize=False)` — `(simple, inference)`
-  in the objective's own units. *Simple* regret is the gap at the best noiseless
-  value sampled so far; *inference* regret is the gap at `inferred`, the action
-  the run would recommend right now, which is what a study hands a subject. The
-  two answer different questions: simple regret can only improve, while
-  inference regret can get worse when a new point moves the posterior argmax.
-- `action_distance(truth, objective, inferred)` — the same pair in action space,
-  as distances to the *nearest* true optimizer. Measured in the objective's
-  normalized frame, so a distance of 0.1 is a tenth of a box span and the whole
-  box has diagonal `sqrt(d)`; without that normalization an action dimension
-  with larger units would dominate the norm.
+It takes a `SyntheticOracle` rather than a bare `SyntheticTestFunction`, and
+that is what makes it self-contained: the oracle measured `sample_min`,
+`sample_max` and `ptp` once over a Sobol scan of its whole box at construction,
+so the caller supplies only the recommendation. The truth is evaluated with
+`noise=False`, so a lucky draw of the observation noise cannot flatter a score.
 
-`maximize` states the direction of the *truth*, separately from
-`objective.maximize` which orients that objective's own standardization. A
-regret is a distance from the optimum and so is non-negative either way:
-`maximize=False` scores `value - optimal_value` over the sampled minimum and
-`maximize=True` scores `optimal_value - value` over the sampled maximum. In a
-run where the objective is this truth the two flags must agree. The default is
-False because a botorch synthetic built with `negate=False` — which is what
-`Objective` expects, since it encodes direction itself — reports its global
-minimum as `optimal_value`.
+Dividing by `ptp` is what makes runs comparable. Two truths whose values differ
+by orders of magnitude produce raw gaps that differ by the same factor; in
+spreads of each truth's own range, a regret of 0.05 means the same thing on
+both. This is the same convention `rel_noise_std` uses for the noise.
 
-`regret` and `action_distance` can disagree, and neither is redundant: a
-recommendation in a neighbouring basin of a multimodal truth is far in action
-space and possibly close in value, and a flat optimum inverts that. A study pays
-for the action directly, since the recommendation it hands a subject is one.
+*Inference* regret, not *simple* regret: it scores the posterior argmax — what a
+human-in-the-loop study actually hands back to a subject — not the best point
+sampled so far. The two behave differently, and it matters when reading a curve:
+simple regret can only improve, while inference regret can get *worse* when a
+new measurement moves the posterior argmax.
+
+`maximize` says which direction the truth is optimized in, and picks both the
+target — `sample_max` or `sample_min` — and which way the gap is subtracted. A
+regret is a distance from the optimum, so it is non-negative either way:
+minimizing scores `inferred - sample_min` and maximizing scores `sample_max -
+inferred`. It defaults to False because a
+botorch synthetic built with `negate=False` — which is what `Objective` expects,
+since it encodes direction itself — is being minimized.
 
 ### Plotting (`utils/plotting.py`)
 

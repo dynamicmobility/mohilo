@@ -15,6 +15,7 @@ from botorch.test_functions.base import (
 
 from pypolar.optimization.gp import DTYPE
 from pypolar.optimization.objectives import sample_actions
+from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated
 
 SPREAD_SAMPLES = 4096   # Sobol points a spread is measured over
 PROBE_SAMPLES  = 32     # Sobol points a candidate instance is probed at
@@ -159,7 +160,8 @@ class SyntheticOracle:
         seed: seeds both the scan and the noise draws.
 
     Attributes:
-        max, min, ptp: the scan's largest and smallest value, and their gap.
+        sample_max, sample_min, ptp: the scan's largest and smallest value,
+            their arguments (`sample_argmax`, `sample_argmin`), and their gap.
         measure_spread: the measured spread, in the function's own units.
         noise_std: the absolute noise standard deviation applied.
     """
@@ -179,18 +181,23 @@ class SyntheticOracle:
         self.rel_noise_std = rel_noise_std
         self.rng           = np.random.default_rng(seed)
 
+        X = sample_actions(
+            bounds    = truth.bounds,
+            n         = n_spread,
+            kind      = 'sobol',
+            seed      = seed
+        )
         y = truth_at(
             truth = truth,
-            X     = sample_actions(
-                bounds    = truth.bounds,
-                n         = n_spread,
-                kind      = 'sobol',
-                seed      = seed
-            )
+            X = X
         )
-        self.max              = np.max(y)
-        self.min              = np.min(y)
-        self.ptp              = self.max - self.min
+        max_action_idx        = np.argmax(y)
+        min_action_idx        = np.argmin(y)
+        self.sample_min      = y[min_action_idx]
+        self.sample_max      = y[max_action_idx]
+        self.sample_argmin    = X[min_action_idx]
+        self.sample_argmax    = X[max_action_idx]
+        self.ptp              = self.sample_max - self.sample_min
         self.measure_spread   = y.std() if measure == 'std' else self.ptp
         self.noise_std        = rel_noise_std * self.measure_spread
 
@@ -276,11 +283,17 @@ class MOSyntheticOracle:
         measure: 'std' or 'range', as `SyntheticOracle` takes it.
         n_spread: points in each spread scan.
         seed: seeds the scans and the noise draws.
+        ref_point: (m,) the worst value per objective that still counts, in the
+            truth's own units. A `MultiObjectiveTestProblem` supplies its own,
+            so it is required only for a list of functions.
 
     Attributes:
         objectives: the m `SyntheticOracle`s, in the truth's objective order.
         measure_spread: (m,) each objective's measured spread, in its own units.
         noise_std: (m,) the absolute noise standard deviation applied to each.
+        ref_point: (m,) the hypervolume reference, in the truth's own units.
+        sampled_max_hypervolume: the hypervolume of the scan's own front, the
+            multi-objective analog of a `SyntheticOracle`'s `sample_min`.
     """
 
     def __init__(
@@ -289,7 +302,8 @@ class MOSyntheticOracle:
         rel_noise_std   : float = 0.0,
         measure         : str   = 'range',
         n_spread        : int   = SPREAD_SAMPLES,
-        seed            : int   = 0
+        seed            : int   = 0,
+        ref_point       : np.ndarray | None = None
     ):
         self.truth         = truth
         self.rel_noise_std = rel_noise_std
@@ -318,6 +332,32 @@ class MOSyntheticOracle:
             ]
         self.measure_spread = np.array([o.measure_spread for o in self.objectives])
         self.noise_std      = np.array([o.noise_std for o in self.objectives])
+
+        if ref_point is None:
+            if not isinstance(truth, MultiObjectiveTestProblem):
+                raise ValueError('ref_point is required for a list of functions')
+            ref_point = truth.ref_point.numpy()
+        
+        self.ref_point = np.broadcast_to(
+            array = np.asarray(
+                ref_point, 
+                dtype=float
+            ),
+            shape = (len(self.objectives),)
+        )
+
+        X = sample_actions(
+            bounds=self.objectives[0].truth.bounds, 
+            n=n_spread,
+            kind='sobol', 
+            seed=seed
+        )
+        # TODO: make this more efficient in the future. Currently samples each objective many times (see how __call__ works for each objective)
+        y = self(X, noise=False)
+
+        self.sampled_max_hypervolume = hypervolume_from_nondominated(
+            y[get_nondominated(-y)] - self.ref_point
+        )
 
     def objective(self, index) -> SyntheticOracle:
         """Objective `index`, as a scalar `SyntheticOracle`."""

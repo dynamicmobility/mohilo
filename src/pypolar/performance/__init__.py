@@ -1,6 +1,6 @@
 from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
 from pypolar.performance.loo import loo
-from pypolar.performance.regret import regret, action_distance
+from pypolar.performance.regret import normalized_inference_regret
 
 __all__ = [
     # mo
@@ -9,6 +9,5 @@ __all__ = [
     # loo
     "loo",
     # regret
-    "regret",
-    "action_distance"
+    "normalized_inference_regret"
 ]
