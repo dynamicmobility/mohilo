@@ -2,11 +2,16 @@
 experiments draw from, noiseless evaluation, and an observation noise stated as
 a fraction of a function's own spread."""
 
+from inspect import signature
+
 import numpy as np
 import torch
 
 from botorch.exceptions.errors import BotorchError
-from botorch.test_functions import SyntheticTestFunction, synthetic
+from botorch.test_functions import SyntheticTestFunction, multi_objective, synthetic
+from botorch.test_functions.base import (
+    MultiObjectiveTestProblem,
+)
 
 from pypolar.optimization.gp import DTYPE
 from pypolar.optimization.objectives import sample_actions
@@ -41,9 +46,6 @@ SYNTHETIC_FUNCTIONS = {
     'WeldedBeamSO'            : synthetic.WeldedBeamSO,
 }
 
-# the entries with a non-constant 1D instance, as measured by construct_function
-# on [-5, 5]. A box that excludes a function's known optimizer drops it, so
-# StyblinskiTang (optimizer at -2.904) leaves this set below a half-width of 2.91.
 SYNTHETIC_1D_FUNCTIONS = {
     'Ackley'                  : synthetic.Ackley,
     'DixonPrice'              : synthetic.DixonPrice,
@@ -54,21 +56,75 @@ SYNTHETIC_1D_FUNCTIONS = {
     'StyblinskiTang'          : synthetic.StyblinskiTang,
 }
 
+MO_SYNTHETIC_FUNCTIONS = {
+    'BraninCurrin' : multi_objective.BraninCurrin,
+    'CarSideImpact': multi_objective.CarSideImpact,
+    'DH1'          : multi_objective.DH1,
+    'DH2'          : multi_objective.DH2,
+    'DH3'          : multi_objective.DH3,
+    'DH4'          : multi_objective.DH4,
+    'DTLZ1'        : multi_objective.DTLZ1,
+    'DTLZ2'        : multi_objective.DTLZ2,
+    'DTLZ3'        : multi_objective.DTLZ3,
+    'DTLZ4'        : multi_objective.DTLZ4,
+    'DTLZ5'        : multi_objective.DTLZ5,
+    'DTLZ7'        : multi_objective.DTLZ7,
+    'GMM'          : multi_objective.GMM,
+    'Penicillin'   : multi_objective.Penicillin,
+    'ToyRobust'    : multi_objective.ToyRobust,
+    'VehicleSafety': multi_objective.VehicleSafety,
+    'ZDT1'         : multi_objective.ZDT1,
+    'ZDT2'         : multi_objective.ZDT2,
+    'ZDT3'         : multi_objective.ZDT3,
+}
 
-def truth_at(truth: SyntheticTestFunction, X):
+def truth_at(
+    truth   : SyntheticTestFunction,
+    X       : np.ndarray | float
+) -> np.ndarray:
     """Noiseless values of the truth at the (n, d) actions X."""
     X = np.asarray(X)
     with torch.no_grad():
         return truth(torch.as_tensor(X, dtype=DTYPE), noise=False).numpy()
 
 
-def construct_function(func, dim, box, seed=0):
+def construct_function(
+    func              : type[SyntheticTestFunction] | type[MultiObjectiveTestProblem],
+    dim               : int,
+    box               : float,
+    num_objectives    : int | None = None,
+    seed              : int = 0
+):
     """One non-constant instance of func at the requested dim, or None if it has
-    no such instance. Prefers the [-box, box] action box, falls back to the
-    function's own default bounds when it rejects that box."""
+    no such instance.
+
+    Defaults to the [-box, box] action box and falls back to the function's own
+    default bounds. No multi-objective problem accepts a `bounds` argument at
+    all, so for those the box is inert and `truth.bounds` is the domain.
+
+    Args:
+        func: a `SyntheticTestFunction` or `MultiObjectiveTestProblem` subclass.
+        dim: the action dimension wanted.
+        box: half-width of the preferred action box.
+        num_objectives: m, for the families that take it (DTLZ*, ZDT*, GMM).
+        seed: seeds the non-constant probe.
+    """
+    # TODO: get rid of this function eventually...
+    # each candidate is filtered against the constructor's own signature, since
+    # the two families take different arguments and neither takes the other's
+    takes  = signature(func).parameters
+    shared = {'num_objectives': num_objectives} if num_objectives is not None else {}
+
+    tried = []
     for kwargs in ({'dim': dim, 'bounds': [(-box, box)] * dim},
                    {'bounds': [(-box, box)] * dim},
+                   {'dim': dim},
                    {}):
+        kwargs = {k: v for k, v in (kwargs | shared).items() if k in takes}
+        if kwargs in tried:
+            continue     # the filter collapsed it onto a candidate already tried
+        tried.append(kwargs)
+
         try:
             truth = func(**kwargs)
         except (TypeError, ValueError, AssertionError, BotorchError):
@@ -78,24 +134,21 @@ def construct_function(func, dim, box, seed=0):
             continue
 
         # Powell sums over range(dim // 4) and Rosenbrock over range(dim - 1),
-        # so below dim 4 and dim 2 they are identically zero
+        # so below dim 4 and dim 2 they are identically zero. Per objective
+        # rather than pooled: a wide objective would otherwise cover a
+        # constant one, whose ptp is a column of an (n, m) result.
         probe = sample_actions(bounds=truth.bounds, n=PROBE_SAMPLES,
                                kind='sobol', seed=seed)
-        if np.ptp(truth_at(truth, probe)) > 0:
+        if np.min(np.ptp(truth_at(truth, probe), axis=0)) > 0:
             return truth
 
     return None
 
-
-class SyntheticFunction:
+class SyntheticOracle:
     """A synthetic test function plus an observation noise stated as a fraction
     of the function's own spread.
 
-    The spread is measured once, over a Sobol scan of the whole box. That is
-    what makes `rel_noise_std` mean the same difficulty across functions whose
-    ranges differ by orders of magnitude, and it is the only way a sequential
-    loop can use the convention at all: it adds one point at a time, and a
-    single point has no spread of its own to take a fraction of.
+    Function spread is measured once, over a Sobol scan of the whole box.
 
     Args:
         truth: a `SyntheticTestFunction` *instance*.
@@ -106,12 +159,19 @@ class SyntheticFunction:
         seed: seeds both the scan and the noise draws.
 
     Attributes:
-        spread: the measured spread, in the function's own units.
+        max, min, ptp: the scan's largest and smallest value, and their gap.
+        measure_spread: the measured spread, in the function's own units.
         noise_std: the absolute noise standard deviation applied.
     """
 
-    def __init__(self, truth: SyntheticTestFunction, rel_noise_std=0.0,
-                 measure='std', n_spread=SPREAD_SAMPLES, seed=0):
+    def __init__(
+        self,
+        truth           : SyntheticTestFunction,
+        rel_noise_std   : float = 0.0,
+        measure         : str = 'range',
+        n_spread        : int = SPREAD_SAMPLES,
+        seed            : int = 0
+    ):
         if measure not in ('std', 'range'):
             raise ValueError(f"measure must be 'std' or 'range', got {measure!r}")
 
@@ -119,12 +179,26 @@ class SyntheticFunction:
         self.rel_noise_std = rel_noise_std
         self.rng           = np.random.default_rng(seed)
 
-        y = truth_at(truth, sample_actions(bounds=truth.bounds, n=n_spread,
-                                           kind='sobol', seed=seed))
-        self.spread    = y.std() if measure == 'std' else np.ptp(y)
-        self.noise_std = rel_noise_std * self.spread
+        y = truth_at(
+            truth = truth,
+            X     = sample_actions(
+                bounds    = truth.bounds,
+                n         = n_spread,
+                kind      = 'sobol',
+                seed      = seed
+            )
+        )
+        self.max              = np.max(y)
+        self.min              = np.min(y)
+        self.ptp              = self.max - self.min
+        self.measure_spread   = y.std() if measure == 'std' else self.ptp
+        self.noise_std        = rel_noise_std * self.measure_spread
 
-    def __call__(self, X, noise=True): # TODO: type annotate and make this work with floats
+    def __call__(
+        self,
+        X       : np.ndarray | float,
+        noise   : bool = True
+    ):
         """Values at the (n, d) actions X, returned (n,).
 
         The noise is drawn from the instance's own generator, so repeated calls
@@ -136,18 +210,160 @@ class SyntheticFunction:
 
         return y + self.noise_std * self.rng.standard_normal(y.shape)
     
-    # TODO: add estimate range function
+    @classmethod
+    def from_name(
+        cls,
+        func            : str,
+        dim             : int,
+        box             : float,
+        seed            : int = 0,
+        rel_noise_std   : float = 0.0,
+        measure         : str = 'range',
+        n_spread        : int = SPREAD_SAMPLES
+    ):
+        """One oracle, from arguments plain enough to store and replay."""
+        truth = construct_function(
+            func    = SYNTHETIC_FUNCTIONS[func],
+            dim     = dim,
+            box     = box,
+            seed    = seed
+        )
+        if truth is None:
+            raise ValueError(f'{func} has no non-constant instance at dim {dim}')
 
+        return cls(
+            truth           = truth,
+            rel_noise_std   = rel_noise_std,
+            measure         = measure,
+            n_spread        = n_spread,
+            seed            = seed
+        )
+    
+class MO2SO:
+    """One scalarization of a multi-objective truth: `truth(X) @ tradeoff`.
 
-def make_synthetic(func, dim, box, seed=0, rel_noise_std=0.0):
-    """One `SyntheticFunction`, from arguments plain enough to store.
+    Exposes the `bounds`, `dim` and `noise` keyword a `SyntheticTestFunction`
+    instance does, which is the whole interface `truth_at` and `SyntheticOracle`
+    ask of a truth.
 
-    Returns:
-        the `SyntheticFunction`, or None when `func` has no instance at `dim`.
+    Args:
+        truth: a `MultiObjectiveTestProblem` *instance*.
+        tradeoff: (m,) weights over its objectives.
     """
-    truth = construct_function(func=SYNTHETIC_FUNCTIONS[func], dim=dim, box=box,
-                               seed=seed)
-    if truth is None:
-        return None
 
-    return SyntheticFunction(truth=truth, rel_noise_std=rel_noise_std, seed=seed)
+    def __init__(
+        self,
+        truth       : MultiObjectiveTestProblem,
+        tradeoff    : np.ndarray
+    ):
+        self.truth    = truth
+        self.tradeoff = torch.as_tensor(tradeoff, dtype=DTYPE)
+        self.bounds   = truth.bounds
+        self.dim      = truth.dim
+
+    def __call__(self, X, noise=True):
+        """Values at the (n, d) actions X, returned (n,)."""
+        return self.truth(X, noise=noise) @ self.tradeoff
+
+
+class MOSyntheticOracle:
+    """A multi-objective test function as m independent `SyntheticOracle`s.
+
+    Args:
+        truth: a `MultiObjectiveTestProblem` *instance*.
+        rel_noise_std: noise standard deviation, as a fraction of each
+            objective's own spread.
+        measure: 'std' or 'range', as `SyntheticOracle` takes it.
+        n_spread: points in each spread scan.
+        seed: seeds the scans and the noise draws.
+
+    Attributes:
+        objectives: the m `SyntheticOracle`s, in the truth's objective order.
+        measure_spread: (m,) each objective's measured spread, in its own units.
+        noise_std: (m,) the absolute noise standard deviation applied to each.
+    """
+
+    def __init__(
+        self,
+        truth           : MultiObjectiveTestProblem | list[SyntheticTestFunction],
+        rel_noise_std   : float = 0.0,
+        measure         : str   = 'range',
+        n_spread        : int   = SPREAD_SAMPLES,
+        seed            : int   = 0
+    ):
+        self.truth         = truth
+        self.rel_noise_std = rel_noise_std
+
+        if isinstance(truth, MultiObjectiveTestProblem):
+            self.objectives = [
+                SyntheticOracle(
+                    truth           = MO2SO(truth, w),
+                    rel_noise_std   = rel_noise_std,
+                    measure         = measure,
+                    n_spread        = n_spread,
+                    seed            = seed + i
+                )
+                for i, w in enumerate(np.eye(truth.num_objectives))
+            ]
+        else:
+            self.objectives = [
+                SyntheticOracle(
+                    truth           = synfunc,
+                    rel_noise_std   = rel_noise_std,
+                    measure         = measure,
+                    n_spread        = n_spread,
+                    seed            = seed + i
+                )
+                for i, synfunc in enumerate(truth)  
+            ]
+        self.measure_spread = np.array([o.measure_spread for o in self.objectives])
+        self.noise_std      = np.array([o.noise_std for o in self.objectives])
+
+    def objective(self, index) -> SyntheticOracle:
+        """Objective `index`, as a scalar `SyntheticOracle`."""
+        return self.objectives[index]
+
+    def __len__(self):
+        return len(self.objectives)
+
+    def __getitem__(self, index):
+        return self.objectives[index]
+
+    def __call__(self, X, noise=True):
+        """Values at the (n, d) actions X, returned (n, m).
+
+        Each column draws from its own objective's generator, so the noise is
+        independent across the objectives.
+        """
+        return np.stack([o(X, noise=noise) for o in self.objectives], axis=-1)
+    
+    @classmethod
+    def from_name(
+        cls,
+        func            : str,
+        dim             : int,
+        box             : float,
+        seed            : int           = 0,
+        rel_noise_std   : float         = 0.0,
+        num_objectives  : int | None    = None,
+        measure         : str           = 'range',
+        n_spread        : int           = SPREAD_SAMPLES
+    ):
+        """One oracle, from arguments plain enough to store and replay."""
+        truth = construct_function(
+            func            = MO_SYNTHETIC_FUNCTIONS[func],
+            dim             = dim,
+            box             = box,
+            num_objectives  = num_objectives,
+            seed            = seed
+        )
+        if truth is None:
+            raise ValueError(f'{func} has no non-constant instance at dim {dim}')
+
+        return cls(
+            truth           = truth,
+            rel_noise_std   = rel_noise_std,
+            measure         = measure,
+            n_spread        = n_spread,
+            seed            = seed
+        )

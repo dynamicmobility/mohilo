@@ -1,4 +1,8 @@
-from pypolar.feedback.acquisition import AcquisitionFunction, acquisition_factory_1d
+from pypolar.feedback.acquisition import (
+    AcquisitionFunction,
+    acquisition_factory_1d,
+    acquisition_factory_2d,
+)
 from pypolar.feedback.oracles import (
     BradleyTerryOracle,
     MultiObjectiveOracle,
@@ -14,15 +18,18 @@ from pypolar.feedback.rewards import (
 from pypolar.feedback.synthetic import (
     SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
-    SyntheticFunction,
+    MO_SYNTHETIC_FUNCTIONS,
+    SyntheticOracle,
+    MOSyntheticOracle,
+    MO2SO,
     construct_function,
-    make_synthetic,
     truth_at
 )
 
 __all__ = [
     "AcquisitionFunction",
     "acquisition_factory_1d",
+    "acquisition_factory_2d",
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
     "NoisyRegressionOracle",
@@ -33,8 +40,10 @@ __all__ = [
     "BoundedIdealPoint",
     "SYNTHETIC_FUNCTIONS",
     "SYNTHETIC_1D_FUNCTIONS",
-    "SyntheticFunction",
+    "MO_SYNTHETIC_FUNCTIONS",
+    "SyntheticOracle",
+    "MOSyntheticOracle",
+    "MO2SO",
     "construct_function",
-    "make_synthetic",
     "truth_at",
 ]

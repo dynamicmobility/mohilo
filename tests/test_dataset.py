@@ -12,8 +12,10 @@ import json
 import numpy as np
 import pytest
 
+from botorch.acquisition import UpperConfidenceBound
+
 from pypolar.experiment.dataset import ExperimentDataset, TrialDataset
-from pypolar.feedback.synthetic import make_synthetic
+from pypolar.feedback.synthetic import SyntheticOracle
 from pypolar.optimization.gp import BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -26,6 +28,10 @@ ACTIONS = np.linspace(-4.0, 4.0, 9)[:, None]
 ACQUISITION  = {'strategy': 'ucb', 'seed': 3, 'ucb_beta': 2.0}
 GROUNDTRUTHS = {'cost': {'func': 'Levy', 'dim': 1, 'box': 5.0, 'seed': 3,
                          'rel_noise_std': 0.1}}
+
+
+def acqf_bounds_hold(action):
+    return np.all(action >= BOX[0] - 1e-9) and np.all(action <= BOX[1] + 1e-9)
 
 
 def _objectives():
@@ -185,12 +191,21 @@ class TestGetGroundtruthAndAcquisition:
         probe = np.array([[1.0], [2.0]])
 
         # the same arguments must give the same function, values and spread
-        np.testing.assert_allclose(truth(probe, noise=False),
-                                   make_synthetic(**GROUNDTRUTHS['cost'])(probe, noise=False))
-        assert truth.spread == make_synthetic(**GROUNDTRUTHS['cost']).spread
+        np.testing.assert_allclose(
+            truth(probe, noise=False),
+            SyntheticOracle.from_name(**GROUNDTRUTHS['cost'])(probe, noise=False))
+        assert (truth.measure_spread
+                == SyntheticOracle.from_name(**GROUNDTRUTHS['cost']).measure_spread)
 
-    def test_the_acquisition_rebuilds_over_that_trials_objective(self, saved):
+    def test_the_acquisition_rebuilds_as_the_recorded_strategy(self, saved):
         acqf = saved.get_acquisition(-1)
 
-        # json has no tuple, so the box comes back as a list of the same numbers
-        np.testing.assert_allclose(acqf.bounds, BOX)
+        assert acqf.acqf.func is UpperConfidenceBound
+        assert acqf.acqf.keywords['beta'] == ACQUISITION['ucb_beta']
+
+    def test_the_rebuilt_acquisition_searches_that_trials_box(self, saved):
+        # it carries no box of its own; the model it is queried against
+        # supplies the objective's own action_bounds
+        action = saved.get_acquisition(-1).query(saved.get_model(-1))
+
+        assert acqf_bounds_hold(action)

@@ -8,6 +8,7 @@ from botorch.models import ModelListGP
 from botorch.utils.multi_objective.box_decompositions.dominated import (
     DominatedPartitioning,
 )
+from sklearn.metrics import r2_score
 
 import pypolar as plr
 from pypolar.optimization.gp import DTYPE
@@ -21,6 +22,9 @@ ACTIONS_PATH    = Path('human_data/MH01_walk.csv')
 
 CONTOUR_RES     = 200                       # plotting only
 SEED            = 95
+
+MIN_LENGTH_SCALE = 0.1                          # lengthscale floor, normalized action frame
+GP_NOISE         = plr.NoiseModel.prior(0.3)    # fitted under a prior on 30% of each objective's spread
 
 
 def compute_hypervolume(Y, ref=None):
@@ -37,7 +41,7 @@ def posterior_mu_at(model: ModelListGP, X, chunk=2048):
     
     return torch.cat(out).numpy()
 
-def read_data(objs_path: Path, actions_path: Path) -> tuple[plr.DecoupledObjectives]:
+def read_data(objs_path: Path, actions_path: Path) -> plr.DecoupledObjectives:
     objs_df = pd.read_csv(objs_path)
     actions_df = pd.read_csv(actions_path)
     
@@ -68,7 +72,64 @@ def read_data(objs_path: Path, actions_path: Path) -> tuple[plr.DecoupledObjecti
     ))
     
     return objectives
+
+def fit_gp(
+    objective   : plr.Objective,
+    noise       : plr.NoiseModel,
+    hypers      : plr.GPHyperparameters = None
+):
+    """A GP on `objective`, with its hyperparameters refit or frozen.
+
+    Args:
+        objective: the measurements to condition on.
+        noise: a `NoiseModel`, or a fraction of the objective's spread to pin,
+            or None to fit it by marginal likelihood alongside the kernel.
+        hypers: a `GPHyperparameters` to hold fixed, or None to fit them. Every
+            field supersedes the arguments, the noise included, so a fitted
+            noise freezes across folds exactly as the kernel does.
+    """
+    if hypers is None:
+        return plr.BoTorchGP(objective, noise=noise, fit_hyperparameters=True,
+                             min_length_scale=MIN_LENGTH_SCALE)
+
+    # Standardize divides train_Y by its own sample spread, so the square root
+    # of a post-Standardize noise variance is the fraction a pinned noise states
+    return plr.BoTorchGP(
+        objective,
+        noise               = plr.NoiseModel.pinned(np.sqrt(hypers.noise_var)),
+        fit_hyperparameters = False,
+        length_scale        = hypers.lengthscale,
+        signal_var          = hypers.signal_var,
+        min_length_scale    = MIN_LENGTH_SCALE
+    )
     
+
+def report_loo(objectives: plr.DecoupledObjectives, noise: plr.NoiseModel):
+    """Leave-one-out accuracy and calibration, one row per objective.
+
+    Every fold refits through `fit_gp`, which is the configuration `main` fits,
+    so the numbers score the model in use rather than a different one.
+    """
+    print('\n=== leave-one-out ===')
+    print(f'  {"objective":<20}{"R2":>8}{"RMSE":>10}{"sd(y)":>10}{"z-std":>8}')
+    for i in range(len(objectives)):
+        obj = objectives[i]
+        mu, std, models = plr.loo(obj, fit_gp, noise=noise)
+
+        resid = mu - obj.ydata
+
+        # loo reports the latent std, but a residual carries the observation
+        # noise too, so the z divides by the predictive std. noise_var is
+        # post-Standardize, hence the scale back into the objective's units
+        hypers    = [gp.get_fitted_hyperparameters() for gp in models]
+        noise_std = obj.ytransform.inv_scale(np.array(
+            [np.sqrt(h.noise_var) * h.standardize_scale for h in hypers]))
+        z = resid / np.hypot(std, noise_std)
+
+        print(f'  {obj.name:<20}{r2_score(obj.ydata, mu):>+8.3f}'
+              f'{np.sqrt(np.mean(resid ** 2)):>10.3f}'
+              f'{obj.ydata.std():>10.3f}{z.std():>8.2f}')
+
 
 def main():
     # read in the data
@@ -85,14 +146,14 @@ def main():
         
     mogp = plr.DecoupledMOGP(
         objectives=objectives[[OBJ1, OBJ2]],
-        fit_hyperparameters=True
+        fit_hyperparameters=True,
+        noise=GP_NOISE,
+        min_length_scale=MIN_LENGTH_SCALE
     )
-    
-    x = np.linspace(0, 1, 50)
-    X, Y, Z = np.meshgrid(x,x,x)
-    points = np.column_stack((X.ravel(), Y.ravel(), Z.ravel()))
 
-    objs, stds = mogp.posterior_at(action=points, normalized=True)
+    report_loo(mogp.objectives, GP_NOISE)
+    quit()
+
     nd_objs = objs[plr.get_nondominated(objs)]
     
     # plot them

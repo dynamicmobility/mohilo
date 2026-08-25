@@ -12,10 +12,11 @@ from pypolar.optimization.objectives import (
     sample_actions
 )
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
-from pypolar.utils.plotting import plot_test_function, plot_fit_1d
+from pypolar.utils.plotting import plot_test_function, plot_fit_1d, plot_loo_curve
 from pypolar.feedback import (
     AcquisitionFunction,
     acquisition_factory_1d,
+    acquisition_factory_2d,
     BradleyTerryOracle,
     MultiObjectiveOracle,
     NoisyRegressionOracle,
@@ -25,9 +26,11 @@ from pypolar.feedback import (
     BoundedIdealPoint,
     SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
-    SyntheticFunction,
+    MO_SYNTHETIC_FUNCTIONS,
+    SyntheticOracle,
+    MOSyntheticOracle,
+    MO2SO,
     construct_function,
-    make_synthetic,
     truth_at
 )
 from pypolar.experiment import (
@@ -41,7 +44,7 @@ from pypolar.experiment import (
     read_events
 )
 from pypolar.performance.mo import pareto_overlay, groundtruth_hypervolume
-from pypolar.performance.loo import loo
+from pypolar.performance.loo import loo, loo_curve
 from pypolar.performance.regret import regret, action_distance
 
 __all__ = [
@@ -59,6 +62,7 @@ __all__ = [
     # acquisition
     "AcquisitionFunction",
     "acquisition_factory_1d",
+    "acquisition_factory_2d",
     # feedback oracles
     "BradleyTerryOracle",
     "MultiObjectiveOracle",
@@ -71,9 +75,11 @@ __all__ = [
     # synthetic groundtruths
     "SYNTHETIC_FUNCTIONS",
     "SYNTHETIC_1D_FUNCTIONS",
-    "SyntheticFunction",
+    "MO_SYNTHETIC_FUNCTIONS",
+    "SyntheticOracle",
+    "MOSyntheticOracle",
+    "MO2SO",
     "construct_function",
-    "make_synthetic",
     "truth_at",
     # pareto
     "get_pareto_statistics",
@@ -93,10 +99,12 @@ __all__ = [
     # plotting
     "plot_test_function",
     "plot_fit_1d",
+    "plot_loo_curve",
     # performance
     "pareto_overlay",
     "groundtruth_hypervolume",
     "loo",
+    "loo_curve",
     "regret",
     "action_distance"
 ]

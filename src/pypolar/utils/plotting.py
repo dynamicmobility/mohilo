@@ -123,3 +123,45 @@ def plot_fit_1d(
     ax.legend(frameon=False, fontsize=8)
 
     return ax
+
+
+def plot_loo_curve(
+        ax       : plt.Axes,
+        sizes    : np.ndarray,
+        scores   : np.ndarray,
+        baseline : float = 0.0,
+        ylabel   : str = None,
+        title    : str = None
+    ):
+    """Plot a held-out score against dataset size.
+
+    Summarized by median and interquartile band rather than mean and standard
+    deviation, because a score like ``R^2`` is heavy-tailed at small sizes and a
+    few collapsed subsets would drag the mean well below the typical one.
+
+    Args:
+        ax: a ``matplotlib.axes.Axes`` to draw on.
+        sizes: length-``S`` subset sizes, as ``loo_curve`` returns them.
+        scores: ``(S, repeats)`` scores at each size.
+        baseline: a reference line, ``0.0`` being where ``R^2`` stops beating
+            the training mean. None draws none.
+        ylabel: optional y label, e.g. ``'$R^2$'``.
+        title: optional axes title.
+
+    Returns:
+        The ``ax`` that was drawn on, for chaining.
+    """
+    lo, med, hi = np.percentile(scores, [25, 50, 75], axis=1)
+
+    if baseline is not None:
+        ax.axhline(baseline, color=TRUTH_COLOR, ls=':', lw=0.8)
+    ax.fill_between(sizes, lo, hi, color=MODEL_COLOR, alpha=0.2, lw=0)
+    ax.plot(sizes, med, color=MODEL_COLOR, marker='o', ms=3, lw=1.2)
+
+    ax.set_xlabel('subset size (each fold fit on one fewer)')
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
+
+    return ax

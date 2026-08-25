@@ -36,7 +36,7 @@ NUM_FANTASIES  = 20     # lognei: noiseless incumbents drawn; cost is linear in 
 MC_SAMPLES     = 128    # qlognei: QMC samples per acquisition evaluation
 PRUNE_BASELINE = True   # qlognei: drop measured points that cannot be the best
 
-METABOLIC_TRUTH = plr.SyntheticFunction(
+METABOLIC_TRUTH = plr.SyntheticOracle(
     truth = plr.construct_function(
         func = plr.SYNTHETIC_1D_FUNCTIONS['Levy'],
         dim  = DIM,
@@ -46,7 +46,7 @@ METABOLIC_TRUTH = plr.SyntheticFunction(
     rel_noise_std = 0.5,
 )
 
-COMFORT_TRUTH = plr.SyntheticFunction(
+COMFORT_TRUTH = plr.SyntheticOracle(
     truth = plr.construct_function(
         func = plr.SYNTHETIC_1D_FUNCTIONS['DixonPrice'],
         dim  = DIM,
@@ -185,8 +185,7 @@ def main():
     
     experiment = make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
-        acqf      = acquisition_factory(strategy=ACQ_STRAT, seed=SEED),
-        objective = experiment.objectives[COMFORT]
+        acqf = acquisition_factory(strategy=ACQ_STRAT, seed=SEED)
     )
 
     try:

@@ -14,7 +14,7 @@ BOX   = 5.0   # half-width of the action box, where the function accepts one
 N     = 2 ** 12
 SEED  = 95
 NCOLS = 4
-PATH  = Path('hilo/output/synthetic_functions.svg')
+PATH  = Path('scripts/output/synthetic_functions.svg')
 
 
 def main():

@@ -18,7 +18,7 @@ import torch
 
 from pypolar.experiment.ledger import fingerprint, jsonable
 from pypolar.feedback.acquisition import AcquisitionFunction, acquisition_factory_1d
-from pypolar.feedback.synthetic import make_synthetic
+from pypolar.feedback.synthetic import SyntheticOracle
 from pypolar.optimization.gp import DTYPE, BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -61,7 +61,7 @@ class TrialDataset:
         trial: the step's index.
         measurements: objective name -> that objective's `to_record`.
         acquisition: the arguments `acquisition_factory_1d` was called with.
-        groundtruths: objective name -> the arguments `make_synthetic` used.
+        groundtruths: objective name -> the arguments `SyntheticOracle.from_name` used.
         action: (d,) action chosen here, in raw units, or None on the last record.
         source: what chose it -- an acquisition's name, or 'random'.
         state_dict: the fitted GP's tensors, as lists. None before the first fit.
@@ -234,16 +234,17 @@ class ExperimentDataset:
         Rebuilt from their arguments, so the functions are identical; their
         noise streams restart from the seed rather than resuming.
         """
-        return {name: make_synthetic(**spec)
+        return {name: SyntheticOracle.from_name(**spec) # get rid of funciton reconstruction to --> just storing an interpolation
                 for name, spec in self.trials[trial].groundtruths.items()}
 
     def get_acquisition(self, trial: int = -1):
-        """The acquisition a trial queried, over that trial's objective."""
-        record = self.trials[trial]
+        """The acquisition a trial queried.
 
+        The box is not stored with it: an acquisition reads it off whatever
+        model it is queried against.
+        """
         return AcquisitionFunction(
-            acqf      = acquisition_factory_1d(**record.acquisition),
-            objective = self.get_objective(trial),
+            acqf = acquisition_factory_1d(**self.trials[trial].acquisition)
         )
 
     def get_regret(self):

@@ -32,7 +32,7 @@ def action_grid(box: np.ndarray, n: int = GRID_POINTS):
 
 def plot_fit(
     ax         : plt.Axes,
-    truth      : plr.SyntheticFunction,
+    truth      : plr.SyntheticOracle,
     objective  : plr.Objective,
     gp         : plr.BoTorchGP,
     recommended: np.ndarray,

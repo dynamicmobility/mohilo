@@ -427,6 +427,17 @@ class BoTorchGP:
 
 
     @property
+    def action_bounds(self):
+        """(low, high) actions the objective declares, in raw units, or None
+        when nothing pins them and the frame moves with the measurements."""
+        return self.objective.action_bounds
+
+    @property
+    def action_dim(self):
+        """d, the action dimension."""
+        return self.objective.action_dim
+
+    @property
     def frame(self):
         """The `AffineTransform` normalizing actions into the GP's own frame."""
         return self.objective.xtransform
@@ -589,9 +600,32 @@ class DecoupledMOGP:
         return self.objectives.xtransform.inv(actions), np.diag(mu), np.diag(std)
 
     @property
+    def action_bounds(self):
+        """(low, high) actions the objective declares, in raw units, or None
+        when nothing pins them and the frame moves with the measurements."""
+        return self.objectives.action_bounds
+
+    @property
+    def action_dim(self):
+        """d, the action dimension."""
+        return self.objectives.action_dim
+
+    @property
     def frame(self):
         """The `AffineTransform` normalizing actions into the shared frame."""
         return self.objectives.xtransform
+
+    @property
+    def measured_x(self):
+        """(n, d) union of every objective's measured actions, normalized.
+
+        A union rather than one objective's actions because the objectives are
+        decoupled: nothing requires them to share feedback points.
+        """
+        return np.unique(
+            np.vstack([self.objectives.actions(i) for i in range(len(self.objectives))]),
+            axis=0
+        )
 
     def scalarized(self, weights) -> 'ScalarizedGP':
         """These GPs read through fixed weights, as one single-output GP."""
@@ -719,21 +753,25 @@ class ScalarizedGP:
         return self.frame.inv(actions), np.diag(mu), np.diag(std)
 
     @property
+    def action_bounds(self):
+        """(low, high) actions the objective declares, in raw units, or None
+        when nothing pins them and the frame moves with the measurements."""
+        return self.objectives.action_bounds
+
+    @property
+    def action_dim(self):
+        """d, the action dimension."""
+        return self.objectives.action_dim
+
+    @property
     def frame(self):
         """The `AffineTransform` normalizing actions into the shared frame."""
         return self.objectives.xtransform
 
     @property
     def measured_x(self):
-        """(n, d) union of every objective's measured actions, normalized.
-
-        A union rather than one objective's actions because the objectives are
-        decoupled: nothing requires them to share a design.
-        """
-        return np.unique(
-            np.vstack([self.objectives.actions(i) for i in range(len(self.objectives))]),
-            axis=0
-        )
+        """(n, d) union of every objective's measured actions, normalized."""
+        return self.mogp.measured_x
 
     def incumbent(self):
         """The best scalarized value inferred so far, in maximization space.

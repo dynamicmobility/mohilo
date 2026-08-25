@@ -4,8 +4,6 @@ from dataclasses import asdict
 from functools import partial
 from inspect import signature
 from pathlib import Path
-from sklearn.metrics import r2_score
-
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,39 +16,29 @@ warnings.filterwarnings('ignore', category=NumericalWarning)
 DIM              = 3
 BOX              = 5.0
 SEED             = 95
-TRUE_NOISE       = 0.25
-GP_NOISE         = plr.NoiseModel.prior(0.5)
+TRUE_NOISE       = 0.5
+GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
 # GP_NOISE         = plr.NoiseModel.pinned(TRUE_NOISE)
 MIN_LENGTHSCALE  = 0.1
 NUM_QUERIES      = DIM * 13
-ACQ_STRATS       = ['ucb', 'logei', 'qlognei', 'ts']
+ACQ_STRATS       = ['ucb', 'logei', 'qlognei']
 REPEATS          = 1
 COMFORT          = 'Comfort'
 METABOLIC        = 'Cost'
 MULTITHREAD      = False
 
-RUNS_PER_ACQF = 5
+RUNS_PER_ACQF = 10
 
 OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
 # the arguments `plr.make_synthetic` builds each groundtruth from, rather than
 # the instance alone, so a saved run carries what rebuilds it
-GROUND_TRUTH_SPECS = { # TODO: change this so that the experimentdataset just stores a discretization version of this (points vs reconstructing the whole function)
-    METABOLIC : {
-        'func': 'Levy', 
-        'dim': DIM, 
-        'box': BOX, 
-        'seed': SEED,
-        'rel_noise_std': TRUE_NOISE
-    },
-    COMFORT   : {
-        'func': 'Levy', 
-        'dim': DIM, 
-        'box': BOX, 
-        'seed': SEED,
-        'rel_noise_std': TRUE_NOISE
-    },
+GROUND_TRUTH_SPECS = {
+    METABOLIC : {'func': 'Levy', 'dim': DIM, 'box': BOX, 'seed': SEED,
+                 'rel_noise_std': TRUE_NOISE},
+    COMFORT   : {'func': 'Levy', 'dim': DIM, 'box': BOX, 'seed': SEED,
+                 'rel_noise_std': TRUE_NOISE},
 }
 
 
@@ -121,7 +109,7 @@ def make_experiment(probes: list[plr.Probe]):
     )
     return experiment
 
-def fit_gp(objective, noise=None, hypers=None):
+def fit_gp(objective):
     return plr.BoTorchGP(
         objective           = objective,
         noise               = GP_NOISE,
@@ -154,7 +142,7 @@ def run_experiment(
     for i in tqdm(range(NUM_QUERIES)):
         objective = experiment.objectives[COMFORT]
         recommended, regret = None, None
-        if len(objective.ydata) < 1:
+        if i < 1:
             # randomly sample if no data is collected
             source = 'random'
             action = plr.sample_actions(
@@ -167,14 +155,25 @@ def run_experiment(
         else:
             # fit gp + Acquisition strategy for the rest
             source = dataset.acquisition['strategy']
-            gp = fit_gp(objective)
-            degenerate_gp = gp.get_fitted_hyperparameters().signal_var < 1e-2
+            gp = fit_gp(experiment.objectives)
             action = acqf.query(gp, q=1)[0]
-            # if degenerate_gp:
-            #     print(action, i)
-            #     print('IT HAPPENED\n\n')
 
-            
+            # recommended, regret = inference_regret(
+            #     gp, 
+            #     optimal_actions,
+            #     ground_truths, 
+            #     gt_spread
+            # )
+
+        # the state the action was chosen from, recorded before it is applied
+        dataset.add_trial(
+            objectives  = experiment.objectives,
+            gp          = gp,
+            action      = action,
+            source      = source,
+            recommended = action, # TODO: FIX
+            regret      = 0.0 # TODO: FIX
+        )
 
         experiment.begin_trial(
             action=action,
@@ -186,32 +185,15 @@ def run_experiment(
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
 
-        gp = fit_gp(experiment.objectives[COMFORT])
-        recommended, regret = inference_regret(
-            gp, 
-            optimal_actions,
-            ground_truths, 
-            gt_spread
-        )
-        # the state the action was chosen from, recorded before it is applied
-        dataset.add_trial(
-            objectives  = experiment.objectives,
-            gp          = gp,
-            action      = action,
-            source      = source,
-            recommended = recommended,
-            regret      = regret
-        )
-
     # the run's final state: every measurement, and the fit to all of them
-    gp = fit_gp(experiment.objectives[COMFORT])
-    recommended, regret = inference_regret(gp, optimal_actions, ground_truths, gt_spread)
-    dataset.add_trial(
-        objectives  = experiment.objectives,
-        gp          = gp,
-        recommended = recommended,
-        regret      = regret
-    )
+    gp = fit_gp(experiment.objectives)
+    # recommended, regret = inference_regret(gp, optimal_actions, ground_truths, gt_spread)
+    # dataset.add_trial(
+    #     objectives  = experiment.objectives,
+    #     gp          = gp,
+    #     recommended = recommended,
+    #     regret      = regret
+    # )
 
     return experiment, gp, dataset
 
@@ -274,9 +256,6 @@ def main():
                 ground_truths     = GROUND_TRUTHS,
                 gt_spread         = gt_spread
             )
-            # mu, std, models = plr.loo(gp.objective, fit_gp, noise=GP_NOISE)
-            # resid = mu - gp.objective.ydata
-            # print('SCORE', r2_score(gp.objective.ydata, mu))
             print(f'wrote {dataset.save()}')
 
 
