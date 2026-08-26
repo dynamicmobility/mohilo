@@ -2,6 +2,7 @@
 experiments draw from, noiseless evaluation, and an observation noise stated as
 a fraction of a function's own spread."""
 
+from dataclasses import dataclass
 from inspect import signature
 
 import numpy as np
@@ -407,3 +408,74 @@ class MOSyntheticOracle:
             n_spread        = n_spread,
             seed            = seed
         )
+
+@dataclass(frozen=True)
+class SyntheticOracleParams:
+    """The arguments one groundtruth is built from, plain enough to store.
+
+    Attributes:
+        func: a key of either registry.
+        objectives: one objective name per output column, in column order.
+        dim, box, seed, rel_noise_std, measure, n_spread: as the oracles'
+            `from_name` takes them.
+        num_objectives: m, for the multi-objective families that take it
+            (DTLZ*, ZDT*, GMM). Single-objective params leave it None.
+    """
+
+    func            : str
+    objectives      : tuple[str, ...]
+    dim             : int
+    box             : float
+    seed            : int           = 0
+    rel_noise_std   : float         = 0.0
+    measure         : str           = 'range'
+    n_spread        : int           = SPREAD_SAMPLES
+    num_objectives  : int | None    = None
+
+    def __post_init__(self):
+        # json reads a tuple back as a list, and a bare name is one column
+        names = ((self.objectives,) if isinstance(self.objectives, str)
+                 else tuple(self.objectives))
+        object.__setattr__(self, 'objectives', names)
+
+        if self.func not in SYNTHETIC_FUNCTIONS and self.func not in MO_SYNTHETIC_FUNCTIONS:
+            raise ValueError(f'{self.func!r} is in neither synthetic registry')
+        if not self.multi_objective:
+            if self.num_objectives is not None:
+                raise ValueError(f'{self.func} is single-objective, so '
+                                 'num_objectives does not apply')
+            if len(names) != 1:
+                raise ValueError(f'{self.func} has one output column, got '
+                                 f'{len(names)} objective names')
+
+    @property
+    def multi_objective(self):
+        """Whether these build a `MOSyntheticOracle`."""
+        return self.func in MO_SYNTHETIC_FUNCTIONS
+
+    def build(self) -> SyntheticOracle | MOSyntheticOracle:
+        """The oracle itself.
+
+        Its noise stream starts from the seed rather than resuming wherever an
+        earlier build left off, so a replay repeats the draws rather than
+        continuing them.
+        """
+        shared = {
+            'func'          : self.func,
+            'dim'           : self.dim,
+            'box'           : self.box,
+            'seed'          : self.seed,
+            'rel_noise_std' : self.rel_noise_std,
+            'measure'       : self.measure,
+            'n_spread'      : self.n_spread,
+        }
+        if not self.multi_objective:
+            return SyntheticOracle.from_name(**shared)
+
+        oracle = MOSyntheticOracle.from_name(num_objectives=self.num_objectives,
+                                             **shared)
+        if len(self.objectives) != len(oracle):
+            raise ValueError(f'{self.func} has {len(oracle)} output columns, got '
+                             f'{len(self.objectives)} objective names')
+
+        return oracle

@@ -1,7 +1,6 @@
 import time
 import warnings
 from dataclasses import asdict
-from inspect import signature
 from pathlib import Path
 from sklearn.metrics import r2_score
 
@@ -26,14 +25,6 @@ OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H
 ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
 
-def acquisition_spec(strategy, seed, **kwargs):
-    """Every argument `acquisition_factory_1d` is called with, its defaults
-    resolved, so a saved run rebuilds the acquisition it actually queried."""
-    bound = signature(plr.acquisition_factory_1d).bind(strategy=strategy, seed=seed,
-                                                       **kwargs)
-    bound.apply_defaults()
-    return dict(bound.arguments)
-
 def fit_gp(
     objective   : plr.DecoupledObjectives,
     noise       : plr.NoiseModel = None,
@@ -46,21 +37,21 @@ def fit_gp(
         min_length_scale    = MIN_LENGTHSCALE,
     )
 
-def recommendation(gp, ground_truth):
-    """The action the GP recommends now, and its regret in groundtruth spreads."""
+def aux(gp, ground_truth):
+    """What a trial is scored with. A multi-objective run scores a hypervolume
+    regret here, where `acqf_study.py` scores a scalar one -- which is the whole
+    reason `add_trial` takes a dict of its own keys rather than named fields."""
     recommended, _, _ = gp.recommend(raw=True)
 
-    return recommended[0], plr.normalized_inference_regret(
-        raw_recommended_action   = recommended[0],
-        ground_truth             = ground_truth
-    )
+    # TODO: hypervolume regret, against the multi-objective groundtruth
+    return {'recommended': recommended}
 
 
 def run_experiment(
     experiment        : plr.Logger,
     acqf              : plr.AcquisitionFunction,
     dataset           : plr.ExperimentDataset,
-    ground_truths     : dict[str, plr.SyntheticOracle]
+    ground_truth      : plr.MOSyntheticOracle
 ):
     gp = None
     for i in tqdm(range(NUM_QUERIES)):
@@ -76,57 +67,56 @@ def run_experiment(
             )[0]
         else:
             # fit gp + Acquisition strategy for the rest
-            source = dataset.acquisition['strategy']
+            source = dataset.acquisition.strategy
             # gp = fit_gp(experiment.objectives)
             action = acqf.query(gp, q=1)[0]
 
         experiment.begin_trial(
             action=action,
-            args={
-                hilo.METABOLIC: (action,),
-                hilo.COMFORT:   (action, i + 1)
-            }
+            args={hilo.COMFORT: (action, i + 1)}
         )
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
 
         gp = fit_gp(experiment.objectives)
-        # compute hv regret and add to dataset
+        dataset.add_trial(
+            objectives  = experiment.objectives,
+            gp          = gp,
+            action      = action,
+            source      = source,
+            aux         = aux(gp, ground_truth)
+        )
 
     # the run's final state: every measurement, and the fit to all of them
     gp = fit_gp(experiment.objectives)
-    # compute hv regret and add to dataset
+    dataset.add_trial(
+        objectives  = experiment.objectives,
+        gp          = gp,
+        aux         = aux(gp, ground_truth)
+    )
 
     return experiment, gp, dataset
 
 def setup_experiment(acq_strat, seed):
     probes     = hilo.make_probes()
     experiment = hilo.make_experiment(probes)
-    acqf       = plr.AcquisitionFunction(
-        acqf = plr.acquisition_factory_2d(
-            strategy       = acq_strat,
-            seed           = seed,
-            num_objectives = 2
-        )
-    )
+    # a multi-objective strategy, so the same params reach acquisition_factory_2d
+    params     = plr.AcquisitionParams(strategy=acq_strat, seed=seed,
+                                       num_objectives=2, **ACQ_KWARGS)
 
-    return experiment, acqf
+    return experiment, params
 
 def run_trial(acq_strat, trial):
     print(f'Trying {acq_strat} on trial {trial}')
-    experiment, acqf = setup_experiment(
+    experiment, params = setup_experiment(
         acq_strat   = acq_strat,
         seed        = hilo.SEED
     )
 
     dataset = plr.ExperimentDataset(
         name         = acq_strat,
-        acquisition  = acquisition_spec(
-            strategy    = acq_strat,
-            seed        = hilo.SEED,
-            **ACQ_KWARGS
-        ),
-        groundtruths = hilo.GROUND_TRUTH_SPECS,
+        acquisition  = params,
+        groundtruth  = hilo.GROUND_TRUTH,   # TODO: the MO placeholder, once hilo has one
         config       = asdict(
             hilo.Simulation1D(
                 gp_noise          = plr.NoiseModel.coerce(GP_NOISE),
@@ -140,9 +130,9 @@ def run_trial(acq_strat, trial):
 
     experiment, gp, dataset = run_experiment(
         experiment        = experiment,
-        acqf              = acqf,
+        acqf              = params.build(),
         dataset           = dataset,
-        ground_truths     = hilo.GROUND_TRUTHS
+        ground_truth      = hilo.COMFORT_TRUTH
     )
     # mu, std, models = plr.loo(gp.objective, fit_gp, noise=GP_NOISE)
     # resid = mu - gp.objective.ydata

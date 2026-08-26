@@ -15,7 +15,8 @@ import pytest
 from botorch.acquisition import UpperConfidenceBound
 
 from pypolar.experiment.dataset import ExperimentDataset, TrialDataset
-from pypolar.feedback.synthetic import SyntheticOracle
+from pypolar.feedback.acquisition import AcquisitionParams
+from pypolar.feedback.synthetic import SyntheticOracleParams
 from pypolar.optimization.gp import BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -25,9 +26,10 @@ from pypolar.optimization.objectives import DecoupledObjectives, Objective
 BOX     = (-5.0, 5.0)
 ACTIONS = np.linspace(-4.0, 4.0, 9)[:, None]
 
-ACQUISITION  = {'strategy': 'ucb', 'seed': 3, 'ucb_beta': 2.0}
-GROUNDTRUTHS = {'cost': {'func': 'Levy', 'dim': 1, 'box': 5.0, 'seed': 3,
-                         'rel_noise_std': 0.1}}
+ACQUISITION = AcquisitionParams(strategy='ucb', seed=3, ucb_beta=2.0)
+GROUNDTRUTH = SyntheticOracleParams(func='Levy', objectives=('cost',), dim=1,
+                                    box=5.0, seed=3, rel_noise_std=0.1)
+AUX         = {'recommended': np.array([1.5]), 'regret': 0.25}
 
 
 def acqf_bounds_hold(action):
@@ -58,10 +60,10 @@ def gp(objectives):
 def dataset(objectives, gp):
     """A two-step run: a random opening, then one acquired action."""
     data = ExperimentDataset(name='ucb', acquisition=ACQUISITION,
-                             groundtruths=GROUNDTRUTHS, config={'seed': 3})
+                             groundtruth=GROUNDTRUTH, config={'seed': 3})
     data.add_trial(_objectives(), action=np.array([1.0]), source='random')
     data.add_trial(objectives, gp=gp, action=np.array([2.0]), source='ucb',
-                   recommended=np.array([1.5]), regret=0.25)
+                   aux=AUX)
 
     return data
 
@@ -93,6 +95,16 @@ class TestAddTrial:
         assert set(dataset[1].measurements) == {'cost', 'comfort'}
         assert dataset[1].measurements['comfort']['ydata'].size == 0
 
+    def test_aux_is_whatever_the_run_scored_with(self, dataset):
+        # the run picks its own keys: nothing here is a field on the record
+        assert dataset[0].aux == {}
+        assert set(dataset[1].aux) == {'recommended', 'regret'}
+        assert dataset[1].aux['regret'] == 0.25
+
+    def test_a_scalar_aux_is_stored_as_an_array(self, dataset):
+        assert isinstance(dataset[1].aux['regret'], np.ndarray)
+        assert dataset[1].aux['regret'].shape == ()
+
 
 # ---- the file --------------------------------------------------------------
 
@@ -121,19 +133,32 @@ class TestSaveAndLoad:
     def test_arrays_come_back_as_arrays(self, saved):
         assert isinstance(saved[1].action, np.ndarray)
         assert isinstance(saved[1].measurements['cost']['xdata'], np.ndarray)
+        assert isinstance(saved[1].aux['recommended'], np.ndarray)
 
-    def test_regret_is_padded_where_no_gp_was_fit(self, saved):
-        regret = saved.get_regret()
+    def test_the_params_come_back_typed(self, saved):
+        assert saved.groundtruth == GROUNDTRUTH
+        assert saved.acquisition == ACQUISITION
 
-        assert np.isnan(regret[0])
+    def test_a_scalar_aux_stacks_to_one_per_trial(self, saved):
+        regret = saved.get_aux('regret')
+
+        assert regret.shape == (2,)
+        assert np.isnan(regret[0])         # no trial recorded it, so no value
         assert regret[1] == 0.25
 
-    def test_recommendations_are_padded_the_same_way(self, saved):
-        recommended = saved.get_recommendations()
+    def test_a_vector_aux_keeps_its_width(self, saved):
+        recommended = saved.get_aux('recommended')
 
         assert recommended.shape == (2, 1)
         assert np.isnan(recommended[0, 0])
         assert recommended[1, 0] == 1.5
+
+    def test_an_aux_no_trial_recorded_is_an_error_not_a_column_of_nan(self, saved):
+        with pytest.raises(ValueError):
+            saved.get_aux('hypervolume_regret')
+
+    def test_the_keys_any_trial_used_are_reported(self, saved):
+        assert saved.aux_names() == {'recommended', 'regret'}
 
 
 # ---- what comes back out ---------------------------------------------------
@@ -187,25 +212,38 @@ class TestGetObjective:
 class TestGetGroundtruthAndAcquisition:
 
     def test_the_groundtruth_is_the_one_the_arguments_describe(self, saved):
-        truth = saved.get_groundtruth(-1)['cost']
+        truth = saved.get_groundtruth()
         probe = np.array([[1.0], [2.0]])
 
         # the same arguments must give the same function, values and spread
-        np.testing.assert_allclose(
-            truth(probe, noise=False),
-            SyntheticOracle.from_name(**GROUNDTRUTHS['cost'])(probe, noise=False))
-        assert (truth.measure_spread
-                == SyntheticOracle.from_name(**GROUNDTRUTHS['cost']).measure_spread)
+        np.testing.assert_allclose(truth(probe, noise=False),
+                                   GROUNDTRUTH.build()(probe, noise=False))
+        assert truth.measure_spread == GROUNDTRUTH.build().measure_spread
+
+    def test_a_run_with_no_groundtruth_says_so(self, objectives):
+        # which is every real study: nothing knows the truth to record
+        data = ExperimentDataset(name='study', acquisition=ACQUISITION)
+        data.add_trial(objectives)
+
+        with pytest.raises(ValueError):
+            data.get_groundtruth()
+
+    def test_a_run_with_no_acquisition_says_so(self, objectives):
+        data = ExperimentDataset(name='random-only')
+        data.add_trial(objectives)
+
+        with pytest.raises(ValueError):
+            data.get_acquisition()
 
     def test_the_acquisition_rebuilds_as_the_recorded_strategy(self, saved):
-        acqf = saved.get_acquisition(-1)
+        acqf = saved.get_acquisition()
 
         assert acqf.acqf.func is UpperConfidenceBound
-        assert acqf.acqf.keywords['beta'] == ACQUISITION['ucb_beta']
+        assert acqf.acqf.keywords['beta'] == ACQUISITION.ucb_beta
 
     def test_the_rebuilt_acquisition_searches_that_trials_box(self, saved):
         # it carries no box of its own; the model it is queried against
         # supplies the objective's own action_bounds
-        action = saved.get_acquisition(-1).query(saved.get_model(-1))
+        action = saved.get_acquisition().query(saved.get_model(-1))
 
         assert acqf_bounds_hold(action)

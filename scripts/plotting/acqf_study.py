@@ -14,7 +14,7 @@ def plot_study(path: Path):
     regrets = {}
     for dataset in datasets:
         acqf = dataset.get_sources()[-1]
-        rgts = dataset.get_regret()
+        rgts = dataset.get_aux('regret')
         if acqf in regrets:
             regrets[acqf] = np.vstack([regrets[acqf], rgts])
         else:

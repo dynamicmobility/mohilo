@@ -17,8 +17,8 @@ import numpy as np
 import torch
 
 from pypolar.experiment.ledger import fingerprint, jsonable
-from pypolar.feedback.acquisition import AcquisitionFunction, acquisition_factory_1d
-from pypolar.feedback.synthetic import SyntheticOracle
+from pypolar.feedback.acquisition import AcquisitionParams
+from pypolar.feedback.synthetic import SyntheticOracleParams
 from pypolar.optimization.gp import DTYPE, BoTorchGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -34,11 +34,21 @@ def _gp_record(gp: BoTorchGP):
     }
 
 
+def _aux_array(value):
+    """One auxiliary quantity as a float array."""
+    return np.asarray(value, dtype=float)
+
+
 def _trial_from_json(record):
     """One trial read back, with its arrays as arrays again."""
-    for key in ('action', 'recommended'):
-        if record[key] is not None:
-            record[key] = np.asarray(record[key], dtype=float)
+    # TODO: document this better
+    if record['action'] is not None:
+        record['action'] = np.asarray(record['action'], dtype=float)
+
+    record['aux'] = {
+        name: _aux_array(value)
+        for name, value in record['aux'].items()
+    }
 
     for measurement in record['measurements'].values():
         measurement['xdata'] = np.asarray(measurement['xdata'], dtype=float)
@@ -55,26 +65,20 @@ class TrialDataset:
     Attributes:
         trial: the step's index.
         measurements: objective name -> that objective's `to_record`.
-        acquisition: the arguments `acquisition_factory_1d` was called with.
-        groundtruths: objective name -> the arguments `SyntheticOracle.from_name` used.
         action: (d,) action chosen here, in raw units, or None on the last record.
         source: what chose it -- an acquisition's name, or 'random'.
         state_dict: the fitted GP's tensors, as lists. None before the first fit.
         gp: the arguments that GP was built with.
-        recommended: (d,) action the GP's posterior mean peaks at, or None.
-        regret: the groundtruth gap at `recommended`, in spreads, or None.
+        aux: name -> auxilliary variables. Store run-specific info here.
     """
 
     trial        : int
     measurements : dict[str, dict]
-    acquisition  : dict
-    groundtruths : dict[str, dict]  # make this optional (real study wont have this)
     action       : np.ndarray | None      = None
     source       : str | None             = None
     state_dict   : dict[str, list] | None = None
     gp           : dict | None            = None
-    recommended  : np.ndarray | None      = None
-    regret       : float | None           = None
+    aux          : dict[str, np.ndarray]  = field(default_factory=dict)
 
 
 @dataclass
@@ -83,19 +87,22 @@ class ExperimentDataset:
 
     Attributes:
         name: what the run is called.
-        acquisition, groundtruths: as on `TrialDataset`, stamped into each.
+        acquisition: the arguments the run's acquisition was built from, or
+            None when nothing acquired.
+        groundtruth: the arguments the run's oracle was built from, or None
+            when there is no groundtruth.
         config: the constants the run was made under, hashed on save so two
             runs that differ in configuration cannot be mistaken for one.
         trials: the run, one record per step.
         path: where it was last written, or read from.
     """
-    # TODO: when regret is not available, warn/error if requested
+
     name         : str
-    acquisition  : dict               = field(default_factory=dict)
-    groundtruths : dict[str, dict]    = field(default_factory=dict)
-    config       : dict               = field(default_factory=dict)
-    trials       : list[TrialDataset] = field(default_factory=list)
-    path         : Path | None        = None
+    acquisition  : AcquisitionParams | None      = None
+    groundtruth  : SyntheticOracleParams | None  = None
+    config       : dict                          = field(default_factory=dict)
+    trials       : list[TrialDataset]            = field(default_factory=list)
+    path         : Path | None                   = None
 
     def __len__(self):
         return len(self.trials)
@@ -103,22 +110,20 @@ class ExperimentDataset:
     def __getitem__(self, trial):
         return self.trials[trial]
 
-    def add_trial(self, objectives, gp=None, action=None, source=None,
-                  recommended=None, regret=None):
+    def add_trial(self, objectives, gp=None, action=None, source=None, aux=None):
         """Records one step, and returns the `TrialDataset` it appended.
 
         Args:
             objectives: the `DecoupledObjectives` as they stand *before* the
                 action is applied.
             gp: the `BoTorchGP` fit to them, or None when none was fit yet.
-            action, source, recommended, regret: as on `TrialDataset`.
+            action, source: as on `TrialDataset`.
+            aux: name -> anything `np.asarray` takes, stored as float arrays.
         """
         record = TrialDataset(
             trial        = len(self.trials),
             measurements = {name: objectives[name].to_record()
                             for name in objectives.names},
-            acquisition  = self.acquisition,
-            groundtruths = self.groundtruths,
             action       = None if action is None
                            else np.asarray(action, dtype=float).ravel(),
             source       = source,
@@ -126,9 +131,8 @@ class ExperimentDataset:
                            else {key: value.tolist()
                                  for key, value in gp.model.state_dict().items()},
             gp           = None if gp is None else _gp_record(gp),
-            recommended  = None if recommended is None
-                           else np.asarray(recommended, dtype=float).ravel(),
-            regret       = None if regret is None else float(regret),
+            aux          = {name: _aux_array(value)
+                            for name, value in (aux or {}).items()},
         )
         self.trials.append(record)
 
@@ -148,12 +152,14 @@ class ExperimentDataset:
         self.path = Path(path or self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            'name'         : self.name,
-            'fingerprint'  : fingerprint(self.config),
-            'config'       : self.config,
-            'acquisition'  : self.acquisition,
-            'groundtruths' : self.groundtruths,
-            'trials'       : [asdict(trial) for trial in self.trials],
+            'name'        : self.name,
+            'fingerprint' : fingerprint(self.config),
+            'config'      : self.config,
+            'acquisition' : None if self.acquisition is None
+                            else asdict(self.acquisition),
+            'groundtruth' : None if self.groundtruth is None
+                            else asdict(self.groundtruth),
+            'trials'      : [asdict(trial) for trial in self.trials],
         }
         # a state dict's constraint buffers are infinite, which python's json
         # writes as `Infinity` and reads back; no stricter reader is promised
@@ -164,14 +170,18 @@ class ExperimentDataset:
     @classmethod
     def load(cls, path: Path):
         """A run read back from `save`."""
-        path    = Path(path)
-        payload = json.loads(path.read_text())
-        dataset = cls(
-            name         = payload['name'],
-            acquisition  = payload['acquisition'],
-            groundtruths = payload['groundtruths'],
-            config       = payload['config'],
-            path         = path,
+        path        = Path(path)
+        payload     = json.loads(path.read_text())
+        acquisition = payload['acquisition']
+        groundtruth = payload['groundtruth']
+        dataset     = cls(
+            name        = payload['name'],
+            acquisition = None if acquisition is None
+                          else AcquisitionParams(**acquisition),
+            groundtruth = None if groundtruth is None
+                          else SyntheticOracleParams(**groundtruth),
+            config      = payload['config'],
+            path        = path,
         )
         dataset.trials = [_trial_from_json(record) for record in payload['trials']]
 
@@ -223,29 +233,43 @@ class ExperimentDataset:
             for record in self.trials[trial].measurements.values()
         ])
 
-    def get_groundtruth(self, trial: int = -1):
-        """The groundtruth functions a trial ran against, by objective name.
-
-        Rebuilt from their arguments, so the functions are identical; their
-        noise streams restart from the seed rather than resuming.
+    def get_groundtruth(self):
+        """The groundtruth the run was scored against rebuilt as a pypolar object.
         """
-        return {name: SyntheticOracle.from_name(**spec) # get rid of funciton reconstruction to --> just storing an interpolation
-                for name, spec in self.trials[trial].groundtruths.items()}
+        if self.groundtruth is None:
+            raise ValueError(f'{self.name} recorded no groundtruth')
 
-    def get_acquisition(self, trial: int = -1):
-        """The acquisition a trial queried.
+        return self.groundtruth.build()
 
-        The box is not stored with it: an acquisition reads it off whatever
-        model it is queried against.
+    def get_acquisition(self, bounds=None):
+        """The acquisition the run queried, rebuilt from its arguments.
+
+        The box is not stored with the saved params.
         """
-        return AcquisitionFunction(
-            acqf = acquisition_factory_1d(**self.trials[trial].acquisition)
-        )
+        if self.acquisition is None:
+            raise ValueError(f'{self.name} recorded no acquisition')
 
-    def get_regret(self):
-        """Regret from all trials, (T,), NaN wherever no GP was fit."""
-        return np.array([np.nan if trial.regret is None else trial.regret
-                         for trial in self.trials])
+        return self.acquisition.build(bounds=bounds)
+
+    def get_aux(self, name: str):
+        """One auxiliary quantity across the run, (T, ...), NaN wherever the
+        trial did not record it.
+
+        The shape comes from the first trial that has the key, so a scalar
+        stacks to (T,) and a (d,) recommendation to (T, d).
+        """
+        values = [trial.aux.get(name) for trial in self.trials]
+        shape  = next((value.shape for value in values if value is not None), None)
+        if shape is None:
+            raise ValueError(f'no trial of {self.name} recorded {name!r}; it has '
+                             f'{sorted(self.aux_names())}')
+
+        return np.stack([np.full(shape, np.nan) if value is None else value
+                         for value in values])
+
+    def aux_names(self):
+        """Every auxiliary key any trial recorded."""
+        return {name for trial in self.trials for name in trial.aux}
 
     def get_actions(self):
         """(T, d) actions applied, in the order they were run."""
@@ -256,17 +280,3 @@ class ExperimentDataset:
     def get_sources(self):
         """What chose each action, aligned with `get_actions`."""
         return [trial.source for trial in self.trials if trial.action is not None]
-
-    def get_recommendations(self):
-        """(T, d) action each trial's GP would have recommended, NaN before the
-        first fit."""
-        if not self.trials:
-            return np.empty((0, 0))
-
-        # the width comes from the records rather than from the config, which
-        # holds whatever the run chose to stamp there
-        width = next((len(trial.recommended) for trial in self.trials
-                      if trial.recommended is not None), 0)
-
-        return np.vstack([np.full(width, np.nan) if trial.recommended is None
-                          else trial.recommended for trial in self.trials])

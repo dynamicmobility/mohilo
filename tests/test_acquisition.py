@@ -22,7 +22,16 @@ from botorch.acquisition import (
 )
 from botorch.acquisition.thompson_sampling import PathwiseThompsonSampling
 
-from pypolar.feedback.acquisition import AcquisitionFunction, acquisition_factory_1d
+from pypolar.feedback.acquisition import (
+    MO_STRATEGIES,
+    SO_STRATEGIES,
+    AcquisitionFunction,
+    AcquisitionParams,
+    MO_FANTASIES,
+    NUM_FANTASIES,
+    acquisition_factory_1d,
+    acquisition_factory_2d,
+)
 from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -36,6 +45,7 @@ HIGH = np.array([10.0, 2.0])
 
 PEAK   = np.array([7.5, 1.0])
 VALLEY = np.array([2.5, -1.0])
+SEED   = 3
 
 UCB  = partial(UpperConfidenceBound,  beta=2.0)
 QUCB = partial(qUpperConfidenceBound, beta=2.0)
@@ -284,3 +294,82 @@ class TestThompsonSampling:
         acq = AcquisitionFunction(PathwiseThompsonSampling, raw_samples=1024)
         draws = np.vstack([acq.query(gp) for _ in range(4)])
         assert np.allclose(draws, PEAK, atol=1.0)
+
+
+class TestStrategyRegistries:
+    """`AcquisitionParams` dispatches on which tuple a strategy is in, so the
+    tuples have to agree with the factories they name."""
+
+    def test_the_families_are_disjoint(self):
+        # what makes the name alone enough to pick a factory
+        assert not set(SO_STRATEGIES) & set(MO_STRATEGIES)
+
+    def test_every_single_objective_name_builds(self):
+        for strategy in SO_STRATEGIES:
+            assert acquisition_factory_1d(strategy, seed=0) is not None
+
+    def test_every_multi_objective_name_builds(self):
+        for strategy in MO_STRATEGIES:
+            assert acquisition_factory_2d(strategy, seed=0, num_objectives=2) is not None
+
+    def test_neither_factory_takes_the_others_names(self):
+        with pytest.raises(ValueError):
+            acquisition_factory_1d(MO_STRATEGIES[0], seed=0)
+        with pytest.raises(ValueError):
+            acquisition_factory_2d(SO_STRATEGIES[0], seed=0, num_objectives=2)
+
+
+class TestAcquisitionParams:
+    """The stored form of an acquisition: it builds the thing a run queries,
+    optimizer settings included, so a replay searches as the run searched."""
+
+    def test_it_builds_a_ready_acquisition(self, gp):
+        acqf = AcquisitionParams(strategy='ucb', seed=SEED, ucb_beta=3.0).build()
+
+        assert isinstance(acqf, AcquisitionFunction)
+        assert acqf.acqf.func is UpperConfidenceBound
+        assert acqf.acqf.keywords['beta'] == 3.0
+
+    def test_the_optimizer_settings_reach_the_acquisition(self):
+        acqf = AcquisitionParams(strategy='ucb', seed=SEED, num_restarts=3,
+                                 raw_samples=64).build()
+
+        assert (acqf.num_restarts, acqf.raw_samples) == (3, 64)
+
+    def test_a_multi_objective_strategy_builds_through_the_other_factory(self):
+        params = AcquisitionParams(strategy='qlognehvi', seed=SEED,
+                                   num_objectives=3, ref_point=-1.5)
+        ref    = params.build().acqf.keywords['ref_point']
+
+        assert params.multi_objective
+        assert list(ref) == [-1.5] * 3       # one scalar, broadcast to m
+
+    def test_the_box_is_not_a_field_but_can_be_passed(self):
+        acqf = AcquisitionParams(strategy='ucb', seed=SEED).build(bounds=[[0.0], [1.0]])
+
+        assert acqf.bounds == [[0.0], [1.0]]
+
+    def test_each_family_gets_its_own_fantasy_default(self):
+        # the two factories default it differently, so it is resolved here
+        # rather than left None for whichever factory happens to see it
+        assert AcquisitionParams('lognei', seed=SEED).num_fantasies == NUM_FANTASIES
+        assert AcquisitionParams('qhvkg', seed=SEED,
+                                 num_objectives=2).num_fantasies == MO_FANTASIES
+
+    def test_an_unknown_strategy_is_refused_before_anything_is_built(self):
+        with pytest.raises(ValueError):
+            AcquisitionParams(strategy='not-an-acquisition', seed=SEED)
+
+    def test_a_multi_objective_strategy_needs_its_objective_count(self):
+        # ref_point is broadcast to m, so there is nothing to build without it
+        with pytest.raises(ValueError):
+            AcquisitionParams(strategy='qlognehvi', seed=SEED)
+
+    def test_a_single_objective_strategy_refuses_one(self):
+        with pytest.raises(ValueError):
+            AcquisitionParams(strategy='ucb', seed=SEED, num_objectives=2)
+
+    def test_the_built_acquisition_queries_the_box(self, gp):
+        action = AcquisitionParams(strategy='ucb', seed=SEED).build().query(gp)
+
+        assert np.all(action >= LOW - 1e-9) and np.all(action <= HIGH + 1e-9)

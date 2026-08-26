@@ -1,6 +1,7 @@
 """One acquisition function, the optimizer settings that maximize it, and an
 optional box override for the model's own."""
 
+from dataclasses import dataclass
 from inspect import signature
 
 import numpy as np
@@ -42,6 +43,9 @@ PARTITION_ALPHA = 0.0   # exact box decomposition; botorch's own default is >0 o
 MO_FANTASIES    = 8     # qhvkg: fantasy models per candidate; cost is linear in it
 NUM_PARETO      = 10    # qhvkg: pareto points its inner problem carries
 
+SO_STRATEGIES = ('ucb', 'logei', 'lognei', 'qlognei', 'ts')
+MO_STRATEGIES = ('qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi')
+
 def acquisition_factory_1d(
     strategy        : str,
     seed            : int,
@@ -72,8 +76,8 @@ def acquisition_factory_1d(
         ),
         'ts'     : PathwiseThompsonSampling
     }
-    if strategy not in factories:
-        raise ValueError(f'no acquisition for {strategy!r}')
+    if strategy not in SO_STRATEGIES:
+        raise ValueError(f'no single-objective acquisition for {strategy!r}')
 
     return factories[strategy]
 
@@ -135,8 +139,8 @@ def acquisition_factory_2d(
         # integrating over it, so it is the one to beat under noise
         'qlogehvi'   : partial(qLogExpectedHypervolumeImprovement, ref_point=ref),
     }
-    if strategy not in factories:
-        raise ValueError(f'no acquisition for {strategy!r}')
+    if strategy not in MO_STRATEGIES:
+        raise ValueError(f'no multi-objective acquisition for {strategy!r}')
 
     return factories[strategy]
 
@@ -258,3 +262,89 @@ class AcquisitionFunction:
         # optimize_acqf is box-constrained, so the round trip through the
         # transform leaves the box only by float round-off
         return np.clip(model.frame.inv(action), box[0], box[1])
+
+
+@dataclass(frozen=True)
+class AcquisitionParams:
+    """The arguments one acquisition is built from, plain enough to store.
+    
+    # TODO: get around every argument needing to be specified here 'just in case'
+
+    Attributes:
+        strategy: a name in `SO_STRATEGIES` or `MO_STRATEGIES`.
+        seed: the QMC sampler's seed.
+        num_objectives: m. Required by the multi-objective family, and
+            meaningless to the other, which scores one objective by
+            construction.
+        num_restarts, raw_samples: the optimizer settings `AcquisitionFunction`
+            maximizes with. They decide which action a query returns, so they
+            belong to the record as much as the acquisition itself does.
+        ucb_beta, num_fantasies, mc_samples, prune_baseline, ref_point, alpha,
+            num_pareto: as the factories take them.
+    """
+
+    strategy       : str
+    seed           : int
+    num_objectives : int | None = None
+    ucb_beta       : float      = UCB_BETA
+    num_fantasies  : int | None = None
+    mc_samples     : int        = MC_SAMPLES
+    prune_baseline : bool       = PRUNE_BASELINE
+    ref_point      : float      = REF_POINT
+    alpha          : float      = PARTITION_ALPHA
+    num_pareto     : int        = NUM_PARETO
+    num_restarts   : int        = NUM_RESTARTS
+    raw_samples    : int        = RAW_SAMPLES
+
+    def __post_init__(self):
+        if self.strategy not in SO_STRATEGIES and self.strategy not in MO_STRATEGIES:
+            raise ValueError(f'no acquisition for {self.strategy!r}')
+        if self.multi_objective and self.num_objectives is None:
+            raise ValueError(f'{self.strategy} scores m objectives at once, so '
+                             'it needs num_objectives')
+        if not self.multi_objective and self.num_objectives is not None:
+            raise ValueError(f'{self.strategy} is single-objective, so '
+                             'num_objectives does not apply')
+
+        if self.num_fantasies is None:
+            object.__setattr__(self, 'num_fantasies',
+                               MO_FANTASIES if self.multi_objective else NUM_FANTASIES)
+
+    @property
+    def multi_objective(self):
+        """Whether these build through `acquisition_factory_2d`."""
+        return self.strategy in MO_STRATEGIES
+
+    def build(self, bounds=None):
+        """The `AcquisitionFunction` itself, ready to `query`.
+
+        Args:
+            bounds: a box overriding the queried model's own, as
+                `AcquisitionFunction` takes it. Not a field here: a box belongs
+                to the objective being searched, not to the acquisition
+                searching it.
+        """
+        shared = {
+            'strategy'       : self.strategy,
+            'seed'           : self.seed,
+            'num_fantasies'  : self.num_fantasies,
+            'mc_samples'     : self.mc_samples,
+            'prune_baseline' : self.prune_baseline,
+        }
+        if self.multi_objective:
+            acqf = acquisition_factory_2d(
+                num_objectives  = self.num_objectives,
+                ref_point       = self.ref_point,
+                alpha           = self.alpha,
+                num_pareto      = self.num_pareto,
+                **shared
+            )
+        else:
+            acqf = acquisition_factory_1d(ucb_beta=self.ucb_beta, **shared)
+
+        return AcquisitionFunction(
+            acqf         = acqf,
+            num_restarts = self.num_restarts,
+            raw_samples  = self.raw_samples,
+            bounds       = bounds
+        )

@@ -16,6 +16,7 @@ from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_no
 from pypolar.utils.plotting import plot_test_function, plot_fit_1d, plot_loo_curve
 from pypolar.feedback import (
     AcquisitionFunction,
+    AcquisitionParams,
     acquisition_factory_1d,
     acquisition_factory_2d,
     BradleyTerryOracle,
@@ -30,6 +31,7 @@ from pypolar.feedback import (
     MO_SYNTHETIC_FUNCTIONS,
     SyntheticOracle,
     MOSyntheticOracle,
+    SyntheticOracleParams,
     MO2SO,
     construct_function,
     truth_at
@@ -63,6 +65,7 @@ __all__ = [
     "sample_actions",
     # acquisition
     "AcquisitionFunction",
+    "AcquisitionParams",
     "acquisition_factory_1d",
     "acquisition_factory_2d",
     # feedback oracles
@@ -80,6 +83,7 @@ __all__ = [
     "MO_SYNTHETIC_FUNCTIONS",
     "SyntheticOracle",
     "MOSyntheticOracle",
+    "SyntheticOracleParams",
     "MO2SO",
     "construct_function",
     "truth_at",

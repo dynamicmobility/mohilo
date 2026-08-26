@@ -131,7 +131,7 @@ def make_gif(dataset: plr.ExperimentDataset, path: Path = None, fps: float = FPS
     path.parent.mkdir(parents=True, exist_ok=True)
 
     last  = dataset.get_objective(frames[-1].trial)
-    truth = dataset.get_groundtruth(frames[-1].trial)[last.name]
+    truth = dataset.get_groundtruth()
     if last.action_dim != 1:
         # botorch would raise on the grid instead, several frames in
         raise ValueError(f'both panels draw one action, got {last.action_dim}D')
@@ -161,16 +161,16 @@ def make_gif(dataset: plr.ExperimentDataset, path: Path = None, fps: float = FPS
                 truth       = truth,
                 objective   = gp.objective,
                 gp          = gp,
-                recommended = record.recommended,
+                recommended = record.aux.get('recommended'),
                 box         = box,
             )
             plot_acquisition(
                 ax     = ax_acq,
-                acqf   = dataset.get_acquisition(record.trial),
+                acqf   = dataset.get_acquisition(),
                 gp     = gp,
                 action = record.action,
                 box    = box,
-                label  = f'{dataset.acquisition["strategy"]} acquisition',
+                label  = f'{dataset.acquisition.strategy} acquisition',
             )
             ax_fit.set_xlabel('')
             ax_fit.set_ylim(span.min() - pad, span.max() + pad)

@@ -13,6 +13,8 @@ import pytest
 
 from botorch.test_functions import multi_objective, synthetic
 
+from dataclasses import asdict
+
 from pypolar.feedback.synthetic import (
     MO_SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
@@ -20,6 +22,7 @@ from pypolar.feedback.synthetic import (
     MO2SO,
     MOSyntheticOracle,
     SyntheticOracle,
+    SyntheticOracleParams,
     construct_function,
     truth_at,
 )
@@ -306,3 +309,61 @@ class TestRegistries:
         # constraints to evaluate_slack, so it would be silently unconstrained here
         for name, func in MO_SYNTHETIC_FUNCTIONS.items():
             assert not hasattr(func, 'evaluate_slack_true'), name
+
+
+class TestSyntheticOracleParams:
+    """The stored form of a groundtruth: which oracle it builds is decided by
+    which registry the name is in, since `num_objectives` cannot decide it --
+    BraninCurrin is multi-objective and takes no such argument."""
+
+    SPEC    = dict(func='Levy', objectives=('cost',), dim=2, box=BOX, seed=SEED)
+    MO_SPEC = dict(func='BraninCurrin', objectives=('branin', 'currin'), dim=2,
+                   box=BOX, seed=SEED)
+
+    def test_a_single_objective_name_builds_a_scalar_oracle(self):
+        oracle = SyntheticOracleParams(**self.SPEC).build()
+
+        assert isinstance(oracle, SyntheticOracle)
+
+    def test_a_multi_objective_name_builds_the_multi_objective_oracle(self):
+        oracle = SyntheticOracleParams(**self.MO_SPEC).build()
+
+        assert isinstance(oracle, MOSyntheticOracle)
+        assert len(oracle) == 2
+
+    def test_the_oracle_is_the_one_the_arguments_describe(self):
+        params = SyntheticOracleParams(rel_noise_std=0.1, **self.SPEC)
+        probe  = np.array([[1.0, 2.0], [0.5, -1.0]])
+
+        np.testing.assert_allclose(
+            params.build()(probe, noise=False),
+            SyntheticOracle.from_name(func='Levy', dim=2, box=BOX, seed=SEED,
+                                      rel_noise_std=0.1)(probe, noise=False))
+
+    def test_it_survives_the_round_trip_a_json_file_makes(self):
+        params = SyntheticOracleParams(**self.MO_SPEC)
+
+        # asdict writes the names as a list, and a list is what json reads back
+        assert SyntheticOracleParams(**asdict(params)) == params
+
+    def test_a_name_in_neither_registry_is_refused(self):
+        with pytest.raises(ValueError):
+            SyntheticOracleParams(func='NotAFunction', objectives=('cost',),
+                                  dim=2, box=BOX)
+
+    def test_a_scalar_truth_refuses_multi_objective_arguments(self):
+        with pytest.raises(ValueError):
+            SyntheticOracleParams(num_objectives=2, **self.SPEC)
+
+    def test_a_scalar_truth_refuses_more_than_one_objective_name(self):
+        with pytest.raises(ValueError):
+            SyntheticOracleParams(func='Levy', objectives=('cost', 'comfort'),
+                                  dim=2, box=BOX)
+
+    def test_naming_the_wrong_number_of_columns_is_caught_at_build(self):
+        # the count is only knowable once the problem exists, so it is checked
+        # there rather than at construction
+        params = SyntheticOracleParams(func='BraninCurrin', objectives=('one',),
+                                       dim=2, box=BOX)
+        with pytest.raises(ValueError):
+            params.build()
