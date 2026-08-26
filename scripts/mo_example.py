@@ -18,7 +18,7 @@ DIM              = 3
 GP_NOISE         = plr.NoiseModel.prior(0.5)
 MIN_LENGTHSCALE  = 0.1
 NUM_QUERIES      = DIM * 13
-ACQ_STRATS       = ['ucb', 'logei', 'qlognei', 'ts']
+ACQ_STRATS       = ['qlognehvi']
 
 RUNS_PER_ACQF = 5
 REPEATS          = 1
@@ -40,7 +40,7 @@ def fit_gp(
     hypers      : plr.GPHyperparameters = None
 ):
     return plr.DecoupledMOGP(
-        objective           = objective,
+        objectives          = objective,
         noise               = GP_NOISE,
         fit_hyperparameters = True,
         min_length_scale    = MIN_LENGTHSCALE,
@@ -103,7 +103,11 @@ def setup_experiment(acq_strat, seed):
     probes     = hilo.make_probes()
     experiment = hilo.make_experiment(probes)
     acqf       = plr.AcquisitionFunction(
-        acqf = plr.acquisition_factory_1d(strategy=acq_strat, seed=seed)
+        acqf = plr.acquisition_factory_2d(
+            strategy       = acq_strat,
+            seed           = seed,
+            num_objectives = 2
+        )
     )
 
     return experiment, acqf

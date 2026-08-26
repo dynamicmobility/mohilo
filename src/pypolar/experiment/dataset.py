@@ -52,11 +52,6 @@ class TrialDataset:
     """One step of a run: the measurements in hand, the GP fit to them, and the
     action that GP chose next.
 
-    A record is the state *before* its action was applied, so trial t's
-    measurements are what trial t-1's action produced. The last record of a run
-    carries no action -- nothing further was chosen -- and holds the fit to
-    every measurement taken.
-
     Attributes:
         trial: the step's index.
         measurements: objective name -> that objective's `to_record`.
