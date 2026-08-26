@@ -107,21 +107,23 @@ def construct_function(
     Args:
         func: a `SyntheticTestFunction` or `MultiObjectiveTestProblem` subclass.
         dim: the action dimension wanted.
-        box: half-width of the preferred action box.
+        box: half-width of the preferred action box, or None when the
+            function states its own.
         num_objectives: m, for the families that take it (DTLZ*, ZDT*, GMM).
         seed: seeds the non-constant probe.
     """
-    # TODO: get rid of this function eventually...
+    # TODO: get rid of this function eventually..it's a bit weird since it tries making a function over and over until it gets it right.
+
     # each candidate is filtered against the constructor's own signature, since
     # the two families take different arguments and neither takes the other's
     takes  = signature(func).parameters
     shared = {'num_objectives': num_objectives} if num_objectives is not None else {}
 
+    boxed = [] if box is None else [{'dim': dim, 'bounds': [(-box, box)] * dim},
+                                    {'bounds': [(-box, box)] * dim}]
+
     tried = []
-    for kwargs in ({'dim': dim, 'bounds': [(-box, box)] * dim},
-                   {'bounds': [(-box, box)] * dim},
-                   {'dim': dim},
-                   {}):
+    for kwargs in (*boxed, {'dim': dim}, {}):
         kwargs = {k: v for k, v in (kwargs | shared).items() if k in takes}
         if kwargs in tried:
             continue     # the filter collapsed it onto a candidate already tried
@@ -134,11 +136,6 @@ def construct_function(
 
         if truth.dim != dim:
             continue
-
-        # Powell sums over range(dim // 4) and Rosenbrock over range(dim - 1),
-        # so below dim 4 and dim 2 they are identically zero. Per objective
-        # rather than pooled: a wide objective would otherwise cover a
-        # constant one, whose ptp is a column of an (n, m) result.
         probe = sample_actions(bounds=truth.bounds, n=PROBE_SAMPLES,
                                kind='sobol', seed=seed)
         if np.min(np.ptp(truth_at(truth, probe), axis=0)) > 0:
@@ -293,8 +290,12 @@ class MOSyntheticOracle:
         measure_spread: (m,) each objective's measured spread, in its own units.
         noise_std: (m,) the absolute noise standard deviation applied to each.
         ref_point: (m,) the hypervolume reference, in the truth's own units.
-        sampled_max_hypervolume: the hypervolume of the scan's own front, the
-            multi-objective analog of a `SyntheticOracle`'s `sample_min`.
+        scan_actions, scan_values: the (n_spread, d) Sobol scan of the box and
+            the (n_spread, m) noiseless values there.
+        sampled_max_hypervolume: the hypervolume of the scan's own front with
+            every objective minimized, the multi-objective analog of a
+            `SyntheticOracle`'s `sample_min`. `max_hypervolume` is the same
+            measurement in any direction.
     """
 
     def __init__(
@@ -347,18 +348,40 @@ class MOSyntheticOracle:
             shape = (len(self.objectives),)
         )
 
-        X = sample_actions(
-            bounds=self.objectives[0].truth.bounds, 
-            n=n_spread,
-            kind='sobol', 
-            seed=seed
+        self.scan_actions = sample_actions(
+            bounds    = self.objectives[0].truth.bounds,
+            n         = n_spread,
+            kind      = 'sobol',
+            seed      = seed
         )
         # TODO: make this more efficient in the future. Currently samples each objective many times (see how __call__ works for each objective)
-        y = self(X, noise=False)
+        self.scan_values = self(self.scan_actions, noise=False)
 
-        self.sampled_max_hypervolume = hypervolume_from_nondominated(
-            y[get_nondominated(-y)] - self.ref_point
-        )
+        self._max_hypervolume = {}
+
+    def max_hypervolume(self, signs=None):
+        """The hypervolume of the scan's own front, in the direction `signs`
+        states: +1 where an objective is maximized, -1 where it is minimized.
+        """
+        signs = (-np.ones(len(self.objectives)) if signs is None
+                 else np.asarray(signs, dtype=float).ravel())
+        if len(signs) != len(self.objectives):
+            raise ValueError(f'{len(signs)} signs for {len(self.objectives)} '
+                             'objectives; they are positional, so one per column')
+
+        key = tuple(signs)
+        if key not in self._max_hypervolume:
+            values = signs * self.scan_values
+            self._max_hypervolume[key] = hypervolume_from_nondominated(
+                signs * self.ref_point - values[get_nondominated(values)]
+            )
+
+        return self._max_hypervolume[key]
+
+    @property
+    def sampled_max_hypervolume(self):
+        """`max_hypervolume` with every objective minimized."""
+        return self.max_hypervolume()
 
     def objective(self, index) -> SyntheticOracle:
         """Objective `index`, as a scalar `SyntheticOracle`."""

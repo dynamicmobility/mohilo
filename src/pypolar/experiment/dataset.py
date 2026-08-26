@@ -19,19 +19,23 @@ import torch
 from pypolar.experiment.ledger import fingerprint, jsonable
 from pypolar.feedback.acquisition import AcquisitionParams
 from pypolar.feedback.synthetic import SyntheticOracleParams
-from pypolar.optimization.gp import DTYPE, BoTorchGP, NoiseModel
+from pypolar.optimization.gp import DTYPE, BoTorchGP, DecoupledMOGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
 
-def _gp_record(gp: BoTorchGP):
-    """The arguments a GP was built with, read off the GP itself."""
-    return {
-        'objective'        : gp.objective.name,
+def _gp_record(gp: BoTorchGP | DecoupledMOGP):
+    """The arguments a GP was built with, read off the GP itself.
+    """
+    record = {
         'noise'            : asdict(gp.noise),
         'length_scale'     : gp.length_scale,
         'signal_var'       : gp.signal_var,
         'min_length_scale' : gp.min_length_scale,
     }
+    if isinstance(gp, DecoupledMOGP):
+        return record | {'objectives': gp.objectives.names}
+
+    return record | {'objective': gp.objective.name}
 
 
 def _aux_array(value):
@@ -188,28 +192,32 @@ class ExperimentDataset:
         return dataset
 
     def get_model(self, trial: int = -1):
-        """Makes a `BoTorchGP` with the stored parameters and returns it.
-
-        The state dict *is* the fit, so nothing is refit: the same measurements
-        under the same configuration, with the same tensors loaded over them,
-        give back the posterior the run actually queried. None before the first
-        fit.
+        """Builds and returns a `BoTorchGP`, or a `DecoupledMOGP` with the 
+        stored parameters in the dataset. Uses a torch state dict rather than
+        refitting the model.
         """
         record = self.trials[trial]
         if record.state_dict is None:
             return None
 
-        return BoTorchGP(
-            objective           = self.get_objective(trial),
-            noise               = NoiseModel(**record.gp['noise']),
-            fit_hyperparameters = False,
-            length_scale        = record.gp['length_scale'],
-            signal_var          = record.gp['signal_var'],
-            min_length_scale    = record.gp['min_length_scale'],
-            # json numbers are decimal and torch infers float32 from python
-            # floats, so without the cast the fit comes back at half its precision
-            state_dict          = {key: torch.as_tensor(value, dtype=DTYPE)
-                                   for key, value in record.state_dict.items()},
+        shared = {
+            'noise'               : NoiseModel(**record.gp['noise']),
+            'fit_hyperparameters' : False,
+            'length_scale'        : record.gp['length_scale'],
+            'signal_var'          : record.gp['signal_var'],
+            'min_length_scale'    : record.gp['min_length_scale'],
+            'state_dict'          : {key: torch.as_tensor(value, dtype=DTYPE)
+                                     for key, value in record.state_dict.items()},
+        }
+        names = record.gp.get('objectives')
+        if names is None:
+            return BoTorchGP(objective=self.get_objective(trial), **shared)
+
+        return DecoupledMOGP(
+            objectives = DecoupledObjectives([
+                Objective.from_record(record.measurements[name]) for name in names
+            ]),
+            **shared
         )
 
     def get_objective(self, trial: int = -1, name: str = None):

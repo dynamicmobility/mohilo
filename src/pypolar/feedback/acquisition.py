@@ -159,7 +159,8 @@ class AcquisitionFunction:
         acqf            : type[BoTorchAcqf],
         num_restarts    : int               = NUM_RESTARTS,
         raw_samples     : int               = RAW_SAMPLES,
-        bounds          : np.ndarray | list = None
+        bounds          : np.ndarray | list = None,
+        raw_ref_point   : np.ndarray | list = None
     ):
         """
         Args:
@@ -170,11 +171,17 @@ class AcquisitionFunction:
             bounds: (2, d) [[low, ...], [high, ...]] actions in raw units, or
                 any spelling `as_bounds` takes. Defaults to the queried model's
                 `action_bounds`.
+            raw_ref_point: (m,) hypervolume reference in the objectives' own
+                measured units, one per objective **in the queried model's
+                objective order**. Overrides the scalar `ref_point` the factory
+                bound. None leaves that scalar in place.
         """
-        self.acqf         = acqf
-        self.bounds       = bounds
-        self.num_restarts = num_restarts
-        self.raw_samples  = raw_samples
+        self.acqf          = acqf
+        self.bounds        = bounds
+        self.num_restarts  = num_restarts
+        self.raw_samples   = raw_samples
+        self.raw_ref_point = (None if raw_ref_point is None
+                              else np.asarray(raw_ref_point, dtype=float).ravel())
 
     def _incumbent(self, model):
         """The measurement-dependent arguments `self.acqf` takes, read off the
@@ -197,10 +204,37 @@ class AcquisitionFunction:
                          if wanted(name)})
         if wanted('best_f'):
             args['best_f'] = model.incumbent()
+        # not `wanted`: a raw reference deliberately overrides the scalar the
+        # factory bound, and a partial's call-time keyword wins over its own
+        ref = self._ref_point(model, bound)
+        if ref is not None and 'ref_point' in taken:
+            args['ref_point'] = torch.as_tensor(ref, dtype=DTYPE)
         if wanted('partitioning'):
-            args['partitioning'] = self._partitioning(model, bound.get('ref_point'))
+            args['partitioning'] = self._partitioning(model, ref)
 
         return args
+
+    def _ref_point(self, model, bound):
+        """The hypervolume reference, in the standardized maximization space
+        the model's posterior is stated in. model is the plr GP, and bound is
+        a dictionary of keywords of the acqusition function. The ref point can
+        be provided to the BoTorch acquisition directly, or it can be passed in
+        in the constructor via self.raw_ref_point
+        """
+        # TODO: check if the above docstring is correct, and clean this up. _incumbent needs to be cleaned first ig
+        if self.raw_ref_point is None:
+            return bound.get('ref_point')
+
+        objectives = model.objectives
+        if len(self.raw_ref_point) != len(objectives):
+            raise ValueError(
+                f'raw_ref_point has {len(self.raw_ref_point)} entries for '
+                f'{len(objectives)} objectives {objectives.names}; it is '
+                'positional, so one per objective in the model\'s own order'
+            )
+
+        return np.array([objectives[i].ytransform(reference)
+                         for i, reference in enumerate(self.raw_ref_point)])
 
     @staticmethod
     def _partitioning(model, ref_point):
@@ -281,6 +315,12 @@ class AcquisitionParams:
             belong to the record as much as the acquisition itself does.
         ucb_beta, num_fantasies, mc_samples, prune_baseline, ref_point, alpha,
             num_pareto: as the factories take them.
+        raw_ref_point: (m,) hypervolume reference in the objectives' own
+            measured units, one per objective in the model's order, or None to
+            use the scalar `ref_point`. The scalar lives in standardized
+            maximization space, whose frame moves with every measurement, so it
+            names a different physical point each trial; this one is anchored to
+            the problem and converted per query.
     """
 
     strategy       : str
@@ -291,6 +331,7 @@ class AcquisitionParams:
     mc_samples     : int        = MC_SAMPLES
     prune_baseline : bool       = PRUNE_BASELINE
     ref_point      : float      = REF_POINT
+    raw_ref_point  : tuple[float, ...] | None = None
     alpha          : float      = PARTITION_ALPHA
     num_pareto     : int        = NUM_PARETO
     num_restarts   : int        = NUM_RESTARTS
@@ -305,6 +346,15 @@ class AcquisitionParams:
         if not self.multi_objective and self.num_objectives is not None:
             raise ValueError(f'{self.strategy} is single-objective, so '
                              'num_objectives does not apply')
+
+        if self.raw_ref_point is not None:
+            if not self.multi_objective:
+                raise ValueError(f'{self.strategy} is single-objective, so '
+                                 'raw_ref_point does not apply')
+            # json reads a tuple back as a list, and the field is hashed by the
+            # record's fingerprint, so it is stored as a tuple either way
+            object.__setattr__(self, 'raw_ref_point',
+                               tuple(float(r) for r in self.raw_ref_point))
 
         if self.num_fantasies is None:
             object.__setattr__(self, 'num_fantasies',
@@ -343,8 +393,9 @@ class AcquisitionParams:
             acqf = acquisition_factory_1d(ucb_beta=self.ucb_beta, **shared)
 
         return AcquisitionFunction(
-            acqf         = acqf,
-            num_restarts = self.num_restarts,
-            raw_samples  = self.raw_samples,
-            bounds       = bounds
+            acqf          = acqf,
+            num_restarts  = self.num_restarts,
+            raw_samples   = self.raw_samples,
+            bounds        = bounds,
+            raw_ref_point = self.raw_ref_point
         )

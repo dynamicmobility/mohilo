@@ -370,6 +370,15 @@ class DecoupledObjectives:
             high = reduce(np.maximum, [box[1] for box in boxes])
         )
 
+    def ytransform(self, data: np.ndarray): # TODO: write tests for this function
+        data = np.atleast_2d(data)
+        if data.shape[1] != len(self):
+            raise ValueError(f'Data must have all objectives in it. Got shape {data.shape}')
+        
+        return np.column_stack([
+            self.objectives[i].ytransform(data[:, i]) for i in range(len(self))
+        ])
+
     @property
     def names(self):
         return [o.name for o in self.objectives]
@@ -381,6 +390,18 @@ class DecoupledObjectives:
     @property
     def num_objectives(self):
         return len(self.objectives)
+
+    @property
+    def signs(self):
+        """(m,) +1 where an objective is maximized and -1 where it is
+        minimized, in objective order.
+
+        The direction belongs here rather than to a groundtruth: a truth only
+        says what a function is worth at an action, and BoTorch states every
+        one of its own in the minimizing sense. Which way each is optimized is
+        the task, which is what this class describes.
+        """
+        return np.array([o.sign for o in self.objectives])
 
     # TODO: check over this later
     @property

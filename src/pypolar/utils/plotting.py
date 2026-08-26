@@ -9,6 +9,18 @@ SAMPLE_COLOR = '#009E73'
 # (color, linestyle) cycled over `vlines`, in the order they are given
 VLINE_STYLES = ((MODEL_COLOR, '--'), (TRUTH_COLOR, ':'))
 
+INK, MUTED = "#0b0b0b", "#52514e"   # chart ink and recessive furniture
+
+def dress_axis(ax: plt.Axes) -> plt.Axes:
+    """Apply the house style: recessive grid, muted ticks, no top/right spines."""
+    ax.grid(True, color=INK, alpha=0.12, lw=0.8)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(MUTED)
+    ax.tick_params(colors=MUTED, labelsize=8)
+    return ax
 
 def plot_test_function(
         ax    : plt.Axes,

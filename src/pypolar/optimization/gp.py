@@ -459,10 +459,10 @@ class BoTorchGP:
 class DecoupledMOGP:
     """Independent (decoupled) per-objective GPs over one shared action frame.
     """
-
+    # TODO: review this class eventually
     def __init__(self, objectives: DecoupledObjectives, fit_hyperparameters=True,
                  noise=NOISE_STD, length_scale=LENGTH_SCALE,
-                 signal_var=SIGNAL_VAR, min_length_scale=None):
+                 signal_var=SIGNAL_VAR, min_length_scale=None, state_dict=None):
         """
         Args:
             objectives: the measurements to condition on.
@@ -475,22 +475,26 @@ class DecoupledMOGP:
             length_scale: starting ARD lengthscale, in the normalized frame.
             signal_var: starting ScaleKernel outputscale.
             min_length_scale: lower bound on every lengthscale, or None.
+            state_dict: the tensors of a fit that already happened, loaded in
+                place of fitting. Restores a recorded GP without refitting it.
         """
         self.noise = NoiseModel.coerce(noise)
-        if self.noise.is_fitted and not fit_hyperparameters:
+        if self.noise.is_fitted and not fit_hyperparameters and state_dict is None:
             raise ValueError('a fitted noise is determined by the marginal '
                              'likelihood, so fit_hyperparameters must be True')
         self.fit_hyperparameters = fit_hyperparameters
         self.length_scale     = length_scale
         self.signal_var       = signal_var
         self.min_length_scale = min_length_scale
-        self.update_feedback(objectives)
+        self.update_feedback(objectives, state_dict=state_dict)
 
-    def update_feedback(self, objectives: DecoupledObjectives):
+    def update_feedback(self, objectives: DecoupledObjectives, state_dict=None):
         """Rebuild every GP against the current feedback.
 
         Args:
             objectives: the measurements to condition on.
+            state_dict: the saved tensors of a fitted gp. A model
+                restored from one is not fitted again (overrides hyperparam fitting).
 
         Returns:
             The `ModelListGP`, in eval mode.
@@ -507,6 +511,11 @@ class DecoupledMOGP:
             )
             for i in range(len(objectives))
         ]).eval()
+
+        if state_dict is not None:
+            self.model.load_state_dict(state_dict)
+            self.model.eval()
+            return self.model
 
         if self.fit_hyperparameters:
             # the sum splits over the sub-models because the objectives are

@@ -1,4 +1,139 @@
-from pypolar.utils.pareto import get_nondominated_tol, hypervolume_from_nondominated, get_pareto_statistics
+"""Multi-objective metrics against a known groundtruth: the hypervolume the
+model's inferred Pareto set attains, and the hypervolume the queried points
+attain, both as a fraction of the truth's own."""
+
+import numpy as np
+
+from pypolar.feedback.synthetic import MOSyntheticOracle
+from pypolar.optimization.objectives import DecoupledObjectives
+from pypolar.utils.pareto import (gd_plus, get_nondominated, get_nondominated_tol,
+                                  get_pareto_statistics,
+                                  hypervolume_from_nondominated)
+
+
+def _signs(objectives, ground_truth: MOSyntheticOracle):
+    """(m,) direction of each objective
+    """
+    signs = objectives.signs
+    if len(signs) != len(ground_truth):
+        raise ValueError(f'{len(signs)} objectives {objectives.names} against '
+                         f'{len(ground_truth)} truth columns; they are '
+                         "positional, so one per column in the truth's order")
+
+    return signs
+
+
+def _attained_fraction(
+    true_objs       : np.ndarray,
+    ground_truth    : MOSyntheticOracle,
+    signs           : np.ndarray
+):
+    """Fraction of the truth's own hypervolume that a set of objective
+    vectors from the truth function covers (usually, the predicted Pareto
+    optimal actions that the GP predicted).
+
+    Args:
+        true_objs: (n, m) *true* objective values, in the truth's own raw units.
+        ground_truth: the oracle, carrying `ref_point` and the scan's
+            `max_hypervolume`.
+        signs: (m,) +1 on a maximized objective, -1 on a minimized one.
+    """
+    values = signs * np.asarray(true_objs, dtype=float)
+    front  = get_nondominated(values)
+
+    return hypervolume_from_nondominated(
+        signs * ground_truth.ref_point - values[front]
+    ) / ground_truth.max_hypervolume(signs)
+
+
+def normalized_hypervolume_regret( # TODO: potentially add a k-sampling to avoid the fact that hypervolume strictly increases with more points
+    gp,
+    ground_truth    : MOSyntheticOracle,
+    tol             : float = 0.0
+):
+    """The inference hypervolume regret of a model: one minus the ratio between
+    the ground truth's max hypervolume and the hypervolume produced by the GP's
+    predicted Pareto optimal actions. Between 0 and 1 (0 is better).
+
+    Args:
+        gp: a `DecoupledMOGP`, or anything whose `posterior_at` returns
+            (n, m) means in maximization space.
+        ground_truth: the oracle, whose `scan_actions` and `scan_values` are
+            the discretization the fronts are compared over.
+        tol: relaxes non-domination by a fraction of each objective's range
+            (see `get_nondominated_tol`), keeping near-ties on the estimated
+            front. Optimistic, since hypervolume only grows as the set does.
+
+    Returns:
+        The regret, as a fraction of the truth's hypervolume in [0, 1].
+    """
+    signs = _signs(gp.objectives, ground_truth)
+    mu, _ = gp.posterior_at(ground_truth.scan_actions)
+    front = get_nondominated_tol(mu, tol)
+
+    return 1.0 - _attained_fraction(ground_truth.scan_values[front],
+                                    ground_truth, signs)
+
+
+def attained_hypervolume_regret(
+    raw_actions     : np.ndarray,
+    ground_truth    : MOSyntheticOracle,
+    objectives      : DecoupledObjectives
+):
+    """The hypervolume regret of the points a run has actually queried.
+
+    Args:
+        raw_actions: (N, d) every action queried so far, in raw action units.
+        ground_truth: the oracle, evaluated with `noise=False` so a lucky draw
+            cannot flatter the score.
+        objectives: the `DecoupledObjectives` whose `signs` the truth is scored
+            in, one per truth column in the truth's own order.
+
+    Returns:
+        The regret, as a fraction of the truth's hypervolume.
+    """
+    return 1.0 - _attained_fraction(
+        ground_truth(raw_actions, noise=False), ground_truth,
+        _signs(objectives, ground_truth)
+    )
+
+
+
+def front_alignment_regret(
+    gp,
+    ground_truth    : MOSyntheticOracle,
+    tol             : float = 0.0
+):
+    """The GD+ indicator. How far a model's inferred Pareto front sits from the
+    true Pareto front (in 'objective space').
+
+    Args:
+        gp: a `DecoupledMOGP`, or anything whose `posterior_at` returns
+            (n, m) means in maximization space.
+        ground_truth: the oracle, whose scan supplies both the true front and
+            the ranges the distance is stated in.
+        tol: relaxes non-domination on the *estimated* front only (see
+            `get_nondominated_tol`), keeping near-ties in the recommendation.
+            The true front stays strict, since relaxing it would hand the
+            indicator extra targets to be close to.
+
+    Returns:
+        The regret, in fractions of the truth's objective ranges. 0.0 exactly
+        when every recommended action lies on the true front.
+    """
+    signs  = _signs(gp.objectives, ground_truth)
+    mu, _  = gp.posterior_at(ground_truth.scan_actions)
+    values = signs * ground_truth.scan_values
+    
+    corners = np.stack([signs * np.array([o.sample_min for o in ground_truth.objectives]),
+                        signs * np.array([o.sample_max for o in ground_truth.objectives])])
+
+    return gd_plus(
+        F           = -values[get_nondominated_tol(mu, tol)],
+        true_front  = -values[get_nondominated(values)],
+        ideal       = -corners.max(axis=0),
+        nadir       = -corners.min(axis=0)
+    )
 
 def groundtruth_hypervolume(estimated_objs, true_objs, tol=0.0):
     """Groundtruth hypervolume attained under the predicted Pareto-opimal action set.

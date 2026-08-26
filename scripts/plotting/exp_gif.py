@@ -25,8 +25,7 @@ ACQ_COLOR   = '#0072B2'   # Okabe-Ito blue, the one plot_fit_1d leaves free
 DATASET     = Path('hilo/output/experiments/action1d/logei-3.json')
 
 
-def action_grid(box: np.ndarray, n: int = GRID_POINTS):
-    """(n, 1) actions spanning the 1D box."""
+def action_grid(box: np.ndarray, n: int = GRID_POINTS): # TODO: can this be replaced with the objective bounds?
     return np.linspace(box[0, 0], box[1, 0], n)[:, None]
 
 

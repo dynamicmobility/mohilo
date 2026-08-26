@@ -1,4 +1,5 @@
 from pymoo.indicators.hv import HV
+from pymoo.indicators.gd_plus import GDPlus
 from pymoo.util.normalization import normalize
 from pymoo.indicators.spacing import SpacingIndicator
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
@@ -108,3 +109,16 @@ def get_pareto_statistics(F):
         hypervolume_from_nondominated(F_min), 
         sparsity_from_normalized_nondominated(F_min_norm)
     )
+
+def gd_plus(F, true_front, ideal, nadir):
+    """Normalized GD+ of a set against a known Pareto front, in minimization space.
+
+    Args:
+        F: ``(n, m)`` points to score, in minimization space.
+        true_front: ``(k, m)`` the true Pareto front, same space.
+        ideal, nadir: ``(m,)`` the best and worst value per objective.
+
+    Returns:
+        The indicator as a float, 0 when every point of ``F`` is on the front.
+    """
+    return GDPlus(true_front, zero_to_one=True, ideal=ideal, nadir=nadir)(F)
