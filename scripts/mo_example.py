@@ -14,17 +14,10 @@ import hilo.shared.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 # TODO: go through all the reference setting/computing and min/max objective logic in this codebase
-DIM              = hilo.MO_DIM
-GP_NOISE         = plr.NoiseModel.prior(0.5)
-MIN_LENGTHSCALE  = 0.1
-NUM_QUERIES      = DIM * 13
-NUM_RANDOM       = 3    # random actions drawn before the acquisition takes over
-ACQ_STRATS       = ['qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi']
-
-RUNS_PER_ACQF = 7
-REPEATS          = 1
-OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
-ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
+ACQ_STRATS    = ['qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi']
+RUNS_PER_ACQF = 3
+OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
+ACQ_KWARGS    = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
 
 def fit_gp(
@@ -34,9 +27,9 @@ def fit_gp(
 ):
     return plr.DecoupledMOGP(
         objectives          = objective,
-        noise               = GP_NOISE,
+        noise               = hilo.GP_NOISE,
         fit_hyperparameters = True,
-        min_length_scale    = MIN_LENGTHSCALE,
+        min_length_scale    = hilo.MIN_LENGTHSCALE,
     )
 
 def aux(
@@ -69,12 +62,12 @@ def run_experiment(
     ground_truth      : plr.MOSyntheticOracle
 ):
     gp = None
-    for i in tqdm(range(NUM_QUERIES)):
-        if i < NUM_RANDOM:
+    for i in tqdm(range(hilo.NUM_QUERIES)):
+        if i < hilo.NUM_RANDOM:
             # randomly sample until the acquisition has something to fit to
             source = 'random'
             action = plr.sample_actions(
-                dim    = DIM,
+                dim    = hilo.DIM,
                 n      = 1,
                 kind   = 'uniform',
                 seed   = hilo.SEED + i,
@@ -88,7 +81,10 @@ def run_experiment(
 
         experiment.begin_trial(
             action = action,
-            args   = {name: (action,) for name in experiment.probes}
+            args           = {
+                hilo.METABOLIC: (action, i + 1),
+                hilo.COMFORT:   (action, i + 1, hilo.SURVEY_TIMEOUT, hilo.SURVEY_PERIOD)
+            }
         )
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
@@ -116,7 +112,7 @@ def setup_experiment(acq_strat, seed):
     probes     = hilo.make_probes_mo()
     experiment = hilo.make_experiment_mo(
         probes    = probes,
-        maximize  = {hilo.METABOLIC: True, hilo.COMFORT: True}
+        maximize  = hilo.MAXIMIZE
     )
     params     = plr.AcquisitionParams(
         strategy          = acq_strat,
@@ -125,7 +121,7 @@ def setup_experiment(acq_strat, seed):
         raw_ref_point     = hilo.MO_TRUTH.ref_point,
         **ACQ_KWARGS
     )
-    assert experiment.objectives.names == list(hilo.GROUND_TRUTH_2D.objectives)
+    assert experiment.objectives.names == list(hilo.GROUND_TRUTH_PARAMS.objectives)
 
     return experiment, params
 
@@ -139,14 +135,15 @@ def run_trial(acq_strat, trial):
     dataset = plr.ExperimentDataset(
         name         = acq_strat,
         acquisition  = params,
-        groundtruth  = hilo.GROUND_TRUTH_2D,
+        groundtruth  = hilo.GROUND_TRUTH_PARAMS,
         config       = asdict(
-            hilo.Simulation1D(
-                gp_noise          = plr.NoiseModel.coerce(GP_NOISE),
-                min_lengthscale   = MIN_LENGTHSCALE,
-                num_queries       = NUM_QUERIES,
-                repeats           = REPEATS,
-                dim               = DIM,
+            hilo.Config(
+                gp_noise          = plr.NoiseModel.coerce(hilo.GP_NOISE),
+                min_lengthscale   = hilo.MIN_LENGTHSCALE,
+                num_queries       = hilo.NUM_QUERIES,
+                repeats           = hilo.REPEATS,
+                dim               = hilo.DIM,
+                seed              = hilo.SEED
             )
         ),
         path         = OUTPUT_DIR / f'{acq_strat}-{trial}.json'

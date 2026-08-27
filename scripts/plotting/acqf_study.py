@@ -58,9 +58,9 @@ def multi_objective_study(datasets: list[plr.ExperimentDataset]):
     # for k in keys:
     #     data[k] = np.array(data[k])
             
-    fig, axs = plt.subplots(ncols=3, figsize=(8,4))
+    fig, axs = plt.subplots(ncols=3, figsize=(12,4))
     axs = axs.flatten()
-    colors = ['C0', 'C1', 'C2', 'C3']
+    colors = ['C0', 'C1', 'C2', 'C3', 'C4']
     # one color per acquisition function, shared by every panel
     acqf_colors = dict(zip(data[keys[0]], colors))
     for k, ax in zip(keys, axs):
@@ -84,7 +84,7 @@ def multi_objective_study(datasets: list[plr.ExperimentDataset]):
 
 
 if __name__ == '__main__':
-    datasets = load_data(Path('scripts/output/experiments/20260826_150446'))
+    datasets = load_data(Path('scripts/output/experiments/20260827_131242'))
     if datasets[0].get_objectives().num_objectives > 1:
         multi_objective_study(datasets)
     else:

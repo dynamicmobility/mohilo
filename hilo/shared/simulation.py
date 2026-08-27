@@ -30,7 +30,7 @@ MIN_LENGTHSCALE  = 0.2
 NUM_RANDOM       = 3
 
 
-GT_NAME = 'DTLZ2'
+GT_NAME = 'DTLZ1'
 GROUND_TRUTH_PARAMS = plr.SyntheticOracleParams(
     func          = GT_NAME,
     objectives    = (METABOLIC, COMFORT),
