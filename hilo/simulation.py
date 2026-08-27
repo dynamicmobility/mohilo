@@ -1,10 +1,9 @@
 import time
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from linear_operator.utils.warnings import NumericalWarning
 import pypolar as plr
-import numpy as np
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 MULTITHREAD = False 
@@ -45,34 +44,16 @@ GROUND_TRUTH_PARAMS = plr.SyntheticOracleParams(
 MO_TRUTH        = GROUND_TRUTH_PARAMS.build()
 
 
-def reference_point(
-    oracle      : plr.MOSyntheticOracle,
-    names       : tuple[str, ...],
-    maximize    : dict[str, bool],
-    margin      : float = REF_MARGIN
-):
-    """The hypervolume reference in the objectives' own units, (m,).
-
-    Args:
-        oracle: the groundtruth, for its `scan_values`.
-        names: one objective name per column, in the oracle's column order.
-        maximize: name -> direction, as `Objective` takes it.
-        margin: the gap past the worst value, as a fraction of the range.
-
-    Returns:
-        (m,) reference, one per objective in column order.
-    """
-    signs  = np.array([1.0 if maximize[name] else -1.0 for name in names])
-    values = signs * oracle.scan_values          # larger is better, every column
-    worst  = values.min(axis=0)
-    return signs * (worst - margin * (values.max(axis=0) - worst))
-
-
-REF_POINT       = reference_point(
-    oracle   = MO_TRUTH,
-    names    = GROUND_TRUTH_PARAMS.objectives,
-    maximize = MAXIMIZE
+REF_POINT       = plr.reference_point(
+    values   = MO_TRUTH.scan_values,
+    maximize = [MAXIMIZE[name] for name in GROUND_TRUTH_PARAMS.objectives],
+    margin   = REF_MARGIN
 )
+
+# the reference the run optimizes against travels with the groundtruth, so a
+# metric reading a saved run back scores it against the same one
+GROUND_TRUTH_PARAMS = replace(GROUND_TRUTH_PARAMS, ref_point=tuple(REF_POINT))
+MO_TRUTH            = GROUND_TRUTH_PARAMS.build()
 
 # Actions
 DIM             = MO_TRUTH.objectives[0].truth.dim

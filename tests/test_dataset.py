@@ -220,6 +220,35 @@ class TestGetGroundtruthAndAcquisition:
                                    GROUNDTRUTH.build()(probe, noise=False))
         assert truth.measure_spread == GROUNDTRUTH.build().measure_spread
 
+    def test_the_reference_point_survives_the_file(self, objectives, tmp_path):
+        # a hypervolume is comparable only under one reference, so the one a run
+        # optimized against has to come back with the truth rather than being
+        # replaced by the function's own default
+        ref  = (1.5, 2.5)
+        data = ExperimentDataset(
+            name        = 'mo',
+            groundtruth = SyntheticOracleParams(
+                func = 'DTLZ2', objectives=('cost', 'comfort'), dim=3, box=None,
+                num_objectives=2, ref_point=ref),
+            path        = tmp_path / 'mo.json'
+        )
+        data.add_trial(objectives)
+        back = ExperimentDataset.load(data.save())
+
+        assert back.groundtruth.ref_point == ref
+        np.testing.assert_allclose(back.get_groundtruth().ref_point, ref)
+
+    def test_without_one_the_truth_falls_back_to_its_own(self, objectives, tmp_path):
+        params = SyntheticOracleParams(func='DTLZ2', objectives=('cost', 'comfort'),
+                                       dim=3, box=None, num_objectives=2)
+        data   = ExperimentDataset(name='mo', groundtruth=params,
+                                   path=tmp_path / 'mo.json')
+        data.add_trial(objectives)
+        back = ExperimentDataset.load(data.save())
+
+        assert back.groundtruth.ref_point is None
+        np.testing.assert_allclose(back.get_groundtruth().ref_point, [1.1, 1.1])
+
     def test_a_run_with_no_groundtruth_says_so(self, objectives):
         # which is every real study: nothing knows the truth to record
         data = ExperimentDataset(name='study', acquisition=ACQUISITION)

@@ -41,6 +41,8 @@ WS_PORT   = 8766
 
 PAGE = 'preference.html'
 
+LABELS = ('Efficiency', 'Comfort')      # the slider's low and high ends
+
 EFF_ACTION = np.array([-2.0,  1.0, 0.5])    # action at index 0
 COM_ACTION = np.array([ 3.0, -1.5, 2.0])    # action at index 100
 
@@ -81,13 +83,16 @@ class Preference:
 
     Args:
         device: what a submitted action is sent to.
+        labels: the two end names the page shows, low end first.
         http_port, ws_port: ports the two servers listen on.
         quiet: silences the HTTP request log.
     """
 
-    def __init__(self, device=None, http_port=HTTP_PORT, ws_port=WS_PORT, quiet=True):
+    def __init__(self, device=None, labels=LABELS, http_port=HTTP_PORT,
+                 ws_port=WS_PORT, quiet=True):
         # set before the servers start, since a client may connect immediately
         self.device = Exo() if device is None else device
+        self.labels = tuple(labels)
         self.slider = 50        # where the slider is right now, 0 - 100
 
         self._sends     = queue.Queue()
@@ -163,6 +168,8 @@ class Preference:
         self._clients.add(ws)
         self._connected.set()
         print('iPad connected')
+        # the page ships with the default ends; name them for this run
+        await ws.send(json.dumps({'labels': list(self.labels)}))
         try:
             async for raw in ws:
                 try:

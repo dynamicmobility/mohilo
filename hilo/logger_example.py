@@ -8,7 +8,7 @@ import pypolar as plr
 from tablet.survey import Survey
 import sys
 import logging
-from hilo.log import TO_BOTH, setup_logger
+import hilo.log as log
 
 logger = logging.getLogger(__name__)
 
@@ -43,17 +43,36 @@ if CONNECT:
 
 def send_to_exo(action):
     logger.info(f'Exo got action {action}')
-
+    ans = log.logged_input(f'Send {action} (y/n)? ')
+    while True and ans.lower() != 'y':
+        action = log.logged_input(f'Enter an alternative action as an array, like [1, 2, 3]: ')
+        try:
+            action = np.array(eval(action))
+            if np.any(action < hilo.BOUNDS[0]) or np.any(action > hilo.BOUNDS[1]):
+                raise ValueError('Action out of bounds')
+            logger.info(f'Got {action}. Sending to exo...', extra=log.TO_BOTH)
+            break
+        except ValueError as e:
+            logger.error(f'Action out of bounds. Note that bounds (low, high) = {hilo.BOUNDS}', extra=log.TO_BOTH)
+            continue
+        except Exception as e:
+            logger.error(e, extra=log.TO_BOTH)
+            logger.error(f'{action} did not compile. Try again.', extra=log.TO_BOTH)
+            continue
+        
     if CONNECT:
         action_dict = {
-            'h_flex_torque_scale': action[0],
+            'h_flex_torque_scale': action[0], # make this a dict when sending to the exo
             'h_ext_torque_scale' : action[1],
             'hip_delay_idx'      : action[2]
         }
         sio.emit("update_inputs", action_dict)
-        logger.info('Successfully sent action.')
+        logger.info('Successfully sent action.', extra=log.TO_BOTH)
+        return True
     else:
-        logger.info('Disabled!')
+        logger.info('Disabled!', extra=log.TO_BOTH)
+        return True
+
 
 def fit_gp(
     objective   : plr.DecoupledObjectives,
@@ -127,7 +146,7 @@ def connect_to_ipad():
         period  = hilo.SURVEY_PERIOD,
         logger  = logger
     )
-    logger.info('Waiting for the iPad...', extra=TO_BOTH)
+    logger.info('Waiting for the iPad...', extra=log.TO_BOTH)
     ipad.wait_for_ipad()
     return ipad
 
@@ -149,7 +168,7 @@ def setup_experiment(ipad):
 def main():
     torch.manual_seed(hilo.SEED)
     hilo.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    setup_logger(hilo.OUTPUT_DIR / f'{SUBJECT}.log')
+    log.setup_logger(hilo.OUTPUT_DIR / f'{SUBJECT}.log')
     
     ipad                    = connect_to_ipad()
     experiment, acqf_params = setup_experiment(ipad)

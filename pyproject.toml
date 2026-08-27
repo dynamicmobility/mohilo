@@ -20,6 +20,9 @@ dev = [
     "matplotlib",
     "pandas",
 ]
+peripherals = [
+    "sounddevice",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -64,12 +64,51 @@
 
   /* --- the two percentages --- */
 
+  /* the live pair sits at the bottom, the submitted ones stack upward and
+     clip off the top edge as they age out */
   .stage {
     flex: 1 1 auto;
-    display: grid;
-    place-items: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 3vh;
     min-height: 0;
+    overflow: hidden;
   }
+
+  .history {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.6vh;
+    flex: 0 0 auto;
+  }
+
+  .past {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 16px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: min(5vh, 6vw);
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+    filter: grayscale(.5);
+    transition: opacity .25s;
+  }
+
+  .past .ord {
+    font-size: .5em;
+    letter-spacing: .1em;
+    color: var(--ink-dim);
+    min-width: 2.2em;
+    text-align: right;
+  }
+
+  .past .sep  { font-size: .7em; color: var(--ink-dim); }
+  .past .eff  { color: var(--signal); }
+  .past .comf { color: var(--warm); }
 
   .split {
     display: flex;
@@ -201,22 +240,23 @@
   </div>
 
   <div class="stage">
+    <div class="history" id="history"></div>
     <div class="split">
       <div class="half">
         <div class="pct" id="effPct">50%</div>
-        <div class="name">Efficiency</div>
+        <div class="name" id="effName">Efficiency</div>
       </div>
       <div class="half">
         <div class="pct" id="comfPct">50%</div>
-        <div class="name">Comfort</div>
+        <div class="name" id="comfName">Comfort</div>
       </div>
     </div>
   </div>
 
   <div class="control">
     <div class="ends">
-      <span class="eff">Efficiency</span>
-      <span class="comf">Comfort</span>
+      <span class="eff" id="effEnd">Efficiency</span>
+      <span class="comf" id="comfEnd">Comfort</span>
     </div>
     <input type="range" id="slider" min="0" max="100" step="1" value="50">
     <button class="send" id="send" type="button">Send</button>
@@ -230,6 +270,9 @@
   const status  = document.getElementById('status');
   const statusText = document.getElementById('statusText');
   const sendBtn = document.getElementById('send');
+  const names   = ['effName', 'effEnd'].map(i => document.getElementById(i));
+  const names2  = ['comfName', 'comfEnd'].map(i => document.getElementById(i));
+  const history = document.getElementById('history');
 
   const WS_PORT = 8766;
 
@@ -252,9 +295,38 @@
     }
   });
 
+  // ---- submitted history ---------------------------------------------------
+  // Opacity by age, newest past entry first; anything older is dropped, and the
+  // stage clips whatever still does not fit.
+
+  const FADE = [0.55, 0.35, 0.20, 0.10];
+  let trial = 0;
+
+  function remember(v) {
+    trial += 1;
+
+    const el = document.createElement('div');
+    el.className = 'past';
+    el.innerHTML = `<span class="ord">${trial}</span>`
+                 + `<span class="eff">${100 - v}%</span>`
+                 + `<span class="sep">/</span>`
+                 + `<span class="comf">${v}%</span>`;
+    history.appendChild(el);
+
+    while (history.children.length > FADE.length) {
+      history.removeChild(history.firstElementChild);
+    }
+    const kids = history.children;
+    for (let i = 0; i < kids.length; i++) {
+      kids[i].style.opacity = FADE[kids.length - 1 - i];
+    }
+  }
+
   sendBtn.addEventListener('click', () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ submit: parseInt(slider.value, 10) }));
+    const v = parseInt(slider.value, 10);
+    ws.send(JSON.stringify({ submit: v }));
+    remember(v);
 
     sendBtn.textContent = 'Sent';
     setTimeout(() => { sendBtn.textContent = 'Send'; }, 700);
@@ -269,6 +341,15 @@
       status.classList.add('live');
       statusText.textContent = 'Connected';
       sendBtn.disabled = false;
+    };
+
+    // the computer names the two ends for this run
+    ws.onmessage = (e) => {
+      let msg;
+      try { msg = JSON.parse(e.data); } catch (_) { return; }
+      if (!msg.labels) return;
+      names.forEach(el => { el.textContent = msg.labels[0]; });
+      names2.forEach(el => { el.textContent = msg.labels[1]; });
     };
 
     ws.onclose = () => {

@@ -122,3 +122,46 @@ def gd_plus(F, true_front, ideal, nadir):
         The indicator as a float, 0 when every point of ``F`` is on the front.
     """
     return GDPlus(true_front, zero_to_one=True, ideal=ideal, nadir=nadir)(F)
+
+
+def reference_point(values=None, bounds=None, maximize=None, margin=0.1):
+    """The hypervolume reference in the objectives' own units, (m,).
+
+    The reference is the worst value per objective that still counts: a point
+    beyond it on any objective contributes no hypervolume at all.
+
+    Args:
+        values: (n, m) objective vectors to read the range off, in raw units.
+        bounds: (2, m) declared range instead, `[[low, ...], [high, ...]]`.
+            Exactly one of `values` and `bounds`.
+        maximize: (m,) whether each objective is maximized. Defaults to all
+            minimized, which is the sense botorch states a truth in.
+        margin: the gap past the worst end, as a fraction of the range.
+
+    Returns:
+        (m,) reference, one per objective in column order.
+    """
+    if (values is None) == (bounds is None):
+        raise ValueError('pass exactly one of values and bounds')
+
+    if bounds is None:
+        values     = np.atleast_2d(np.asarray(values, dtype=float))
+        low, high  = values.min(axis=0), values.max(axis=0)
+    else:
+        bounds     = np.asarray(bounds, dtype=float)
+        if bounds.shape[0] != 2:
+            raise ValueError(f'bounds is (2, m) [[low, ...], [high, ...]], got '
+                             f'{bounds.shape}')
+        low, high  = bounds
+
+    maximize = (np.zeros(len(low), dtype=bool) if maximize is None
+                else np.asarray(maximize, dtype=bool).ravel())
+    if len(maximize) != len(low):
+        raise ValueError(f'{len(maximize)} directions for {len(low)} objectives; '
+                         'they are positional, so one per column')
+
+    # push past the bad end: below the low end when maximized, above the high
+    # end when minimized
+    gap = margin * (high - low)
+
+    return np.where(maximize, low - gap, high + gap)

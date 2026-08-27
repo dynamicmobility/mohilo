@@ -346,6 +346,34 @@ class TestSyntheticOracleParams:
         # asdict writes the names as a list, and a list is what json reads back
         assert SyntheticOracleParams(**asdict(params)) == params
 
+    def test_the_reference_point_reaches_the_oracle_it_builds(self):
+        # without it the oracle takes the function's own, so a run's reference
+        # would be silently swapped for a different one when it is read back
+        oracle = SyntheticOracleParams(ref_point=(9.0, 9.0), **self.MO_SPEC).build()
+
+        np.testing.assert_allclose(oracle.ref_point, [9.0, 9.0])
+
+    def test_without_one_the_function_supplies_its_own(self):
+        params = SyntheticOracleParams(**self.MO_SPEC)
+
+        assert params.ref_point is None
+        np.testing.assert_allclose(
+            params.build().ref_point,
+            multi_objective.BraninCurrin().ref_point.numpy())
+
+    def test_the_reference_point_survives_the_round_trip(self):
+        # json reads a tuple back as a list, so it is coerced the way the
+        # objective names are
+        params = SyntheticOracleParams(ref_point=(9.0, 9.0), **self.MO_SPEC)
+
+        assert SyntheticOracleParams(**asdict(params)) == params
+        assert SyntheticOracleParams(ref_point=[9.0, 9.0], **self.MO_SPEC) == params
+
+    def test_a_scalar_truth_refuses_a_reference_point(self):
+        # hypervolume is a multi-objective notion, so a reference is meaningless
+        with pytest.raises(ValueError):
+            SyntheticOracleParams(ref_point=(1.0,), **self.SPEC)
+
     def test_a_name_in_neither_registry_is_refused(self):
         with pytest.raises(ValueError):
             SyntheticOracleParams(func='NotAFunction', objectives=('cost',),

@@ -12,8 +12,8 @@ from pypolar.optimization.objectives import (
     as_bounds,
     sample_actions
 )
-from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
-from pypolar.utils.plotting import plot_test_function, plot_fit_1d, plot_loo_curve, dress_axis
+from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
+from pypolar.utils.plotting import plot_test_function, plot_fit_1d, plot_mo_space, plot_loo_curve, dress_axis
 from pypolar.feedback import (
     AcquisitionFunction,
     AcquisitionParams,
@@ -50,6 +50,7 @@ from pypolar.performance.mo import (pareto_overlay, groundtruth_hypervolume,
                                     normalized_hypervolume_regret,
                                     attained_hypervolume_regret,
                                     front_alignment_regret)
+from pypolar.peripherals.host import chime
 from pypolar.performance.loo import loo, loo_curve
 from pypolar.performance.regret import normalized_inference_regret
 
@@ -94,6 +95,7 @@ __all__ = [
     "get_pareto_statistics",
     "get_nondominated",
     "get_nondominated_tol",
+    "reference_point",
     "hypervolume_from_nondominated",
     "sparsity_from_normalized_nondominated",
     # experiment
@@ -108,8 +110,11 @@ __all__ = [
     # plotting
     "plot_test_function",
     "plot_fit_1d",
+    "plot_mo_space",
     "plot_loo_curve",
     "dress_axis",
+    # peripherals
+    "chime",
     # performance
     "pareto_overlay",
     "groundtruth_hypervolume",

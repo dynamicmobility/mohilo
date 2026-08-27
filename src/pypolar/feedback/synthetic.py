@@ -411,7 +411,8 @@ class MOSyntheticOracle:
         rel_noise_std   : float         = 0.0,
         num_objectives  : int | None    = None,
         measure         : str           = 'range',
-        n_spread        : int           = SPREAD_SAMPLES
+        n_spread        : int           = SPREAD_SAMPLES,
+        ref_point       : np.ndarray | None = None
     ):
         """One oracle, from arguments plain enough to store and replay."""
         truth = construct_function(
@@ -429,7 +430,8 @@ class MOSyntheticOracle:
             rel_noise_std   = rel_noise_std,
             measure         = measure,
             n_spread        = n_spread,
-            seed            = seed
+            seed            = seed,
+            ref_point       = ref_point
         )
 
 @dataclass(frozen=True)
@@ -443,6 +445,10 @@ class SyntheticOracleParams:
             `from_name` takes them.
         num_objectives: m, for the multi-objective families that take it
             (DTLZ*, ZDT*, GMM). Single-objective params leave it None.
+        ref_point: (m,) hypervolume reference in the truth's own units, or None
+            to take the function's own. Recorded here so a metric scores a run
+            against the reference the run was optimized against; a hypervolume
+            is only comparable under one reference. Multi-objective only.
     """
 
     func            : str
@@ -454,12 +460,17 @@ class SyntheticOracleParams:
     measure         : str           = 'range'
     n_spread        : int           = SPREAD_SAMPLES
     num_objectives  : int | None    = None
+    ref_point       : tuple | None  = None
 
     def __post_init__(self):
         # json reads a tuple back as a list, and a bare name is one column
         names = ((self.objectives,) if isinstance(self.objectives, str)
                  else tuple(self.objectives))
         object.__setattr__(self, 'objectives', names)
+        if self.ref_point is not None:
+            # TODO: only this way because of dataclass frozen. does it need to be frozen?
+            object.__setattr__(self, 'ref_point',
+                               tuple(np.ravel(self.ref_point).tolist()))
 
         if self.func not in SYNTHETIC_FUNCTIONS and self.func not in MO_SYNTHETIC_FUNCTIONS:
             raise ValueError(f'{self.func!r} is in neither synthetic registry')
@@ -470,6 +481,9 @@ class SyntheticOracleParams:
             if len(names) != 1:
                 raise ValueError(f'{self.func} has one output column, got '
                                  f'{len(names)} objective names')
+            if self.ref_point is not None:
+                raise ValueError(f'{self.func} is single-objective, so '
+                                 'ref_point does not apply')
 
     @property
     def multi_objective(self):
@@ -496,7 +510,7 @@ class SyntheticOracleParams:
             return SyntheticOracle.from_name(**shared)
 
         oracle = MOSyntheticOracle.from_name(num_objectives=self.num_objectives,
-                                             **shared)
+                                             ref_point=self.ref_point, **shared)
         if len(self.objectives) != len(oracle):
             raise ValueError(f'{self.func} has {len(oracle)} output columns, got '
                              f'{len(self.objectives)} objective names')

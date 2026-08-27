@@ -15,11 +15,10 @@ from matplotlib.animation import PillowWriter
 
 import pypolar as plr
 from pypolar.utils.pareto import get_nondominated
+from pypolar.utils.plotting import plot_mo_space
 
 FPS      = 1.5
 DPI      = 120
-PRED_C   = '#D55E00'      # Okabe-Ito vermillion
-DATA_C   = '#0072B2'      # Okabe-Ito blue
 DATASET  = Path('scripts/output/experiments/20260826_105136/qlognehvi-0.json')
 
 
@@ -80,8 +79,6 @@ def make_gif(dataset: plr.ExperimentDataset, path: Path = None, fps: float = FPS
     truth = dataset.get_groundtruth()
     front = true_front(truth, dataset.get_objectives())
     names = dataset.groundtruth.objectives
-    if front.shape[1] != 2:
-        raise ValueError(f'the objective space is drawn flat, got {front.shape[1]}D')
 
     # one axis box for every frame, so the true front does not move as the gif
     # runs. It spans the front and the reference point, which is the region
@@ -100,22 +97,17 @@ def make_gif(dataset: plr.ExperimentDataset, path: Path = None, fps: float = FPS
             predicted = inferred_front(gp, truth)
 
             ax.clear()
-            ax.plot(front[:, 0], front[:, 1], color='k', lw=1.5, zorder=3,
-                    label='true front')
-            ax.scatter(*predicted.T, s=20, color=PRED_C, alpha=0.8, zorder=4,
-                       label='inferred front (true values)')
-            ax.scatter(*measured.T, s=22, marker='x', lw=1.0, color=DATA_C,
-                       alpha=0.7, zorder=2, label='measured')
-
+            plot_mo_space(
+                ax,
+                true_front = front,
+                measured   = measured,
+                predicted  = predicted,
+                names      = [f'{name} (lower is better)' for name in names],
+                title      = f'{dataset.groundtruth.func}, {dataset.name}, '
+                             f'trial {record.trial}'
+            )
             # ax.set_xlim(low[0], high[0])
             # ax.set_ylim(low[1], high[1])
-            ax.set_xlabel(f'{names[0]} (lower is better)')
-            ax.set_ylabel(f'{names[1]} (lower is better)')
-            ax.set_title(f'{dataset.groundtruth.func}, {dataset.name}, '
-                         f'trial {record.trial}')
-            ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
-            ax.grid(alpha=0.3, lw=0.5)
-            ax.set_axisbelow(True)
             writer.grab_frame()
 
     plt.close(fig)

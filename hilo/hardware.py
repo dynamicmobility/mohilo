@@ -42,7 +42,11 @@ MAXIMIZE         = {METABOLIC: False, COMFORT: True}
 SURVEY_TIMEOUT   = 5.0 
 SURVEY_PERIOD    = 5.0
 METABOLIC_PERIOD = 15.0
-REF_POINT        = np.array([0.0, -1.0]) # TODO: check if obj bounds of ((4,6), (-1, 1)) work for this
+REF_POINT        = plr.reference_point(
+    bounds   = [[3.0, -1.0], [6.0, 1.0]],
+    maximize = [MAXIMIZE[METABOLIC], MAXIMIZE[COMFORT]],
+    margin   = 0.1
+)
 
 OUTPUT_DIR       = Path('hilo/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 
@@ -56,6 +60,9 @@ class Config:
     seed              : int = SEED
 
 def get_metabolic_data(action, trial_num):
+    time.sleep(METABOLIC_PERIOD)
+    for _ in range(3):
+        plr.chime()
     while True:
         ret = logged_input('Please enter metabolic cost (W/kg): ')
         try:
@@ -65,7 +72,7 @@ def get_metabolic_data(action, trial_num):
                          extra=TO_BOTH)
             continue
             
-        ans = logged_input(f'Got {ret} continue? (y/n)? ')
+        ans = logged_input(f'Got {ret} W/kg. Continue? (y/n)? ')
         if ans.lower() == 'y':
             break
     

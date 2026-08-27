@@ -1,3 +1,5 @@
+from itertools import cycle
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -5,6 +7,9 @@ import matplotlib.pyplot as plt
 MODEL_COLOR  = '#D55E00'
 TRUTH_COLOR  = '#000000'
 SAMPLE_COLOR = '#009E73'
+
+# cycled over `overlays`, in the order they are given
+OVERLAY_COLORS = ('#0072B2', '#CC79A7', '#E69F00', '#56B4E9')
 
 # (color, linestyle) cycled over `vlines`, in the order they are given
 VLINE_STYLES = ((MODEL_COLOR, '--'), (TRUTH_COLOR, ':'))
@@ -177,3 +182,60 @@ def plot_loo_curve(
         ax.set_title(title)
 
     return ax
+
+
+def plot_mo_space(
+        ax          : plt.Axes,
+        true_front  : np.ndarray,
+        measured    : np.ndarray = None,
+        predicted   : np.ndarray = None,
+        overlays    : dict = None,
+        names       : tuple = None,
+        title       : str = None
+    ):
+    """Plot one 2D objective space: the truth's Pareto front as a line, the
+    points a run measured and the front a model infers as clouds, and any number
+    of labeled overlays on top.
+
+    Everything arrives already evaluated, and in one common set of units, for
+    the same reason ``plot_test_function`` takes ``y``: the caller owns the
+    groundtruth and the model, so this module stays on plain arrays.
+
+    Args:
+        ax: a ``matplotlib.axes.Axes`` to draw on.
+        true_front: ``(k, 2)`` the truth's own front, sorted along a column so
+            it draws as a line.
+        measured: ``(N, 2)`` values at the actions a run has measured.
+        predicted: ``(k, 2)`` values at the model's inferred Pareto set.
+        overlays: label -> ``(n, 2)`` points, drawn in ``OVERLAY_COLORS`` order.
+        names: the two axis labels, verbatim.
+        title: optional axes title.
+
+    Returns:
+        The ``ax`` that was drawn on, for chaining.
+    """
+    if true_front.shape[1] != 2:
+        raise ValueError(f'the objective space is drawn flat, got '
+                         f'{true_front.shape[1]}D')
+
+    ax.plot(true_front[:, 0], true_front[:, 1], color=TRUTH_COLOR, lw=1.5,
+            zorder=3, label='true front')
+    if measured is not None:
+        ax.scatter(*measured.T, s=22, marker='x', lw=1.0, color=SAMPLE_COLOR,
+                   alpha=0.7, zorder=2, label='measured')
+    if predicted is not None:
+        ax.scatter(*predicted.T, s=20, color=MODEL_COLOR, alpha=0.8, zorder=4,
+                   label='inferred front')
+
+    for (label, points), color in zip((overlays or {}).items(), cycle(OVERLAY_COLORS)):
+        ax.scatter(*np.atleast_2d(points).T, s=90, color=color, zorder=5,
+                   edgecolor=TRUTH_COLOR, lw=0.8, label=label)
+
+    if names is not None:
+        ax.set_xlabel(names[0])
+        ax.set_ylabel(names[1])
+    if title:
+        ax.set_title(title)
+    ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
+
+    return dress_axis(ax)
