@@ -8,7 +8,7 @@ import pypolar as plr
 from tablet.survey import Survey
 import sys
 import logging
-import hilo.log as log
+import hilo.shared.log as log
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +18,9 @@ CONNECT     = False
 EMULATE     = False
 
 if EMULATE:
-    import hilo.simulation as hilo
+    import hilo.shared.simulation as hilo
 else:
-    import hilo.hardware as hilo
+    import hilo.shared.hardware as hilo
 
 sio = socketio.Client()
 

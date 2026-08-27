@@ -7,7 +7,7 @@ import pypolar as plr
 from tablet.survey import Survey
 import numpy as np
 import logging
-from hilo.log import TO_BOTH, logged_input, setup_logger
+from hilo.shared.log import TO_BOTH, logged_input, setup_logger
 
 logger = logging.getLogger(__name__)
 

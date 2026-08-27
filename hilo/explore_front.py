@@ -23,7 +23,7 @@ from pypolar.experiment.dataset import ExperimentDataset
 from tablet.preference import Preference
 import logging
 # from hilo.log import TO_BOTH, setup_logger
-import hilo.log as log
+import hilo.shared.log as log
 logger = logging.getLogger(__name__)
 
 SUBJECT = 'MT01'
@@ -37,9 +37,9 @@ EMULATE = False
 
 sio = socketio.Client()
 if EMULATE:
-    import hilo.simulation as hilo
+    import hilo.shared.simulation as hilo
 else:
-    import hilo.hardware as hilo
+    import hilo.shared.hardware as hilo
 
 if CONNECT:
     i = 0

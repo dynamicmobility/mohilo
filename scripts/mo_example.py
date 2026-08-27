@@ -10,7 +10,7 @@ from linear_operator.utils.warnings import NumericalWarning
 import torch
 import pypolar as plr
 from tqdm import tqdm
-import hilo.simulation as hilo
+import hilo.shared.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 # TODO: go through all the reference setting/computing and min/max objective logic in this codebase
