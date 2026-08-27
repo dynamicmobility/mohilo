@@ -1,202 +1,184 @@
 import time
-from functools import partial
 from pathlib import Path
-
+import socketio
+from dataclasses import asdict
 import numpy as np
-from botorch.acquisition import (
-    LogExpectedImprovement,
-    LogNoisyExpectedImprovement,
-    UpperConfidenceBound,
-    qLogNoisyExpectedImprovement,
-)
-from botorch.sampling import SobolQMCNormalSampler
 import torch
 import pypolar as plr
 from tablet.survey import Survey
+import sys
+import logging
+from hilo.log import TO_BOTH, setup_logger
 
-# TODO: rename and setup for the actual hardware run. make an emulation mode
+logger = logging.getLogger(__name__)
 
-DIM              = 3
-BOX              = 5.0
-SEED             = 95
-GP_NOISE         = plr.NoiseModel.pinned(0.5)
-MIN_LENGTHSCALE  = 0.2
-NUM_QUERIES      = 15
-ACQ_STRAT        = 'lognei'
-REPEATS          = 1
-SURVEY_TIMEOUT   = 10.0 
-SURVEY_PERIOD    = 15.0
-METABOLIC_PERIOD = 15.0
-COMFORT          = 'Comfort'
-METABOLIC        = 'Cost'
+EXO_IP      = "192.168.1.122:5000"
+SUBJECT     = 'MT01'
+CONNECT     = False
+EMULATE     = False
 
-# Acquisition function stuff
-UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations
-NUM_FANTASIES  = 20     # lognei: noiseless incumbents drawn; cost is linear in it
-MC_SAMPLES     = 128    # qlognei: QMC samples per acquisition evaluation
-PRUNE_BASELINE = True   # qlognei: drop measured points that cannot be the best
+if EMULATE:
+    import hilo.simulation as hilo
+else:
+    import hilo.hardware as hilo
 
-METABOLIC_TRUTH = plr.SyntheticOracle(
-    truth = plr.construct_function(
-        func = plr.SYNTHETIC_1D_FUNCTIONS['Levy'],
-        dim  = DIM,
-        box  = BOX,
-        seed = SEED
-    ),
-    rel_noise_std = 0.5,
-)
+sio = socketio.Client()
 
-COMFORT_TRUTH = plr.SyntheticOracle(
-    truth = plr.construct_function(
-        func = plr.SYNTHETIC_1D_FUNCTIONS['DixonPrice'],
-        dim  = DIM,
-        box  = BOX,
-        seed = SEED
-    ),
-    rel_noise_std = 0.3,
-)
+if CONNECT:
+    i = 0
+    while True:
+        try:
+            i += 1
+            sio.connect(f"ws://{EXO_IP}")
+            break
+        except socketio.exceptions.ConnectionError:
+            # prints rather than logs: this runs at import, before setup_logger
+            if i > 5:
+                print('Exceeded maximum number of retries. Exiting...')
+                exit()
+            print('Connection failed. Retrying...')
+            time.sleep(1)
+    else:
+        sio = None
 
-class Exo(plr.Device):
+def send_to_exo(action):
+    logger.info(f'Exo got action {action}')
 
-    def send(self, action):
-        print('Exo got action', action)
-        input('Send action? ')
+    if CONNECT:
+        action_dict = {
+            'h_flex_torque_scale': action[0],
+            'h_ext_torque_scale' : action[1],
+            'hip_delay_idx'      : action[2]
+        }
+        sio.emit("update_inputs", action_dict)
+        logger.info('Successfully sent action.')
+    else:
+        logger.info('Disabled!')
 
-
-def get_data_from_cart(action: np.ndarray):
-    time.sleep(METABOLIC_PERIOD)
-    return METABOLIC_TRUTH(action)
-
-def make_probes(survey: Survey):
-    probes = [
-        plr.Probe(
-            name     = METABOLIC,
-            caller   = get_data_from_cart,
-            obj_name = METABOLIC,
-        ),
-        plr.Probe(
-            name     = COMFORT,
-            caller   = survey.ask,
-            repeats  = REPEATS,
-            obj_name = COMFORT
-        ),
-    ]
-    return probes
-
-
-def make_experiment(probes: list[plr.Probe]):
-    experiment = plr.Logger(
-        objectives   = [
-            plr.Objective.from_empty(
-                name          = METABOLIC,
-                maximize      = False,
-                action_bounds = (-BOX, BOX)
-            ),
-            plr.Objective.from_empty(
-                name          = COMFORT,
-                maximize      = True,
-                action_bounds = (-BOX, BOX)
-            )
-        ],
-        probes       = probes,
-        device       = Exo(),
-        action_names = ['x', 'y', 'z']
-    )
-    return experiment
-
-def acquisition_factory(strategy, seed):
-    if strategy == 'lognei' and plr.NoiseModel.coerce(GP_NOISE).is_fitted:
-        raise ValueError("'lognei' needs a FixedNoiseGaussianLikelihood, so set "
-                         'GP_NOISE = plr.NoiseModel.pinned(...) to use it')
-
-    factories = {
-        'ucb'    : partial(
-            UpperConfidenceBound, 
-            beta = UCB_BETA
-        ),
-        'logei'  : LogExpectedImprovement,
-        'lognei' : partial(
-            LogNoisyExpectedImprovement, 
-            num_fantasies = NUM_FANTASIES
-        ),
-        'qlognei': partial(
-            qLogNoisyExpectedImprovement,
-            sampler        = SobolQMCNormalSampler(torch.Size([MC_SAMPLES]), seed=seed),
-            prune_baseline = PRUNE_BASELINE
-        )
-    }
-    if strategy not in factories:
-        raise ValueError(f'no acquisition for {strategy!r}')
-
-    return factories[strategy]
-
-def fit_gp(objective):
-    return plr.BoTorchGP(
-        objective           = objective,
-        noise               = GP_NOISE,
+def fit_gp(
+    objective   : plr.DecoupledObjectives,
+    noise       : plr.NoiseModel = None,
+    hypers      : plr.GPHyperparameters = None
+):
+    return plr.DecoupledMOGP(
+        objectives          = objective,
+        noise               = hilo.GP_NOISE,
         fit_hyperparameters = True,
-        min_length_scale    = MIN_LENGTHSCALE,
+        min_length_scale    = hilo.MIN_LENGTHSCALE,
     )
 
-def run_experiment(experiment: plr.Logger, acqf: plr.AcquisitionFunction):
-    for i in range(NUM_QUERIES):
-        objective = experiment.objectives[COMFORT]
-        if not len(objective.ydata):
+def run_experiment(
+    experiment        : plr.Logger,
+    acqf              : plr.AcquisitionFunction,
+    dataset           : plr.ExperimentDataset,
+):
+    gp = None
+    for i in range(hilo.NUM_QUERIES):
+        if i < hilo.NUM_RANDOM:
             # randomly sample if no data is collected
+            source = 'random'
             action = plr.sample_actions(
-                bounds = np.array([[-BOX] * DIM, [BOX] * DIM], dtype=float),
+                bounds = hilo.BOUNDS,
                 n      = 1,
                 kind   = 'uniform',
-                seed   = SEED + i
+                seed   = hilo.SEED + i,
+                dim    = hilo.DIM
             )[0]
         else:
             # fit gp + Acquisition strategy for the rest
-            gp = fit_gp(objective)
+            source = dataset.acquisition.strategy
             action = acqf.query(gp, q=1)[0]
 
         experiment.begin_trial(
-            action=action,
-            args={
-                METABOLIC: (action,),
-                COMFORT:   (action, i + 1)
+            action         = action,
+            device_send_fn = send_to_exo,
+            args           = {
+                hilo.METABOLIC: (action, i + 1),
+                hilo.COMFORT:   (action, i + 1, hilo.SURVEY_TIMEOUT, hilo.SURVEY_PERIOD)
             }
         )
         
-        start = time.time()
-        while not experiment.all_measurements_completed:
-            print('Waiting...', round(time.time() - start, 1), end='\t\t\r')
-            time.sleep(0.1)
-
+        experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
+        
+        gp = fit_gp(experiment.objectives)
+        dataset.add_trial(
+            objectives  = experiment.objectives,
+            gp          = gp,
+            action      = action,
+            source      = source,
+        )
+        logger.info(f'Wrote {dataset.save()}')
     
-    return experiment
+    # the run's final state: every measurement, and the fit to all of them
+    gp = fit_gp(experiment.objectives)
+    dataset.add_trial(
+        objectives  = experiment.objectives,
+        gp          = gp,
+    )
+    
+    return experiment, dataset
 
 def connect_to_ipad():
-    ipad = Survey(timeout=SURVEY_TIMEOUT, period=SURVEY_PERIOD)
-    print('Waiting for the iPad...')
+    if EMULATE:
+        return None
+    ipad = Survey(
+        timeout = hilo.SURVEY_TIMEOUT,
+        period  = hilo.SURVEY_PERIOD,
+        logger  = logger
+    )
+    logger.info('Waiting for the iPad...', extra=TO_BOTH)
     ipad.wait_for_ipad()
     return ipad
 
-def main():
-    torch.manual_seed(SEED)
+def setup_experiment(ipad):
+    probes     = hilo.make_probes_mo(ipad, multithread=hilo.MULTITHREAD)
+    experiment = hilo.make_experiment_mo(
+        probes    = probes,
+        maximize  = hilo.MAXIMIZE
+    )
+    acqf_params = plr.AcquisitionParams(
+        strategy          = hilo.ACQ_STRAT,
+        seed              = hilo.SEED,
+        num_objectives    = hilo.NUM_OBJECTIVES,
+        raw_ref_point     = hilo.REF_POINT,
+        **hilo.ACQ_KWARGS
+    )
+    return experiment, acqf_params
 
-    ipad       = connect_to_ipad()
-    probes     = make_probes(ipad)
+def main():
+    torch.manual_seed(hilo.SEED)
+    hilo.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    setup_logger(hilo.OUTPUT_DIR / f'{SUBJECT}.log')
     
-    experiment = make_experiment(probes)
-    acqf       = plr.AcquisitionFunction(
-        acqf = acquisition_factory(strategy=ACQ_STRAT, seed=SEED)
+    ipad                    = connect_to_ipad()
+    experiment, acqf_params = setup_experiment(ipad)
+    
+    dataset = plr.ExperimentDataset(
+        name         = SUBJECT, # TODO: add a date here
+        acquisition  = acqf_params,
+        config       = asdict(
+            hilo.Config(
+                gp_noise          = plr.NoiseModel.coerce(hilo.GP_NOISE),
+                min_lengthscale   = hilo.MIN_LENGTHSCALE,
+                num_queries       = hilo.NUM_QUERIES,
+                repeats           = hilo.REPEATS,
+                dim               = hilo.DIM,
+            )
+        ),
+        groundtruth  = hilo.GROUND_TRUTH_PARAMS if EMULATE else None,
+        path         = hilo.OUTPUT_DIR / (SUBJECT + f'.json')
     )
 
     try:
-        experiment = run_experiment(experiment, acqf)
+        experiment, dataset = run_experiment(
+            experiment        = experiment,
+            acqf              = acqf_params.build(),
+            dataset           = dataset,
+        )
     finally:
-        ipad.close()
-
-    for name in experiment.objectives.names:
-        objective = experiment.objectives[name]
-        print(name, 'values ', objective.ydata)
-        print(name, 'actions', objective.xdata.tolist())
+        logger.info(f'Wrote {dataset.save()}') # change this to save per trial...
+        if CONNECT: ipad.close()
 
 
 if __name__ == '__main__':

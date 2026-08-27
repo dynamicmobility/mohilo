@@ -135,7 +135,6 @@ class AffineTransform:
             shift = -low
         )
 
-
 @dataclass
 class Objective:
     name:     str
@@ -174,6 +173,10 @@ class Objective:
                 sign = self.sign
             )
             self.standard_y = self.ytransform(self.ydata)
+            
+        if self.xdata.shape[0] != self.ydata.shape[0]:
+            # TODO: add test for this
+            raise Exception(f'Number of actions ({self.xdata.shape[0]}) and feedback points ({self.xdata.shape[0]}) do not match.')
 
     def _check_inside_bounds(self):
         """Actions must lie in the declared box. The slack is float round-off:

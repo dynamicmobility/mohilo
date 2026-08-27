@@ -34,6 +34,7 @@ import socket
 import subprocess
 import threading
 import time
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -119,6 +120,9 @@ class _PageHandler(http.server.SimpleHTTPRequestHandler):
         if not self.quiet:
             super().log_message(fmt, *args)
 
+# kept local rather than imported: this module is standalone. The key is the
+# contract with hilo.log.ConsoleFilter.
+TO_BOTH = {"console": True}
 
 class Survey:
     """A rating scale on an iPad, armed one question at a time.
@@ -132,7 +136,7 @@ class Survey:
         quiet: silences the HTTP request log.
     """
 
-    def __init__(self, timeout=TIMEOUT, period=PERIOD, http_port=HTTP_PORT,
+    def __init__(self, logger: logging.Logger, timeout=TIMEOUT, period=PERIOD, http_port=HTTP_PORT,
                  ws_port=WS_PORT, quiet=True):
         # set before the servers start, since a client may connect immediately
         self.timeout   = float(timeout)
@@ -149,6 +153,7 @@ class Survey:
         self._stop      = None
         self._connected = threading.Event()
         self._ready     = threading.Event()
+        self.logger = logger
 
         handler = functools.partial(
             type('_Handler', (_PageHandler,), {'quiet': quiet}),
@@ -163,11 +168,11 @@ class Survey:
 
         ips = local_ips()
         if len(ips) == 1:
-            print(f'Open this on the iPad:  http://{ips[0]}:{http_port}/{PAGE}')
+            logger.info(f'Open this on the iPad:  http://{ips[0]}:{http_port}/{PAGE}', extra=TO_BOTH)
         else:
-            print('Open one of these on the iPad (whichever shares its Wi-Fi):')
+            logger.info('Open one of these on the iPad (whichever shares its Wi-Fi):', extra=TO_BOTH)
             for ip in ips:
-                print(f'    http://{ip}:{http_port}/{PAGE}')
+                logger.info(f'    http://{ip}:{http_port}/{PAGE}', extra=TO_BOTH)
 
     # ---- one question --------------------------------------------------------
 
@@ -203,7 +208,6 @@ class Survey:
             self.disarm()
 
         self.hold(period - (time.monotonic() - start))
-
         return np.empty(0) if value is None else np.atleast_1d(float(value))
 
     def hold(self, seconds):
@@ -292,7 +296,7 @@ class Survey:
     async def _handler(self, ws, *_):
         self._clients.add(ws)
         self._connected.set()
-        print('iPad connected')
+        self.logger.debug('iPad connected')
         try:
             async for raw in ws:
                 try:
@@ -311,7 +315,7 @@ class Survey:
             self._clients.discard(ws)
             if not self._clients:
                 self._connected.clear()
-            print('iPad disconnected')
+            self.logger.debug('iPad disconnected')
 
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()

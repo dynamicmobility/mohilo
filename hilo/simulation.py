@@ -4,110 +4,115 @@ from dataclasses import dataclass
 from pathlib import Path
 from linear_operator.utils.warnings import NumericalWarning
 import pypolar as plr
+import numpy as np
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
-DIM              = 3
-BOX              = 5.0
-SEED             = 95
-TRUE_NOISE       = 0.1 #0.25
-NUM_QUERIES      = DIM * 13
-ACQ_STRATS       = ['ucb', 'logei', 'qlognei', 'ts']
-REPEATS          = 1
+MULTITHREAD = False 
+
+# Objectives
+NUM_OBJECTIVES   = 2
 COMFORT          = 'Comfort'
 METABOLIC        = 'Metabolic Cost'
-MULTITHREAD      = False
+REPEATS          = {METABOLIC: 1, COMFORT: 1}
+MAXIMIZE         = {METABOLIC: False, COMFORT: False}
+SURVEY_TIMEOUT   = 0.0
+SURVEY_PERIOD    = 0.0
+METABOLIC_PERIOD = 0.0
+REF_MARGIN       = 0.1  # reference sits this fraction of the front's extent past its nadir
+TRUE_NOISE       = 0.5
 
-RUNS_PER_ACQF = 5
+# Optimization
+SEED             = 95
+NUM_QUERIES      = 45
+ACQ_STRAT        = 'qlognehvi'
+ACQ_KWARGS       = {}
+GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
+MIN_LENGTHSCALE  = 0.2
+NUM_RANDOM       = 3
 
-OUTPUT_DIR       = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
-ACQ_KWARGS       = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
-GROUND_TRUTH_1D = plr.SyntheticOracleParams(
-    func            = 'Levy',
-    objectives      = (COMFORT,),
-    dim             = DIM,
-    box             = BOX,
-    seed            = SEED,
-    rel_noise_std   = TRUE_NOISE,
-)
-
-GROUND_TRUTH_2D = plr.SyntheticOracleParams(
-    func          = 'BraninCurrin',
+GT_NAME = 'DTLZ2'
+GROUND_TRUTH_PARAMS = plr.SyntheticOracleParams(
+    func          = GT_NAME,
     objectives    = (METABOLIC, COMFORT),
-    dim           = 2,
-    box           = None,     # BraninCurrin takes no bounds; its own are [0, 1]^2
+    dim           = 3, #if GT_NAME == 'DTLZ2' else 2,
+    box           = None, # mo functions dont take bounds
     seed          = SEED,
-    rel_noise_std = TRUE_NOISE
+    rel_noise_std = TRUE_NOISE,
+    measure = 'std'
 )
 
-COMFORT_TRUTH   = GROUND_TRUTH_1D.build()
-MO_TRUTH        = GROUND_TRUTH_2D.build()
+MO_TRUTH        = GROUND_TRUTH_PARAMS.build()
 
-# read off the truth rather than restated, so the action frame the GP is fit in
-# cannot drift from the domain the groundtruth is defined on
-MO_DIM          = MO_TRUTH.objectives[0].truth.dim
-MO_BOUNDS       = plr.as_bounds(MO_TRUTH.objectives[0].truth.bounds)
+
+def reference_point(
+    oracle      : plr.MOSyntheticOracle,
+    names       : tuple[str, ...],
+    maximize    : dict[str, bool],
+    margin      : float = REF_MARGIN
+):
+    """The hypervolume reference in the objectives' own units, (m,).
+
+    Args:
+        oracle: the groundtruth, for its `scan_values`.
+        names: one objective name per column, in the oracle's column order.
+        maximize: name -> direction, as `Objective` takes it.
+        margin: the gap past the worst value, as a fraction of the range.
+
+    Returns:
+        (m,) reference, one per objective in column order.
+    """
+    signs  = np.array([1.0 if maximize[name] else -1.0 for name in names])
+    values = signs * oracle.scan_values          # larger is better, every column
+    worst  = values.min(axis=0)
+    return signs * (worst - margin * (values.max(axis=0) - worst))
+
+
+REF_POINT       = reference_point(
+    oracle   = MO_TRUTH,
+    names    = GROUND_TRUTH_PARAMS.objectives,
+    maximize = MAXIMIZE
+)
+
+# Actions
+DIM             = MO_TRUTH.objectives[0].truth.dim
+BOUNDS          = plr.as_bounds(MO_TRUTH.objectives[0].truth.bounds)
+ACTION_NAMES     = [f'x{i}' for i in range(DIM)]
+OUTPUT_DIR       = Path('hilo/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 
 @dataclass
-class Simulation1D:
+class Config:
     gp_noise          : plr.NoiseModel
     min_lengthscale   : float
     num_queries       : int
-    repeats           : int
+    repeats           : dict[str, int]
     dim               : int = DIM
     seed              : int = SEED
-    true_noise        : float = TRUE_NOISE
-    noise_measure     : str = 'range'
 
 
-
-
-def make_probes():
-    probes = [
-        plr.Probe(
-            name              = COMFORT,
-            caller            = COMFORT_TRUTH,
-            repeats           = REPEATS,
-            obj_name          = COMFORT,
-            separate_thread   = MULTITHREAD
-        ),
-    ]
-    return probes
-
-
-def make_probes_mo():
+def make_probes_mo(ipad=None, multithread=False):
     """One probe per objective, each measuring its own column of the MO truth.
     """
     probes = [
         plr.Probe(
-            name              = name,
-            caller            = MO_TRUTH.objective(i),
-            repeats           = REPEATS,
-            obj_name          = name,
-            separate_thread   = MULTITHREAD
+            name              = METABOLIC,
+            caller            = lambda action, trial_num: MO_TRUTH.objective(0)(action),
+            repeats           = REPEATS[METABOLIC],
+            obj_name          = METABOLIC,
+            separate_thread   = multithread
+        ),
+        plr.Probe(
+            name              = COMFORT,
+            caller            = lambda action, trial, timeout, period: MO_TRUTH.objective(1)(action),
+            repeats           = REPEATS[COMFORT],
+            obj_name          = COMFORT,
+            separate_thread   = multithread
         )
-        for i, name in enumerate(GROUND_TRUTH_2D.objectives)
     ]
     return probes
 
-
-def make_experiment_1d(probes: list[plr.Probe]):
-    experiment = plr.Logger(
-        objectives   = [
-            plr.Objective.from_empty(
-                name          = COMFORT,
-                maximize      = False,
-                action_bounds = (-BOX, BOX)
-            )
-        ],
-        probes       = probes,
-        device       = plr.Device(),
-        action_names = [f'x{i}' for i in range(DIM)],
-    )
-    return experiment
-
 def make_experiment_mo(
-    probes: list[plr.Probe],
+    probes  : list[plr.Probe],
     maximize: dict[str, bool]
 ):
     experiment = plr.Logger(
@@ -115,12 +120,11 @@ def make_experiment_mo(
             plr.Objective.from_empty(
                 name          = name,
                 maximize      = maximize[name],
-                action_bounds = MO_BOUNDS
+                action_bounds = BOUNDS
             )
-            for name in GROUND_TRUTH_2D.objectives
+            for name in (METABOLIC, COMFORT)
         ],
         probes       = probes,
-        device       = plr.Device(),
-        action_names = [f'x{i}' for i in range(MO_DIM)],
+        action_names = ACTION_NAMES
     )
     return experiment
