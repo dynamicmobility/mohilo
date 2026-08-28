@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 EXO_IP      = "192.168.1.122:5000"
 SUBJECT     = 'MT01'
-CONNECT     = False
+CONNECT     = True
 EMULATE     = False
 
 if EMULATE:
@@ -173,21 +173,23 @@ def main():
     ipad                    = connect_to_ipad()
     experiment, acqf_params = setup_experiment(ipad)
     
-    dataset = plr.ExperimentDataset(
-        name         = SUBJECT, # TODO: add a date here
-        acquisition  = acqf_params,
-        config       = asdict(
-            hilo.Config(
-                gp_noise          = plr.NoiseModel.coerce(hilo.GP_NOISE),
-                min_lengthscale   = hilo.MIN_LENGTHSCALE,
-                num_queries       = hilo.NUM_QUERIES,
-                repeats           = hilo.REPEATS,
-                dim               = hilo.DIM,
-            )
-        ),
-        groundtruth  = hilo.GROUND_TRUTH_PARAMS if EMULATE else None,
-        path         = hilo.OUTPUT_DIR / (SUBJECT + f'.json')
-    )
+    # dataset = plr.ExperimentDataset(
+    #     name         = SUBJECT, # TODO: add a date here
+    #     acquisition  = acqf_params,
+    #     config       = asdict(
+    #         hilo.Config(
+    #             gp_noise          = plr.NoiseModel.coerce(hilo.GP_NOISE),
+    #             min_lengthscale   = hilo.MIN_LENGTHSCALE,
+    #             num_queries       = hilo.NUM_QUERIES,
+    #             repeats           = hilo.REPEATS,
+    #             dim               = hilo.DIM,
+    #         )
+    #     ),
+    #     groundtruth  = hilo.GROUND_TRUTH_PARAMS if EMULATE else None,
+    #     path         = hilo.OUTPUT_DIR / (SUBJECT + f'.json')
+    # )
+    
+    dataset = plr.ExperimentDataset.load('hilo/output/experiments/20260827_154607/MT01.json')
 
     try:
         experiment, dataset = run_experiment(

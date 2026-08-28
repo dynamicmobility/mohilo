@@ -17,7 +17,7 @@ MULTITHREAD = True
 
 # Actions
 DIM              = 3
-BOUNDS           = [[0.0, 0.0, 0.0], [5.0, 5.0, 5.0]]
+BOUNDS           = [[0.0, 0.0, 0.0], [0.25, 0.25, 75.0]]
 ACTION_NAMES     = [
     'h_flex_torque_scale',
     'h_ext_torque_scale',
@@ -26,7 +26,7 @@ ACTION_NAMES     = [
 
 # Optimization
 SEED             = 95
-NUM_QUERIES      = 10 #45
+NUM_QUERIES      = 20
 ACQ_STRAT        = 'qlognparego'
 ACQ_KWARGS       = {}
 GP_NOISE         = plr.NoiseModel.prior(0.5)
@@ -43,7 +43,7 @@ SURVEY_TIMEOUT   = 30.0
 SURVEY_PERIOD    = 30.0
 METABOLIC_PERIOD = 120.0
 REF_POINT        = plr.reference_point(
-    bounds   = [[3.0, -1.0], [6.0, 1.0]],
+    bounds   = [[3.0, -1.0], [6.0, 5.0]],
     maximize = [MAXIMIZE[METABOLIC], MAXIMIZE[COMFORT]],
     margin   = 0.1
 )

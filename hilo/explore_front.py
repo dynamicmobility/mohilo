@@ -27,8 +27,8 @@ import hilo.shared.log as log
 logger = logging.getLogger(__name__)
 
 SUBJECT = 'MT01'
-DATASET = Path('hilo/output/experiments/20260827_001745/MT01.json')
-CONNECT = False
+DATASET = Path('hilo/output/experiments/20260827_154607/MT01.json')
+CONNECT = True
 EXO_IP      = "192.168.1.122:5000" # move to hilo.hardware
 SCAN = 4096     # Sobol points the front is read off
 SEED = 95
