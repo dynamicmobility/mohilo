@@ -11,7 +11,10 @@ import json
 import numpy as np
 import pytest
 
+from pypolar.experiment.dataset import ExperimentDataset
 from pypolar.experiment.ledger import Ledger, fingerprint, read_events
+from pypolar.experiment.logger import Logger
+from pypolar.experiment.probe import Probe
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
 
@@ -319,3 +322,129 @@ def test_trials_reports_the_completed_ones(path):
     assert trials[0]['source'] == 'seed'
     np.testing.assert_allclose(trials[0]['action'], [1.0, 2.0])
     np.testing.assert_allclose(trials[0]['values']['cost'], [10.0])
+
+
+# ---- resuming a logger from a dataset ---------------------------------------
+
+"""A `Logger` is resumed from an `ExperimentDataset` rather than from a ledger:
+a dataset stores each objective's whole xdata/ydata per trial, so the last
+record already holds every measurement the run took and nothing is replayed."""
+
+
+def logger_at(objs=None):
+    """A two-objective logger over the same box, with a probe for each."""
+    objs = objectives() if objs is None else objs
+
+    return Logger(
+        objectives   = objs,
+        probes       = [Probe(name=name, caller=lambda: 0.0, obj_name=name)
+                        for name in objs.names],
+        action_names = ['x0', 'x1'],
+    )
+
+
+def dataset_of(trials, name='run'):
+    """A dataset built by applying `trials` -- (action, values) pairs -- to a
+    fresh pair of objectives, one recorded step each."""
+    objs = objectives()
+    data = ExperimentDataset(name=name, config=CONFIG)
+    for action, values in trials:
+        for obj_name, value in values.items():
+            objs.add_point(obj_name, np.atleast_2d(action), [value])
+        data.add_trial(objs, action=np.asarray(action, dtype=float), source='test')
+
+    return data, objs
+
+
+def test_resume_restores_every_measurement():
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0}),
+                          ([1.0, 2.0], {'cost': 2.0, 'comfort': 4.0})])
+    experiment = logger_at()
+
+    assert experiment.resume(data) == 2
+    np.testing.assert_allclose(experiment.objectives['cost'].ydata, [1.0, 2.0])
+    np.testing.assert_allclose(experiment.objectives['cost'].xdata,
+                               [[0.0, 0.0], [1.0, 2.0]])
+    np.testing.assert_allclose(experiment.objectives['comfort'].ydata, [3.0, 4.0])
+
+
+def test_resume_reads_a_file_as_well_as_an_object(tmp_path):
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at()
+
+    assert experiment.resume(data.save(tmp_path / 'run.json')) == 1
+    np.testing.assert_allclose(experiment.objectives['cost'].ydata, [1.0])
+
+
+def test_resume_keeps_the_declared_direction_and_box():
+    """Direction and bounds ride along in the record, so a restored objective is
+    the one that was declared, not a fresh guess from the data."""
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at()
+    experiment.resume(data)
+
+    assert experiment.objectives['cost'].maximize is False
+    assert experiment.objectives['comfort'].maximize is True
+    np.testing.assert_allclose(experiment.objectives['cost'].action_box(),
+                               [[-5.0, -5.0], [5.0, 5.0]])
+
+
+def test_resume_does_not_count_a_closing_record_as_a_trial():
+    """The record a finished run appends carries the final fit and no action, so
+    the loop picks up where the actions stopped."""
+    data, objs = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    data.add_trial(objs)
+
+    assert logger_at().resume(data) == 1
+
+
+def test_resume_of_an_empty_dataset_leaves_the_objectives_alone():
+    experiment = logger_at()
+
+    assert experiment.resume(ExperimentDataset(name='run')) == 0
+    assert len(experiment.objectives['cost'].ydata) == 0
+
+
+def test_resume_refuses_a_run_over_different_objectives():
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at(DecoupledObjectives([
+        Objective.from_empty('cost',   maximize=False, action_bounds=(-5.0, 5.0)),
+        Objective.from_empty('effort', maximize=True,  action_bounds=(-5.0, 5.0)),
+    ]))
+
+    with pytest.raises(ValueError, match='effort'):
+        experiment.resume(data)
+
+
+def test_resume_refuses_actions_of_a_different_width():
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at()
+    experiment.action_names = ['x0', 'x1', 'x2']
+
+    with pytest.raises(ValueError, match='action'):
+        experiment.resume(data)
+
+
+def test_resume_refuses_while_a_trial_is_open():
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at()
+    experiment.current_action = np.array([0.0, 0.0])
+
+    with pytest.raises(RuntimeError):
+        experiment.resume(data)
+
+
+def test_a_resumed_logger_goes_on_recording_into_the_restored_objectives():
+    """The point of resuming: a trial run after it appends to the measurements
+    the saved run left, rather than to an empty objective."""
+    data, _ = dataset_of([([0.0, 0.0], {'cost': 1.0, 'comfort': 3.0})])
+    experiment = logger_at()
+    experiment.resume(data)
+
+    experiment.begin_trial(np.array([1.0, 1.0]))
+    experiment.wait_for_measurements()
+    experiment.end_trial()
+
+    np.testing.assert_allclose(experiment.objectives['cost'].ydata, [1.0, 0.0])
+    np.testing.assert_allclose(experiment.objectives['cost'].xdata,
+                               [[0.0, 0.0], [1.0, 1.0]])

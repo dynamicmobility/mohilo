@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from pypolar.experiment.dataset import ExperimentDataset
 from pypolar.experiment.probe import Probe
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
@@ -131,6 +132,45 @@ class Logger:
 
         self.current_action = None
 
-    def resume(self, experiment_path: Path):
-        """Resumes an experiment from path"""
-        pass
+    def resume(self, dataset: ExperimentDataset | Path | str):
+        """Restores the measurements a saved run.
+        Args:
+            dataset: an `ExperimentDataset`, or a path to one `save` wrote.
+
+        Returns:
+            the number of trials whose action was applied, which is the index
+            the loop picks up at. A run's closing record carries no action, so
+            it does not count.
+
+        Raises:
+            RuntimeError: a trial is open.
+            ValueError: the record's objectives are not the declared ones, or
+                its actions have a different number of dimensions.
+        """
+        if self.current_action is not None:
+            raise RuntimeError('a trial is open; end it before resuming')
+
+        if not isinstance(dataset, ExperimentDataset):
+            dataset = ExperimentDataset.load(Path(dataset))
+
+        if not len(dataset):
+            return 0
+
+        measurements = dataset.trials[-1].measurements
+        if set(measurements) != set(self.objectives.names):
+            raise ValueError(f'{dataset.name} recorded {sorted(measurements)}, '
+                             f'not the declared {sorted(self.objectives.names)}')
+
+        restored = [Objective.from_record(measurements[name])
+                    for name in self.objectives.names]
+
+        if self.action_names is not None:
+            dims = {obj.xdata.shape[1] for obj in restored if obj.xdata.size}
+            if dims and dims != {len(self.action_names)}:
+                raise ValueError(f'{dataset.name} recorded {dims} action '
+                                 f'dimensions, expected {len(self.action_names)}: '
+                                 f'{self.action_names}')
+
+        self.objectives = DecoupledObjectives(restored)
+
+        return len(dataset.get_actions())

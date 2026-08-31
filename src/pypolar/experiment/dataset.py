@@ -91,6 +91,8 @@ class ExperimentDataset:
 
     Attributes:
         name: what the run is called.
+        subject: who it was run on.
+        timestamp: when the run began, as ISO 8601. 
         acquisition: the arguments the run's acquisition was built from, or
             None when nothing acquired.
         groundtruth: the arguments the run's oracle was built from, or None
@@ -102,6 +104,8 @@ class ExperimentDataset:
     """
 
     name         : str
+    subject      : str | None                    = None
+    timestamp    : str | None                    = None
     acquisition  : AcquisitionParams | None      = None
     groundtruth  : SyntheticOracleParams | None  = None
     config       : dict                          = field(default_factory=dict)
@@ -113,6 +117,69 @@ class ExperimentDataset:
 
     def __getitem__(self, trial):
         return self.trials[trial]
+
+    def __str__(self):
+        """Pretty-print
+        """
+        if self.timestamp is None:
+            raise ValueError(f'{self.name} recorded no timestamp; it predates '
+                             'the field, and a directory name is not a record '
+                             'of when a run was taken')
+
+        sources = {source: self.get_sources().count(source)
+                   for source in dict.fromkeys(self.get_sources())}
+        lines = [
+            f'{self.subject or self.name} from {self.path}',
+            f'  run started     : {self.timestamp}',
+            f'  trials recorded : {len(self)}',
+            f'  actions applied : {len(self.get_actions())}',
+            f'  chosen by       : {sources or "nothing"}',
+            f'  acquisition     : {None if self.acquisition is None else self.acquisition.strategy}',
+            f'  fingerprint     : {fingerprint(self.config)}',
+        ]
+        for name, record in (self.trials[-1].measurements if len(self) else {}).items():
+            ydata = np.asarray(record['ydata'], dtype=float)
+            span  = ('empty' if not ydata.size
+                     else f'[{ydata.min():.4g}, {ydata.max():.4g}]')
+            lines.append(f'  {name:<15} : N={ydata.size}, range {span}')
+
+        return '\n'.join(lines)
+
+    def resume(self, prior):
+        """Carries a prior run's trials into this one, and reports where its
+        loop stopped.
+
+        Args:
+            prior: the `ExperimentDataset` to carry on from.
+
+        Returns:
+            the number of applied actions, which is the trial the loop picks
+            up at.
+
+        Raises:
+            ValueError: `prior` recorded no `timestamp`, or was taken on a
+                different subject.
+        """
+        if prior.timestamp is None:
+            raise ValueError(f'{prior.name} recorded no timestamp; it cannot be '
+                             'resumed, since there is no trustworthy record of '
+                             'when it was taken')
+
+        if None not in (prior.subject, self.subject) and prior.subject != self.subject:
+            raise ValueError(f'{prior.path} was taken on {prior.subject}, not '
+                             f'{self.subject}')
+
+        if fingerprint(prior.config) != fingerprint(self.config):
+            print(f'WARNING in ExperimentDataset.resume: {prior.path} was run '
+                  'under a different configuration; carrying it on anyway')
+
+        trials = list(prior.trials)
+        while trials and trials[-1].action is None:
+            trials.pop()
+
+        self.trials = trials
+
+        return len(self.get_actions())
 
     def add_trial(self, objectives, gp=None, action=None, source=None, aux=None):
         """Records one step, and returns the `TrialDataset` it appended.
@@ -157,6 +224,8 @@ class ExperimentDataset:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             'name'        : self.name,
+            'subject'     : self.subject,
+            'timestamp'   : self.timestamp,
             'fingerprint' : fingerprint(self.config),
             'config'      : self.config,
             'acquisition' : None if self.acquisition is None
@@ -180,6 +249,8 @@ class ExperimentDataset:
         groundtruth = payload['groundtruth']
         dataset     = cls(
             name        = payload['name'],
+            subject     = payload.get('subject'),
+            timestamp   = payload.get('timestamp'),
             acquisition = None if acquisition is None
                           else AcquisitionParams(**acquisition),
             groundtruth = None if groundtruth is None

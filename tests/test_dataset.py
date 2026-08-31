@@ -125,6 +125,40 @@ class TestSaveAndLoad:
         first = dataset.save(tmp_path / 'run.json')
         assert dataset.save() == first
 
+    def test_who_and_when_are_written_and_come_back(self, objectives, tmp_path):
+        data = ExperimentDataset(name='ucb', subject='MT01',
+                                 timestamp='2026-08-27T15:46:07')
+        back = ExperimentDataset.load(data.save(tmp_path / 'run.json'))
+
+        assert (back.subject, back.timestamp) == ('MT01', '2026-08-27T15:46:07')
+
+    def test_a_run_that_recorded_neither_writes_them_as_null(self, dataset, tmp_path):
+        payload = json.loads(dataset.save(tmp_path / 'run.json').read_text())
+
+        assert payload['subject'] is None and payload['timestamp'] is None
+
+    def test_a_file_written_before_the_fields_existed_still_loads(self, dataset, tmp_path):
+        """Backwards compatibility: the keys are read with `get`, so a run saved
+        by an older version comes back with them as None rather than raising."""
+        path    = dataset.save(tmp_path / 'run.json')
+        payload = json.loads(path.read_text())
+        path.write_text(json.dumps({key: value for key, value in payload.items()
+                                    if key not in ('subject', 'timestamp')}))
+
+        older = ExperimentDataset.load(path)
+
+        assert (older.subject, older.timestamp) == (None, None)
+        assert len(older) == 2                        # the rest is unaffected
+
+    def test_the_timestamp_is_the_runs_own_not_the_files(self, tmp_path):
+        """It records when the run began, so re-saving does not move it."""
+        data = ExperimentDataset(name='ucb', timestamp='2026-08-27T15:46:07')
+        data.save(tmp_path / 'run.json')
+        data.save(tmp_path / 'again.json')
+
+        assert ExperimentDataset.load(tmp_path / 'again.json').timestamp \
+            == '2026-08-27T15:46:07'
+
     def test_the_trials_come_back(self, saved, dataset):
         assert len(saved) == len(dataset)
         assert saved.get_sources() == ['random', 'ucb']
@@ -276,3 +310,115 @@ class TestGetGroundtruthAndAcquisition:
         action = saved.get_acquisition().query(saved.get_model(-1))
 
         assert acqf_bounds_hold(action)
+
+
+# ---- the summary -----------------------------------------------------------
+
+class TestStr:
+
+    def test_it_reports_who_when_and_how_far(self, dataset):
+        dataset.subject, dataset.timestamp = 'MT01', '2026-08-27T15:46:07'
+        report = str(dataset)
+
+        assert report.startswith('MT01 from')
+        assert 'run started     : 2026-08-27T15:46:07' in report
+        assert 'trials recorded : 2' in report
+        assert 'actions applied : 2' in report
+        assert "{'random': 1, 'ucb': 1}" in report
+
+    def test_it_falls_back_to_the_name_when_no_subject_was_recorded(self, dataset):
+        dataset.timestamp = '2026-08-27T15:46:07'
+        assert str(dataset).startswith('ucb from')
+
+    def test_it_reports_each_objectives_measurements(self, dataset):
+        dataset.timestamp = '2026-08-27T15:46:07'
+        report = str(dataset)
+
+        assert 'cost' in report and 'N=9' in report
+        assert 'comfort' in report and 'empty' in report
+
+    def test_an_empty_run_still_summarizes(self):
+        report = str(ExperimentDataset(name='ucb', timestamp='2026-08-27T15:46:07'))
+
+        assert 'trials recorded : 0' in report
+        assert 'chosen by       : nothing' in report
+
+    def test_a_run_with_no_timestamp_refuses_to_summarize(self, dataset):
+        """A directory name is not a record of when a run was taken, so there is
+        no fallback: the field is the only source."""
+        with pytest.raises(ValueError, match='timestamp'):
+            str(dataset)
+
+    def test_repr_still_works_without_a_timestamp(self, dataset):
+        """__str__ raising must not make the object undebuggable."""
+        assert 'ExperimentDataset' in repr(dataset)
+
+
+# ---- carrying a run on -----------------------------------------------------
+
+class TestResume:
+
+    @pytest.fixture
+    def prior(self, dataset):
+        dataset.subject, dataset.timestamp = 'MT01', '2026-08-27T15:46:07'
+        return dataset
+
+    @pytest.fixture
+    def fresh(self):
+        return ExperimentDataset(name='ucb', subject='MT01',
+                                 timestamp='2026-08-28T09:00:00', config={'seed': 3})
+
+    def test_the_prior_trials_are_copied_across(self, fresh, prior):
+        assert fresh.resume(prior) == 2
+        assert len(fresh) == 2
+        np.testing.assert_allclose(fresh.get_actions(), [[1.0], [2.0]])
+
+    def test_the_closing_record_of_a_finished_run_is_dropped(self, fresh, prior, objectives):
+        """It carries the fit to everything and no action; the resumed run
+        appends its own, so keeping it would leave two."""
+        prior.add_trial(objectives)
+
+        assert fresh.resume(prior) == 2
+        assert len(fresh) == 2
+        assert all(trial.action is not None for trial in fresh.trials)
+
+    def test_a_new_trial_numbers_on_from_the_copied_ones(self, fresh, prior, objectives):
+        fresh.resume(prior)
+
+        assert fresh.add_trial(objectives, action=np.array([3.0])).trial == 2
+
+    def test_the_prior_run_is_not_written_to(self, fresh, prior, objectives, tmp_path):
+        """The resumed run writes its own file, so the original is untouched."""
+        path = prior.save(tmp_path / 'prior.json')
+        fresh.resume(prior)
+        fresh.add_trial(objectives, action=np.array([3.0]))
+        fresh.save(tmp_path / 'resumed.json')
+
+        assert len(ExperimentDataset.load(path)) == 2
+
+    def test_a_run_with_no_timestamp_cannot_be_carried_on(self, fresh, dataset):
+        with pytest.raises(ValueError, match='timestamp'):
+            fresh.resume(dataset)
+
+    def test_a_run_on_another_subject_is_refused(self, fresh, prior):
+        prior.subject = 'MT07'
+
+        with pytest.raises(ValueError, match='MT07'):
+            fresh.resume(prior)
+
+    def test_a_subject_neither_run_recorded_is_not_a_mismatch(self, prior):
+        """An older file records no subject, so there is nothing to compare."""
+        prior.subject = None
+        fresh = ExperimentDataset(name='ucb', timestamp='2026-08-28T09:00:00',
+                                  config={'seed': 3})
+
+        assert fresh.resume(prior) == 2
+
+    def test_a_changed_configuration_warns_but_carries_on(self, prior, capsys):
+        """The constants a run was made under may legitimately change between
+        sessions; refusing would make it unresumable for it."""
+        fresh = ExperimentDataset(name='ucb', subject='MT01',
+                                  timestamp='2026-08-28T09:00:00', config={'seed': 4})
+
+        assert fresh.resume(prior) == 2
+        assert 'different configuration' in capsys.readouterr().out
