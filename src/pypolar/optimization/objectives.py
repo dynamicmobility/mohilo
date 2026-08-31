@@ -1,6 +1,7 @@
 """Objective bookkeeping: raw measurements, their actions, and the affine
 rescalings applied before they reach a GP."""
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from functools import reduce
 
@@ -239,6 +240,48 @@ class Objective:
         std = self.ytransform.inv_scale(std)
         return mu, std
     
+    def __iadd__(self, other):
+        """Appends another objective's measurements to this one, in place.
+        The two must name the same quantity and optimize it in the same
+        direction; declared bounds widen to cover the incoming actions."""
+        if not isinstance(other, Objective):
+            return NotImplemented
+        if other.name != self.name:
+            raise ValueError(f'Cannot add objective {other.name!r} to {self.name!r}: '
+                             'names must match')
+        if other.maximize != self.maximize:
+            raise ValueError(f'{self.name}: cannot add an objective optimized in the '
+                             'opposite direction')
+        if not other.ydata.size:
+            return self
+
+        if self.action_bounds is not None:
+            self.action_bounds = np.stack([
+                np.minimum(self.action_bounds[0], other.xdata.min(axis=0)),
+                np.maximum(self.action_bounds[1], other.xdata.max(axis=0))
+            ])
+        self.add_points(other.xdata, other.ydata)
+        return self
+
+    def __add__(self, other):
+        """`self` and `other`'s measurements as a new objective, both untouched."""
+        combined = deepcopy(self)
+        combined += other
+        return combined
+
+    def __str__(self):
+        """One row per measurement: entry number, action, value, all raw."""
+        direction = 'maximize' if self.maximize else 'minimize'
+        header = (f'{self.name} ({direction}, N={len(self.ydata)}, '
+                  f'K={self.xdata.shape[1] if self.xdata.size else 0})')
+        width = max(1, self.xdata.shape[1] if self.xdata.size else 1) * 11 + 1
+        rows = [f'{"idx":>5}  {"action":<{width}}  {"value":>12}']
+        for i, (x, y) in enumerate(zip(self.xdata, self.ydata)):
+            action = '[' + ' '.join(f'{v: .6f}' for v in np.atleast_1d(x)) + ']'
+            rows.append(f'{i:>5}  {action:<{width}}  {y: 12.6f}')
+
+        return '\n'.join([header] + rows)
+
     def to_record(self):
         """Everything this objective is, as plain data.
         """
@@ -459,6 +502,38 @@ class DecoupledObjectives:
     def __getitem__(self, objs):
         selected = self._select(objs)
         return selected[0] if _is_single(objs) else DecoupledObjectives(selected)
+
+    def __iadd__(self, other):
+        """Merges an `Objective` or another `DecoupledObjectives` in, in place.
+        An incoming objective whose name is already here appends its points to
+        it; any other name becomes a new objective axis."""
+        if isinstance(other, Objective):
+            incoming = [other]
+        elif isinstance(other, DecoupledObjectives):
+            incoming = other.objectives
+        else:
+            return NotImplemented
+
+        for obj in incoming:
+            if obj.name in self.names:
+                self.objectives[self.names.index(obj.name)] += obj
+            else:
+                self.objectives.append(deepcopy(obj))
+
+        self.__post_init__()
+        return self
+
+    def __add__(self, other):
+        """`self` and `other` merged into a new collection, both untouched."""
+        combined = deepcopy(self)
+        combined += other
+        return combined
+
+    def __str__(self):
+        """Each objective's table, in objective order."""
+        if not self.objectives:
+            return 'DecoupledObjectives (empty)'
+        return '\n\n'.join(str(o) for o in self.objectives)
 
     def feedback(self, objs=None):
         """Standardized values of the selected objectives, each larger-is-better."""

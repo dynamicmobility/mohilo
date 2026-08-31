@@ -186,7 +186,7 @@ def plot_loo_curve(
 
 def plot_mo_space(
         ax          : plt.Axes,
-        true_front  : np.ndarray,
+        true_front  : np.ndarray = None,
         measured    : np.ndarray = None,
         predicted   : np.ndarray = None,
         overlays    : dict = None,
@@ -214,12 +214,13 @@ def plot_mo_space(
     Returns:
         The ``ax`` that was drawn on, for chaining.
     """
-    if true_front.shape[1] != 2:
-        raise ValueError(f'the objective space is drawn flat, got '
-                         f'{true_front.shape[1]}D')
+    if true_front:
+        if true_front.shape[1] != 2:
+            raise ValueError(f'the objective space is drawn flat, got '
+                            f'{true_front.shape[1]}D')
 
-    ax.plot(true_front[:, 0], true_front[:, 1], color=TRUTH_COLOR, lw=1.5,
-            zorder=3, label='true front')
+        ax.plot(true_front[:, 0], true_front[:, 1], color=TRUTH_COLOR, lw=1.5,
+                zorder=3, label='true front')
     if measured is not None:
         ax.scatter(*measured.T, s=22, marker='x', lw=1.0, color=SAMPLE_COLOR,
                    alpha=0.7, zorder=2, label='measured')
@@ -239,3 +240,4 @@ def plot_mo_space(
     ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
 
     return dress_axis(ax)
+

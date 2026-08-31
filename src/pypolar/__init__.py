@@ -13,7 +13,14 @@ from pypolar.optimization.objectives import (
     sample_actions
 )
 from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
-from pypolar.utils.plotting import plot_test_function, plot_fit_1d, plot_mo_space, plot_loo_curve, dress_axis
+from pypolar.utils.plotting import (
+    plot_test_function, 
+    plot_fit_1d, 
+    plot_mo_space, 
+    plot_loo_curve, 
+    dress_axis,
+    plot_pareto
+)
 from pypolar.feedback import (
     AcquisitionFunction,
     AcquisitionParams,
@@ -113,6 +120,7 @@ __all__ = [
     "plot_mo_space",
     "plot_loo_curve",
     "dress_axis",
+    "plot_pareto",
     # peripherals
     "chime",
     # performance
