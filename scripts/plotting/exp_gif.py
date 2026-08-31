@@ -22,7 +22,7 @@ NUM_PATHS   = 16          # posterior samples per frame
 FPS         = 1.5
 DPI         = 120
 ACQ_COLOR   = '#0072B2'   # Okabe-Ito blue, the one plot_fit_1d leaves free
-DATASET     = Path('hilo/output/experiments/action1d/logei-3.json')
+DATASET     = Path('hilo/output/experiments/20260831_061404/test.json')
 
 
 def action_grid(box: np.ndarray, n: int = GRID_POINTS): # TODO: can this be replaced with the objective bounds?

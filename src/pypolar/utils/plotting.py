@@ -214,7 +214,7 @@ def plot_mo_space(
     Returns:
         The ``ax`` that was drawn on, for chaining.
     """
-    if true_front:
+    if true_front is not None:
         if true_front.shape[1] != 2:
             raise ValueError(f'the objective space is drawn flat, got '
                             f'{true_front.shape[1]}D')

@@ -84,7 +84,7 @@ def multi_objective_study(datasets: list[plr.ExperimentDataset]):
 
 
 if __name__ == '__main__':
-    datasets = load_data(Path('scripts/output/experiments/20260827_131242'))
+    datasets = load_data(Path('hilo/output/experiments/20260831_061404/test.json'))
     if datasets[0].get_objectives().num_objectives > 1:
         multi_objective_study(datasets)
     else:

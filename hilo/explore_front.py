@@ -7,90 +7,39 @@ objective-2 end, and every position in between is a front point that is
 actually attainable rather than a blend of two endpoint actions.
 
     conda activate pypolar
-    python -m hilo.explore_front
+    python -m hilo.explore_front --dataset hilo/output/experiments/<run>/MT01.json
 
 Each Send prints the front point the slider sits at and hands its action to
 `send_to_exo`.
 """
 
+import argparse
 from pathlib import Path
 
 import numpy as np
-import socketio
-import time
 import pypolar as plr
 from pypolar.experiment.dataset import ExperimentDataset
 from tablet.preference import Preference
 import logging
-# from hilo.log import TO_BOTH, setup_logger
 import hilo.shared.log as log
-logger = logging.getLogger(__name__)
+from hilo.fit_mogp import connect_to_exo, find_dataset, send_to_exo, sio
+import hilo.fit_mogp as fit_mogp
 
-SUBJECT = 'MT01'
-DATASET = Path('hilo/output/experiments/20260827_154607/MT01.json')
-CONNECT = True
-EXO_IP      = "192.168.1.122:5000" # move to hilo.hardware
+logger = logging.getLogger(__name__)
 SCAN = 4096     # Sobol points the front is read off
 SEED = 95
-EMULATE = False
 
 
-sio = socketio.Client()
-if EMULATE:
-    import hilo.shared.simulation as hilo
-else:
-    import hilo.shared.hardware as hilo
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument('--dataset', required=True, type=Path,
+                        help='the fitted run whose front the slider walks')
+    parser.add_argument('--connect', action=argparse.BooleanOptionalAction, default=True,
+                        help='send actions to the exo over the socket')
+    parser.add_argument('--emulate', action=argparse.BooleanOptionalAction, default=False,
+                        help='take the constants from the simulation rather than the hardware')
 
-if CONNECT:
-    i = 0
-    while True:
-        try:
-            i += 1
-            sio.connect(f"ws://{EXO_IP}")
-            break
-        except socketio.exceptions.ConnectionError:
-            # prints rather than logs: this runs at import, before setup_logger
-            if i > 5:
-                print('Exceeded maximum number of retries. Exiting...')
-                exit()
-            print('Connection failed. Retrying...')
-            time.sleep(1)
-    else:
-        sio = None
-
-
-def send_to_exo(action):
-    logger.info(f'Exo got action {action}')
-    ans = log.logged_input(f'Send {action} (y/n)? ')
-    while True and ans.lower() != 'y':
-        action = log.logged_input(f'Enter an alternative action as an array, like [1, 2, 3]: ')
-        try:
-            action = np.array(eval(action))
-            if np.any(action < hilo.BOUNDS[0]) or np.any(action > hilo.BOUNDS[1]):
-                raise ValueError('Action out of bounds')
-            logger.info(f'Got {action}. Sending to exo...', extra=log.TO_BOTH)
-            break
-        except ValueError as e:
-            logger.error(f'Action out of bounds. Note that bounds (low, high) = {hilo.BOUNDS}', extra=log.TO_BOTH)
-            continue
-        except Exception as e:
-            logger.error(e, extra=log.TO_BOTH)
-            logger.error(f'{action} did not compile. Try again.', extra=log.TO_BOTH)
-            continue
-        
-    if CONNECT:
-        action_dict = {
-            'h_flex_torque_scale': action[0], # make this a dict when sending to the exo
-            'h_ext_torque_scale' : action[1],
-            'hip_delay_idx'      : action[2]
-        }
-        sio.emit("update_inputs", action_dict)
-        logger.info('Successfully sent action.', extra=log.TO_BOTH)
-        return True
-    else:
-        logger.info('Disabled!', extra=log.TO_BOTH)
-        return True
-
+    return parser.parse_args(argv)
 
 
 def build_front(mogp, scan=SCAN, seed=SEED):
@@ -147,12 +96,23 @@ def report(actions, values, names, idx=None):
         print(row(i, actions, values, '>' if i == idx else ' '))
 
 
-def main():
-    hilo.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    log.setup_logger(hilo.OUTPUT_DIR / f'{SUBJECT}.log')
-    dataset = ExperimentDataset.load(DATASET)
-    mogp    = dataset.get_model()          # last trial, rebuilt from its state dict
-    names   = mogp.objectives.names
+def main(argv=None):
+    args = parse_args(argv)
+    # nothing here reads the backend's constants; `send_to_exo` checks its
+    # BOUNDS, so what --emulate picks is which module that one sees
+    fit_mogp.load_backend(args.emulate)
+
+    path    = find_dataset(args.dataset)
+    dataset = ExperimentDataset.load(path)
+    # beside the run being explored, so a session is recorded where its dataset
+    # is rather than in a new directory of its own
+    log.setup_logger(path.parent / 'explore.log')
+
+    if args.connect:
+        connect_to_exo()
+
+    mogp  = dataset.get_model()          # last trial, rebuilt from its state dict
+    names = mogp.objectives.names
 
     actions, values = build_front(mogp)
     print(f'{dataset.name}, trial {len(dataset) - 1}, scan {SCAN}: '
@@ -175,7 +135,10 @@ def main():
             print(row(idx, actions, values, '>'))
             send_to_exo(actions[idx])
     except KeyboardInterrupt:
+        pass
+    finally:
         pref.close()
+        sio.disconnect() # a no-op on a client that never connected
 
 
 if __name__ == '__main__':

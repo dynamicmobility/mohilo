@@ -17,7 +17,7 @@ MULTITHREAD = True
 
 # Actions
 DIM              = 3
-BOUNDS           = [[0.0, 0.0, 0.0], [0.25, 0.25, 75.0]]
+BOUNDS           = [[0.0, 0.0, 0.0], [0.30, 0.30, 75.0]]
 ACTION_NAMES     = [
     'h_flex_torque_scale',
     'h_ext_torque_scale',

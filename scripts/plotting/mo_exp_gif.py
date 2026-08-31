@@ -19,7 +19,7 @@ from pypolar.utils.plotting import plot_mo_space
 
 FPS      = 1.5
 DPI      = 120
-DATASET  = Path('scripts/output/experiments/20260826_105136/qlognehvi-0.json')
+DATASET  = Path('hilo/output/experiments/20260831_061404/test.json')
 
 
 def measured_at(gp: plr.DecoupledMOGP, truth: plr.MOSyntheticOracle):

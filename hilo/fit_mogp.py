@@ -124,7 +124,9 @@ def run_experiment(
 ):
     # a resumed run already has measurements, so it has a GP before its first trial
     gp = fit_gp(experiment.objectives) if start else None
-    for i in range(start, hilo.NUM_QUERIES):
+    # NUM_QUERIES is what one session asks for, not a total: resuming a finished
+    # run of 45 takes 45 more rather than stopping the moment it starts
+    for i in range(start, start + hilo.NUM_QUERIES):
         if i < hilo.NUM_RANDOM:
             # randomly sample if no data is collected
             source = 'random'
@@ -234,7 +236,7 @@ def main(argv=None):
         logger.info(f'Resuming {prior}', extra=log.TO_BOTH)
         start = dataset.resume(prior)          # the trials
         experiment.resume(prior)               # the measurements they hold
-        logger.info(f'Carrying on at trial {start} of {hilo.NUM_QUERIES}',
+        logger.info(f'Carrying on at trial {start}, through {start + hilo.NUM_QUERIES}',
                     extra=log.TO_BOTH)
 
     try:
@@ -246,9 +248,9 @@ def main(argv=None):
             start             = start,
         )
     finally:
-        logger.info(f'Wrote {dataset.save()}') # change this to save per trial...
+        logger.info(f'Wrote {dataset.save()}', extra=log.TO_BOTH) # change this to save per trial...
         if ipad is not None: ipad.close()
-        sio.disconnect() # a no-op on a client that never connected
+        sio.disconnect()
 
 
 if __name__ == '__main__':
