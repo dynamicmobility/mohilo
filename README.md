@@ -38,3 +38,16 @@ python -m pytest tests/ -v
 3. Call `pbl.compile()` to convert feedback into JAX arrays
 4. Fit a GP to learn the latent reward — `ConjugateGP` (closed form, for regression feedback) or `LaplaceGP` (gradients and Hessians computed automatically via JAX)
 5. Use `ThompsonSampler` to actively select the next query, or `pbl.predict()` / `pbl.optimal_action()` to use the learned reward
+
+
+```
+python -m hilo.fit_mogp --subject MB02 --no-emulate --connect
+```
+
+```
+python -m hilo.compare_front --dataset ??? --connect --no-emulate
+```
+
+```
+python -m hilo.explore_front --dataset ??? --connect --no-emulate
+```

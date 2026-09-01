@@ -12,7 +12,8 @@ import logging
 import hilo.shared.log as log
 
 logger = logging.getLogger(__name__)
-EXO_IP      = "192.168.1.122:5000"
+# EXO_IP      = "192.168.1.122:5000"
+EXO_IP = "10.42.0.1:5000"
 sio = socketio.Client()
 hilo = None
 

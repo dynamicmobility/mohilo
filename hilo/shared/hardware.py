@@ -26,7 +26,7 @@ ACTION_NAMES     = [
 
 # Optimization
 SEED             = 95
-NUM_QUERIES      = 20
+NUM_QUERIES      = 12
 ACQ_STRAT        = 'qlognparego'
 ACQ_KWARGS       = {}
 GP_NOISE         = plr.NoiseModel.prior(0.5)
@@ -37,13 +37,13 @@ NUM_RANDOM       = 3
 NUM_OBJECTIVES   = 2
 COMFORT          = 'Comfort'
 METABOLIC        = 'Metabolic Cost'
-REPEATS          = {METABOLIC: 1, COMFORT: 4}
+REPEATS          = {METABOLIC: 1, COMFORT: 3}
 MAXIMIZE         = {METABOLIC: False, COMFORT: True}
-SURVEY_TIMEOUT   = 30.0 
-SURVEY_PERIOD    = 30.0
-METABOLIC_PERIOD = 120.0
+SURVEY_TIMEOUT   = 60.0 
+SURVEY_PERIOD    = 60.0
+METABOLIC_PERIOD = 180.0
 REF_POINT        = plr.reference_point(
-    bounds   = [[3.0, -1.0], [6.0, 5.0]],
+    bounds   = [[2.0, -1.0], [6.0, 5.0]],
     maximize = [MAXIMIZE[METABOLIC], MAXIMIZE[COMFORT]],
     margin   = 0.1
 )
