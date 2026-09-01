@@ -18,7 +18,9 @@ from pypolar.utils.plotting import (
     plot_fit_1d, 
     plot_mo_space, 
     plot_loo_curve, 
-    dress_axis
+    dress_axis,
+    plot_pareto,
+    plot_pareto_actions
 )
 from pypolar.feedback import (
     AcquisitionFunction,
@@ -119,6 +121,8 @@ __all__ = [
     "plot_mo_space",
     "plot_loo_curve",
     "dress_axis",
+    "plot_pareto",
+    "plot_pareto_actions",
     # peripherals
     "chime",
     # performance

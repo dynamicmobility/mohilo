@@ -66,8 +66,7 @@ def padded_limits(points, pad=PAD):
 
     return low - margin, high + margin
 
-
-def draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names):
+def draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names, mogp: plr.DecoupledMOGP):
     """One trial's objective space and action space, on axes already cleared.
 
     Args:
@@ -78,38 +77,32 @@ def draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names):
         names: the two objectives' names.
     """
     nd_idx = front_order(mu, raw_mu)
-    nd_mu  = raw_mu[nd_idx]
-    # position along the front as a fraction, so one colorbar serves every
-    # frame even though the fronts differ in length
-    order = np.linspace(0.0, 1.0, len(nd_idx))
+    colors = mogp.objectives.xtransform(X)
+    p_ax = plr.plot_pareto(
+        ax                      = p_ax,
+        pareto                  = raw_mu,
+        nd_idx                  = nd_idx,
+        colors                  = colors,
+        connect                 = True,
+        show_dominated          = True,
+        dominated_alpha         = 0.4,
+        outline_nondominated    = 2,
+        nondominated_s          = 30,
+        label                   = names
+    )
+    a_ax = plr.plot_pareto_actions(
+        ax              = a_ax,
+        nd_pts          = X[nd_idx],
+        colors          = colors[nd_idx],
+        action_labels   = ['Hip Flexion Scale', 'Hip Extension Scale', 'Delay']
+    )
 
-    p_ax.scatter(raw_mu[:, 0], raw_mu[:, 1], s=3, c='C0', alpha=0.1, zorder=0,
-                 label='posterior scan')
-    p_ax.plot(nd_mu[:, 0], nd_mu[:, 1], lw=2, c='black', zorder=1,
-              label='pareto front')
-    p_ax.scatter(nd_mu[:, 0], nd_mu[:, 1], s=25, c=order, cmap=FRONT_CMAP,
-                 vmin=0.0, vmax=1.0, edgecolors='black', linewidths=1, zorder=2)
-    p_ax.scatter(measured[:, 0], measured[:, 1], s=15, marker='x', c='C2',
-                 label='measured')
-    p_ax.set_xlabel(names[0])
-    p_ax.set_ylabel(names[1])
     plr.dress_axis(p_ax)
-
-    pts = X[nd_idx]
-    a_ax.plot(pts[:, 0], pts[:, 1], pts[:, 2], lw=2, c='black', zorder=1)
-    a_ax.scatter(pts[:, 0], pts[:, 1], pts[:, 2], s=25, c=order, cmap=FRONT_CMAP,
-                 vmin=0.0, vmax=1.0, edgecolors='black', linewidths=1, zorder=2,
-                 depthshade=False)
-    for axis, name in zip(('x', 'y', 'z'), ACTION_NAMES):
-        getattr(a_ax, f'set_{axis}label')(name)
-
-    # the scan's markers carry alpha=0.1, which is invisible at legend size
-    legend = p_ax.legend(loc='upper right', framealpha=0.9)
-    for handle in legend.legend_handles:
-        handle.set_alpha(1.0)
+    plr.dress_axis(a_ax)
 
 
-def make_gif(dataset, path=None, fps=FPS, scan=SCAN, seed=SEED):
+
+def make_gif(dataset: plr.ExperimentDataset, path=None, fps=FPS, scan=SCAN, seed=SEED):
     """Every fitted trial of a run as one frame, written to a gif.
 
     The opening trials are chosen before any fit, so they carry no posterior
@@ -134,8 +127,6 @@ def make_gif(dataset, path=None, fps=FPS, scan=SCAN, seed=SEED):
 
     models = [dataset.get_model(trial) for trial in frames]
     names  = models[-1].objectives.names
-    # one scan, from the last trial's box, so every frame reads its front off
-    # the same actions
     X = plr.sample_actions(models[-1].action_bounds, scan, 'sobol', seed)
 
     posteriors = [(mogp.posterior_at(X)[0],            # maximization space
@@ -150,14 +141,9 @@ def make_gif(dataset, path=None, fps=FPS, scan=SCAN, seed=SEED):
     ))
     action_low, action_high = X.min(axis=0), X.max(axis=0)
 
-    # objective space flat, action space in 3D, so the axes are made one at a
-    # time: subplot_kw would go to every subplot alike
     fig  = plt.figure(figsize=(12, 5), constrained_layout=True)
     p_ax = fig.add_subplot(1, 2, 1)
     a_ax = fig.add_subplot(1, 2, 2, projection='3d')
-    # drawn once rather than per frame, since a colorbar per frame would stack
-    fig.colorbar(ScalarMappable(norm=Normalize(0.0, 1.0), cmap=FRONT_CMAP),
-                 ax=[p_ax, a_ax], label='position along the front', shrink=0.7)
 
     path = Path(path or OUTPUT)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -166,7 +152,12 @@ def make_gif(dataset, path=None, fps=FPS, scan=SCAN, seed=SEED):
         for trial, (mu, raw_mu, measured) in zip(frames, posteriors):
             p_ax.clear()
             a_ax.clear()
-            draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names)
+            try:
+                draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names, dataset.get_model(trial=trial))
+            except Exception as e:
+                print(e)
+                quit()
+
             p_ax.set_xlim(low[0], high[0])
             p_ax.set_ylim(low[1], high[1])
             a_ax.set_xlim(action_low[0], action_high[0])

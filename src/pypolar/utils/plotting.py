@@ -241,3 +241,166 @@ def plot_mo_space(
 
     return dress_axis(ax)
 
+
+
+def _decide_color_kwargs(
+        colors : str | np.ndarray = None,
+        idx    : np.ndarray       = None
+    ) -> dict:
+    """Route a color specification to the ``scatter`` keyword that will not
+    value-map it.
+
+    Args:
+        colors: one matplotlib color, an ``(n, 3|4)`` RGB(A) array of one color
+            per point, or None to leave the color unset.
+        idx: indices of the rows of ``colors`` being drawn, or None for all.
+
+    Returns:
+        The keyword to splat into ``ax.scatter``: ``c`` for a per-point array,
+        ``color`` for a single color, and nothing for None.
+    """
+    if colors is None:
+        return {}
+    if isinstance(colors, np.ndarray) and colors.ndim == 2:
+        return {"c": colors if idx is None else colors[idx]}
+    return {"color": colors}
+
+
+def plot_pareto(
+        ax                    : plt.Axes,
+        pareto                : np.ndarray,
+        nd_idx                : np.ndarray       = None,
+        colors                : str | np.ndarray = None,
+        objective             : list[str]        = None,
+        connect               : bool             = False,
+        show_dominated        : bool             = True,
+        nondominated_alpha    : float            = 1.0,
+        dominated_alpha       : float            = 1.0,
+        nondominated_s        : int              = 20,
+        dominated_s           : int              = 8,
+        outline_nondominated  : float            = 0.0,
+        label                 : str              = None,
+        set_lims              : bool             = True,
+        **plot_kwargs
+    ) -> plt.Axes:
+    """Plot a 2D Pareto front: its non-dominated points over the dominated ones.
+
+    Args:
+        ax: a ``matplotlib.axes.Axes`` to draw on.
+        pareto: ``(n, 2)`` values of every point, in the units being plotted.
+        nd_idx: indices of the non-dominated rows of ``pareto``; every other row
+            is drawn as dominated.
+        colors: one matplotlib color, or an ``(n, 3|4)`` RGB(A) array of one
+            color per row of ``pareto``.
+        objective: the two axis labels, in column order.
+        connect: whether the non-dominated points are joined by a line, sorted
+            along the first objective.
+        show_dominated: whether the dominated points are drawn at all.
+        nondominated_alpha: opacity of the non-dominated markers.
+        dominated_alpha: opacity of the dominated markers.
+        nondominated_s: area of a non-dominated marker, in points squared.
+        dominated_s: area of a dominated marker, in points squared.
+        outline_nondominated: width of the black edge on the non-dominated
+            markers, 0 for none.
+        label: what the non-dominated set is called in the legend.
+        set_lims: whether the axes are zoomed to the non-dominated points.
+        **plot_kwargs: forwarded verbatim to both ``ax.scatter`` calls.
+
+    Returns:
+        The ``ax`` that was drawn on, for chaining.
+    """
+    # TODO: this doesn't work for 3d fronts
+    num_objs = pareto.shape[1]
+    if num_objs != 2:
+        raise NotImplementedError('Only 2D paretos are supported for plotting')
+
+    if objective is None: objective = [''] * num_objs
+    c = np.asarray(colors) if isinstance(colors, (list, tuple, np.ndarray)) else colors
+    d_idx = np.setdiff1d(np.arange(pareto.shape[0]), nd_idx)
+
+    if show_dominated:
+        ax.scatter(
+            *(pareto[d_idx].T),
+            s       = dominated_s,
+            alpha   = dominated_alpha,
+            **_decide_color_kwargs(c, d_idx),
+            **plot_kwargs,
+        )
+
+    ax.scatter(
+        *(pareto[nd_idx].T),
+        alpha         = nondominated_alpha,
+        zorder        = 1,
+        s             = nondominated_s,
+        edgecolors    = 'black',
+        linewidths    = outline_nondominated,
+        label         = label,
+        **_decide_color_kwargs(c, nd_idx),
+        **plot_kwargs,
+    )
+    if connect:
+        pts = pareto[nd_idx]
+        ax.plot(
+            *(pts[np.argsort(pts[:, 0])].T),
+            zorder        = 0,
+            color         = 'black',
+        )
+
+    if set_lims:
+        ax.set_xlim((0.95 * np.min(pareto[nd_idx, 0]), 1.05 * np.max(pareto[nd_idx, 0])))
+        ax.set_ylim((0.95 * np.min(pareto[nd_idx, 1]), 1.05 * np.max(pareto[nd_idx, 1])))
+
+    ax.set_xlabel(objective[0], fontsize=16)
+    ax.set_ylabel(objective[1], fontsize=16)
+
+    return ax
+
+
+def plot_pareto_actions(
+        ax            : plt.Axes,
+        nd_pts        : np.ndarray,
+        colors        : str | np.ndarray = None,
+        action_labels : list[str]        = None,
+        bounds        : np.ndarray       = None,
+    ) -> plt.Axes:
+    """Plot the actions behind a Pareto front as a path through a 3D action space.
+
+    Args:
+        ax: a ``matplotlib.axes.Axes`` with a 3D projection to draw on.
+        nd_pts: ``(k, 3)`` non-dominated actions, in the order the line joins
+            them.
+        colors: one matplotlib color, or a ``(k, 3|4)`` RGB(A) array of one
+            color per action.
+        action_labels: the three axis labels, in action order.
+
+    Returns:
+        The ``ax`` that was drawn on, for chaining.
+    """
+    # TODO: generalize to 2D too
+    ax.plot(
+        nd_pts[:, 0], 
+        nd_pts[:, 1], 
+        nd_pts[:, 2], 
+        lw        = 2,
+        color     = 'black',
+        zorder    = 1
+    )
+    ax.scatter(
+        nd_pts[:, 0], 
+        nd_pts[:, 1], 
+        nd_pts[:, 2], 
+        s             = 25,
+        edgecolors    = 'black',
+        c             = colors,
+        linewidths    = 1,
+        zorder        = 2,
+        depthshade    = False
+    )
+    for axis, name in zip(('x', 'y', 'z'), action_labels):
+        getattr(ax, f'set_{axis}label')(name)
+
+    if bounds is not None:
+        bounds = np.asarray(bounds)
+        for axis, b in zip(('x', 'y', 'z'), bounds.T):
+            getattr(ax, f'set_{axis}lim')(b)
+    return ax
