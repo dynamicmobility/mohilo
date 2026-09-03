@@ -123,11 +123,9 @@ def run_experiment(
     send_to_exo       = None,
     start             : int = 0,
 ):
-    # a resumed run already has measurements, so it has a GP before its first trial
     gp = fit_gp(experiment.objectives) if start else None
-    # NUM_QUERIES is what one session asks for, not a total: resuming a finished
-    # run of 45 takes 45 more rather than stopping the moment it starts
     for i in range(start, start + hilo.NUM_QUERIES):
+        logger.info(f'Beginning trial {i + 1}.', extra=log.TO_BOTH)
         if i < hilo.NUM_RANDOM:
             # randomly sample if no data is collected
             source = 'random'

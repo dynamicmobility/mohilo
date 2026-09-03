@@ -195,6 +195,59 @@ class TestSaveAndLoad:
         assert saved.aux_names() == {'recommended', 'regret'}
 
 
+# ---- what the action dimensions are called ---------------------------------
+
+class TestActionLabels:
+
+    def test_a_run_that_named_none_gets_x0_x1(self, dataset):
+        assert dataset.get_action_labels() == ['x0']
+
+    def test_the_fill_is_one_name_per_action_dimension(self):
+        data    = ExperimentDataset(name='3d')
+        actions = np.zeros((4, 3))
+        data.add_trial(DecoupledObjectives([
+            Objective.from_data(actions=actions, values=np.arange(4.0),
+                                maximize=False, name='cost', action_bounds=BOX),
+        ]), action=np.zeros(3))
+
+        assert data.get_action_labels() == ['x0', 'x1', 'x2']
+
+    def test_a_run_with_no_trials_names_nothing(self):
+        assert ExperimentDataset(name='empty').get_action_labels() == []
+
+    def test_names_given_are_returned_verbatim(self, objectives, gp):
+        data = ExperimentDataset(name='ucb', action_labels=['hip_torque'])
+        data.add_trial(objectives, gp=gp, action=np.array([2.0]))
+
+        assert data.get_action_labels() == ['hip_torque']
+
+    def test_names_survive_the_file(self, dataset, tmp_path):
+        dataset.action_labels = ['hip_torque']
+        back = ExperimentDataset.load(dataset.save(tmp_path / 'run.json'))
+
+        assert back.action_labels == ['hip_torque']
+        assert back.get_action_labels() == ['hip_torque']
+
+    def test_a_file_written_before_the_field_existed_still_loads(self, dataset, tmp_path):
+        """Backwards compatibility: an older run has no `action_labels` key, so
+        it comes back unnamed and falls back to the fill."""
+        path    = dataset.save(tmp_path / 'run.json')
+        payload = json.loads(path.read_text())
+        path.write_text(json.dumps({key: value for key, value in payload.items()
+                                    if key != 'action_labels'}))
+
+        older = ExperimentDataset.load(path)
+
+        assert older.action_labels is None
+        assert older.get_action_labels() == ['x0']
+
+    def test_naming_the_wrong_number_of_dimensions_raises(self, dataset):
+        dataset.action_labels = ['hip_torque', 'ankle_torque']
+
+        with pytest.raises(ValueError):
+            dataset.get_action_labels()
+
+
 # ---- what comes back out ---------------------------------------------------
 
 class TestGetModel:

@@ -43,6 +43,21 @@ def _aux_array(value):
     return np.asarray(value, dtype=float)
 
 
+def _action_dim(trials):
+    """K, the number of action dimensions any trial recorded, or 0 for a run
+    that has recorded none yet.
+    """
+    for trial in trials:
+        if trial.action is not None:
+            return trial.action.size
+
+        for record in trial.measurements.values():
+            if np.asarray(record['xdata']).size:
+                return np.asarray(record['xdata']).shape[1]
+
+    return 0
+
+
 def _trial_from_json(record):
     """One trial read back, with its arrays as arrays again."""
     # TODO: document this better
@@ -93,6 +108,8 @@ class ExperimentDataset:
         name: what the run is called.
         subject: who it was run on.
         timestamp: when the run began, as ISO 8601. 
+        action_labels: one name per action dimension, in action order, or None
+            when the run named none.
         acquisition: the arguments the run's acquisition was built from, or
             None when nothing acquired.
         groundtruth: the arguments the run's oracle was built from, or None
@@ -106,6 +123,7 @@ class ExperimentDataset:
     name         : str
     subject      : str | None                    = None
     timestamp    : str | None                    = None
+    action_labels: list[str] | None              = None
     acquisition  : AcquisitionParams | None      = None
     groundtruth  : SyntheticOracleParams | None  = None
     config       : dict                          = field(default_factory=dict)
@@ -223,16 +241,17 @@ class ExperimentDataset:
         self.path = Path(path or self.path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            'name'        : self.name,
-            'subject'     : self.subject,
-            'timestamp'   : self.timestamp,
-            'fingerprint' : fingerprint(self.config),
-            'config'      : self.config,
-            'acquisition' : None if self.acquisition is None
-                            else asdict(self.acquisition),
-            'groundtruth' : None if self.groundtruth is None
-                            else asdict(self.groundtruth),
-            'trials'      : [asdict(trial) for trial in self.trials],
+            'name'          : self.name,
+            'subject'       : self.subject,
+            'timestamp'     : self.timestamp,
+            'action_labels' : self.action_labels,
+            'fingerprint'   : fingerprint(self.config),
+            'config'        : self.config,
+            'acquisition'   : None if self.acquisition is None
+                              else asdict(self.acquisition),
+            'groundtruth'   : None if self.groundtruth is None
+                              else asdict(self.groundtruth),
+            'trials'        : [asdict(trial) for trial in self.trials],
         }
         # a state dict's constraint buffers are infinite, which python's json
         # writes as `Infinity` and reads back; no stricter reader is promised
@@ -248,15 +267,16 @@ class ExperimentDataset:
         acquisition = payload['acquisition']
         groundtruth = payload['groundtruth']
         dataset     = cls(
-            name        = payload['name'],
-            subject     = payload.get('subject'),
-            timestamp   = payload.get('timestamp'),
-            acquisition = None if acquisition is None
-                          else AcquisitionParams(**acquisition),
-            groundtruth = None if groundtruth is None
-                          else SyntheticOracleParams(**groundtruth),
-            config      = payload['config'],
-            path        = path,
+            name          = payload['name'],
+            subject       = payload.get('subject'),
+            timestamp     = payload.get('timestamp'),
+            action_labels = payload.get('action_labels'),
+            acquisition   = None if acquisition is None
+                            else AcquisitionParams(**acquisition),
+            groundtruth   = None if groundtruth is None
+                            else SyntheticOracleParams(**groundtruth),
+            config        = payload['config'],
+            path          = path,
         )
         dataset.trials = [_trial_from_json(record) for record in payload['trials']]
 
@@ -355,6 +375,25 @@ class ExperimentDataset:
         actions = [trial.action for trial in self.trials if trial.action is not None]
 
         return np.vstack(actions) if actions else np.empty((0, 0))
+
+    def get_action_labels(self):
+        """One name per action dimension, in action order.
+
+        Autofilled to `x0, x1, ...` if there are no action labels (legacy).
+
+        Raises:
+            ValueError: the run named a different number of dimensions than
+                its trials recorded.
+        """
+        dim = _action_dim(self.trials)
+        if self.action_labels is None:
+            return [f'x{i}' for i in range(dim)]
+
+        if dim and len(self.action_labels) != dim:
+            raise ValueError(f'{self.name} names {len(self.action_labels)} action '
+                             f'dimensions, but its trials record {dim}')
+
+        return list(self.action_labels)
 
     def get_sources(self):
         """What chose each action, aligned with `get_actions`."""
