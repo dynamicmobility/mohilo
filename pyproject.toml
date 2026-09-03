@@ -14,6 +14,9 @@ dependencies = [
     "botorch"
 ]
 
+[project.scripts]
+plr-print = "pypolar.experiment.__main__:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",

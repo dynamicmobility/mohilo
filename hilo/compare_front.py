@@ -1,21 +1,4 @@
 """Whether a fit's Pareto front really does beat what it calls dominated.
-
-Reads a finished run, takes K actions off its posterior's Pareto front and K
-off its anti-front, writes them beside that run as a csv, and then measures
-every one of them on the subject. There is no GP in the loop: the fit chose the
-actions, and after that this is a plain measurement script.
-
-The order is drawn at random, so the two sets interleave rather than arriving
-as blocks -- a subject who can see the blocks is rating the block, not the
-action. That draw is made once, by the plain run, and the csv it writes is the
-record of it: `--reversed` reads that csv back and reverses the order it finds,
-rather than drawing again. Running one subject each way is what separates a
-genuine front effect from an ordering or fatigue one.
-
-Nothing is ever written over. A run whose files are already in the directory
-raises instead, since the alternative is quietly destroying a subject's data --
-`--resume` is how a session that died partway is picked up, continuing the same
-files from the trial it stopped on.
 """
 
 import argparse
@@ -62,6 +45,7 @@ def load_backend(emulate: bool):
     global hilo
     fit_mogp.load_backend(emulate)
     hilo = fit_mogp.hilo
+    hilo.METABOLIC_PERIOD = 60 * 5
 
 
 def peel(mu, k, sign, exclude=None):
