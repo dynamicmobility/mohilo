@@ -208,7 +208,7 @@ def run_experiment(
 ):
     for i in range(start, len(actions)):
         action, kind = actions[i], kinds[i]
-        experiment.begin_trial(
+        action = experiment.begin_trial(
             action         = action,
             device_send_fn = send_to_exo,
             args           = {

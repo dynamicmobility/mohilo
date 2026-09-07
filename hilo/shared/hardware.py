@@ -43,7 +43,7 @@ SURVEY_TIMEOUT   = 60.0
 SURVEY_PERIOD    = 60.0
 METABOLIC_PERIOD = 180.0
 REF_POINT        = plr.reference_point(
-    bounds   = [[2.0, -1.0], [6.0, 5.0]],
+    bounds   = [[2.0, -1.0], [6.0, 6.0]],
     maximize = [MAXIMIZE[METABOLIC], MAXIMIZE[COMFORT]],
     margin   = 0.1
 )

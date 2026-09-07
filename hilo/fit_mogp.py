@@ -62,7 +62,7 @@ def send_to_exo(action):
     while True and ans.lower() != 'y':
         action = log.logged_input(f'Enter an alternative action as an array, like [1, 2, 3]: ')
         try:
-            action = np.array(eval(action))
+            action = np.asarray(eval(action), dtype=float)
             if np.any(action < hilo.BOUNDS[0]) or np.any(action > hilo.BOUNDS[1]):
                 raise ValueError('Action out of bounds')
             logger.info(f'Got {action}. Sending to exo...', extra=log.TO_BOTH)
@@ -77,7 +77,7 @@ def send_to_exo(action):
 
     if not sio.connected:
         logger.info('Disabled!', extra=log.TO_BOTH)
-        return True
+        return action
 
     action_dict = {
         'h_flex_torque_scale': action[0], # make this a dict when sending to the exo
@@ -87,7 +87,7 @@ def send_to_exo(action):
     sio.emit("update_inputs", action_dict)
     logger.info('Successfully sent action.', extra=log.TO_BOTH)
 
-    return True
+    return action
 
 
 def find_dataset(resume: Path):
@@ -141,7 +141,7 @@ def run_experiment(
             source = dataset.acquisition.strategy
             action = acqf.query(gp, q=1)[0]
 
-        experiment.begin_trial(
+        action = experiment.begin_trial(
             action         = action,
             device_send_fn = send_to_exo,
             args           = {

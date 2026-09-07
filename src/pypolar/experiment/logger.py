@@ -64,31 +64,53 @@ class Logger:
                 )
             self.obj2probes.setdefault(probe.obj_name, []).append(probe)
 
+    def _as_action(self, action, source):
+        """One action as a (d,) float array, checked against `action_names`.
+
+        Args:
+            source: what produced it, for the message a bad one raises with.
+        """
+        action = np.asarray(action, dtype=float).ravel()
+        if self.action_names is not None and len(action) != len(self.action_names):
+            raise ValueError(f'{source} has {len(action)} dimensions, expected '
+                             f'{len(self.action_names)}: {self.action_names}')
+
+        return action
+
     def begin_trial(self, action: np.ndarray, device_send_fn = None, args: dict = None,
                     kwargs: dict[str, dict] = None):
         """Applies an action and starts every probe measuring at it.
 
+        `device_send_fn` returns the action actually applied, which is the one
+        recorded: an operator who substitutes one at the device is measuring
+        that, not the one asked for. It is checked the same way the argument
+        is, so a device that returns something else fails here rather than at
+        `end_trial`, after a trial's worth of measuring.
+
         Args:
             action: (d,) action, in raw units.
+            device_send_fn: called as `device_send_fn(action)`, returning the
+                action applied.
             args, kwargs: probe name -> the arguments that probe's caller takes.
+
+        Returns:
+            (d,) the action applied, in raw units.
         """
         if self.current_action is not None:
             raise RuntimeError('the last trial has not ended')
 
         args   = args or {}
         kwargs = kwargs or {}
-        action = np.asarray(action, dtype=float).ravel()
-        if self.action_names is not None and len(action) != len(self.action_names):
-            raise ValueError(f'action has {len(action)} dimensions, expected '
-                             f'{len(self.action_names)}: {self.action_names}')
+        action = self._as_action(action, 'action')
 
-        self.current_action = action
         # self.device.send(action)
         if device_send_fn:
-            device_send_fn(action)
+            action = self._as_action(device_send_fn(action), 'the applied action')
+        self.current_action = action
 
         for name, probe in self.probes.items():
             probe.measure(*args.get(name, ()), **kwargs.get(name, {}))
+        return action
 
     @property
     def all_measurements_completed(self) -> bool:
