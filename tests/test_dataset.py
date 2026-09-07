@@ -475,3 +475,235 @@ class TestResume:
 
         assert fresh.resume(prior) == 2
         assert 'different configuration' in capsys.readouterr().out
+
+
+# ---- removing a trial -------------------------------------------------------
+
+class TestDeleteTrial:
+    """A trial's `measurements` is cumulative, so deleting one is not just
+    dropping a record: the rows it contributed have to leave every later
+    snapshot, and every fit that saw them has to go with them.
+    """
+
+    @pytest.fixture
+    def growing(self, gp):
+        """A four-step run whose snapshots grow, closed by a record with no
+        action. `cost` gains one value a trial and `comfort` three, except at
+        trial 1, where it gains two.
+
+        Every step records the same fitted GP. Nothing here reads a posterior
+        out of it -- what is under test is which records keep one.
+        """
+        objectives = DecoupledObjectives([
+            Objective.from_empty('cost', maximize=False, action_bounds=BOX),
+            Objective.from_empty('comfort', maximize=True, action_bounds=BOX),
+        ])
+        data = ExperimentDataset(name='growing', config={'seed': 3})
+        for step in range(4):
+            action  = np.array([float(step)])
+            repeats = 2 if step == 1 else 3
+            objectives.add_point('cost', action[None, :], np.array([10.0 + step]))
+            objectives.add_point('comfort', np.tile(action, (repeats, 1)),
+                                 np.full(repeats, float(step)))
+            data.add_trial(objectives, gp=gp, action=action, source='ucb')
+
+        data.add_trial(objectives, gp=gp)
+
+        return data
+
+    @staticmethod
+    def counts(dataset, name):
+        """How many values of `name` each trial's snapshot holds."""
+        return [len(trial.measurements[name]['ydata']) for trial in dataset]
+
+    def test_the_trial_is_gone_and_the_rest_renumber(self, growing):
+        kept = growing.delete_trial(2)
+
+        assert len(kept) == 4
+        assert [trial.trial for trial in kept] == [0, 1, 2, 3]
+
+    def test_the_rows_it_added_leave_every_later_snapshot(self, growing):
+        kept = growing.delete_trial(2)
+
+        assert self.counts(growing, 'cost')    == [1, 2, 3, 4, 4]
+        assert self.counts(kept, 'cost')       == [1, 2, 3, 3]
+        assert self.counts(growing, 'comfort') == [3, 5, 8, 11, 11]
+        assert self.counts(kept, 'comfort')    == [3, 5, 8, 8]
+
+    def test_an_irregular_repeat_count_is_read_off_the_snapshots(self, growing):
+        """Trial 1 collected two comfort values where the others collected
+        three, so the count comes from the record rather than from a constant.
+        """
+        kept = growing.delete_trial(1)
+
+        assert self.counts(kept, 'comfort') == [3, 6, 9, 9]
+
+    def test_the_deleted_measurements_are_the_ones_removed(self, growing):
+        kept = growing.delete_trial(2)
+        cost = Objective.from_record(kept[-1].measurements['cost'])
+
+        np.testing.assert_allclose(cost.ydata, [10.0, 11.0, 13.0])
+        np.testing.assert_allclose(cost.xdata, [[0.0], [1.0], [3.0]])
+
+    def test_earlier_snapshots_are_untouched(self, growing):
+        kept = growing.delete_trial(2)
+
+        for before in range(2):
+            np.testing.assert_allclose(kept[before].measurements['cost']['ydata'],
+                                       growing[before].measurements['cost']['ydata'])
+
+    def test_every_model_from_the_deletion_on_is_cleared(self, growing):
+        kept = growing.delete_trial(2)
+
+        assert [trial.state_dict is None for trial in kept] == [False, False, True, True]
+        assert [trial.gp is None for trial in kept]         == [False, False, True, True]
+
+    def test_the_actions_and_sources_of_the_kept_trials_survive(self, growing):
+        kept = growing.delete_trial(2)
+
+        np.testing.assert_allclose(kept.get_actions(), [[0.0], [1.0], [3.0]])
+        assert kept.get_sources() == ['ucb', 'ucb', 'ucb']
+
+    def test_the_run_it_came_from_is_untouched(self, growing):
+        kept = growing.delete_trial(2)
+
+        assert len(growing) == 5
+        assert growing[2].state_dict is not None
+        assert kept[2].measurements is not growing[3].measurements
+
+    def test_the_copy_has_no_path_so_a_save_cannot_overwrite_the_original(
+            self, growing, tmp_path):
+        growing.save(tmp_path / 'run.json')
+
+        with pytest.raises(ValueError):
+            growing.delete_trial(2).save()
+
+    def test_the_rest_of_the_record_is_carried_over(self, growing):
+        growing.subject = 'MT01'
+        kept = growing.delete_trial(2)
+
+        assert (kept.name, kept.subject, kept.config) == ('growing', 'MT01', {'seed': 3})
+
+    def test_the_first_trial_owns_everything_it_holds(self, growing):
+        kept = growing.delete_trial(0)
+
+        assert self.counts(kept, 'cost')    == [1, 2, 3, 3]
+        assert self.counts(kept, 'comfort') == [2, 5, 8, 8]
+        assert all(trial.state_dict is None for trial in kept)
+
+    def test_a_closing_record_added_no_measurements_so_none_are_removed(self, growing):
+        """The run's last record repeats the previous snapshot and applies no
+        action, so it contributed no rows to remove.
+        """
+        kept = growing.delete_trial(-1)
+
+        assert self.counts(kept, 'cost') == [1, 2, 3, 4]
+        assert all(trial.state_dict is not None for trial in kept)
+
+    def test_there_is_no_such_trial(self, growing):
+        with pytest.raises(IndexError):
+            growing.delete_trial(5)
+
+
+# ---- refitting every model --------------------------------------------------
+
+class TestRefit:
+    """A recorded state dict is the fit the run made live. `refit` is how a run
+    is read back under different hyperparameters, and how one edited by
+    `delete_trial` gets the models that deletion cleared.
+    """
+
+    @staticmethod
+    def fit_gp(min_length_scale=0.1):
+        """A `fit_gp` callable with its hyperparameters bound, the way a caller
+        binds them so every trial is refit under one configuration."""
+        return lambda objectives: BoTorchGP(objectives['cost'],
+                                            noise=NoiseModel.prior(0.3),
+                                            min_length_scale=min_length_scale)
+
+    @pytest.fixture
+    def measured(self, gp):
+        """A two-step run whose objectives are all measured, so every trial can
+        be fit. The second step records no GP, which the refit fills in."""
+        def measured_to(stop):
+            return DecoupledObjectives([
+                Objective.from_data(actions=ACTIONS[:stop],
+                                    values=np.sin(ACTIONS[:stop, 0]),
+                                    maximize=False, name='cost',
+                                    action_bounds=BOX),
+            ])
+
+        data = ExperimentDataset(name='ucb', config={'seed': 3})
+        data.add_trial(measured_to(5), gp=gp, action=np.array([1.0]), source='ucb')
+        data.add_trial(measured_to(9), action=np.array([2.0]), source='ucb')
+
+        return data
+
+    def test_every_trial_that_can_be_fit_is(self, measured):
+        done = measured.refit(self.fit_gp())
+
+        assert all(trial.state_dict is not None for trial in done)
+        assert all(trial.gp is not None for trial in done)
+
+    def test_the_hyperparameters_are_the_ones_the_callable_bound(self, measured):
+        done = measured.refit(self.fit_gp(min_length_scale=0.4))
+
+        assert [trial.gp['min_length_scale'] for trial in done] == [0.4, 0.4]
+        assert all(hypers.lengthscale.min() >= 0.4
+                   for hypers in (done.get_model(trial).get_fitted_hyperparameters()
+                                  for trial in range(len(done))))
+
+    def test_the_model_that_comes_back_is_the_one_that_was_refit(self, measured):
+        done = measured.refit(self.fit_gp(min_length_scale=0.4))
+
+        np.testing.assert_allclose(
+            done.get_model(0).get_fitted_hyperparameters().lengthscale,
+            self.fit_gp(min_length_scale=0.4)(measured.get_objectives(0))
+                .get_fitted_hyperparameters().lengthscale,
+            rtol=1e-6,
+        )
+
+    def test_a_different_floor_gives_a_different_fit(self, measured):
+        loose = measured.refit(self.fit_gp(min_length_scale=0.05))
+        tight = measured.refit(self.fit_gp(min_length_scale=0.9))
+
+        assert not np.allclose(
+            loose.get_model(-1).get_fitted_hyperparameters().lengthscale,
+            tight.get_model(-1).get_fitted_hyperparameters().lengthscale,
+        )
+
+    def test_an_objective_with_no_measurement_has_nothing_to_fit(self, dataset):
+        """The `dataset` fixture declares `comfort` and never measures it, so
+        no trial of it is fittable and every model comes back cleared."""
+        done = dataset.refit(self.fit_gp())
+
+        assert all(trial.state_dict is None for trial in done)
+        assert all(trial.gp is None for trial in done)
+
+    def test_the_measurements_and_the_run_are_left_alone(self, measured):
+        done = measured.refit(self.fit_gp())
+
+        np.testing.assert_allclose(done.get_actions(), measured.get_actions())
+        assert done.get_sources() == measured.get_sources()
+        np.testing.assert_allclose(done[1].measurements['cost']['ydata'],
+                                   measured[1].measurements['cost']['ydata'])
+
+    def test_the_run_it_came_from_is_untouched(self, measured):
+        before = measured[0].gp['min_length_scale']
+        measured.refit(self.fit_gp(min_length_scale=0.4))
+
+        assert measured[0].gp['min_length_scale'] == before
+        assert measured[1].state_dict is None
+
+    def test_the_copy_has_no_path_so_a_save_cannot_overwrite_the_original(
+            self, measured, tmp_path):
+        measured.save(tmp_path / 'run.json')
+
+        with pytest.raises(ValueError):
+            measured.refit(self.fit_gp()).save()
+
+    def test_it_restores_the_models_a_deletion_cleared(self, measured):
+        done = measured.delete_trial(0).refit(self.fit_gp())
+
+        assert len(done) == 1
+        assert done.get_model(0) is not None

@@ -165,3 +165,84 @@ def reference_point(values=None, bounds=None, maximize=None, margin=0.1):
     gap = margin * (high - low)
 
     return np.where(maximize, low - gap, high + gap)
+
+
+def reference_point_from_objectives(objectives, margin=0.1):
+    """The hypervolume reference for a `DecoupledObjectives`, (m,).
+
+    The objectives are decoupled, so each carries its own measurements in its
+    own number and there is no shared (n, m) array to read a range off. The
+    range is therefore taken per objective from its own `ydata`, and its own
+    `maximize` says which end is the bad one.
+
+    Args:
+        objectives: a `DecoupledObjectives`, in raw units.
+        margin: the gap past the worst end, as a fraction of each objective's
+            range.
+
+    Returns:
+        (m,) reference in each objective's own units, in objective order.
+    """
+    if not objectives.objectives:
+        raise ValueError('no objectives to take a reference point from')
+
+    for o in objectives.objectives:
+        if not o.ydata.size:
+            raise ValueError(f'{o.name} has no measurements to read a range off')
+
+    # (2, m): one [low, high] column per objective, from its own measurements
+    bounds = np.column_stack([[o.ydata.min(), o.ydata.max()]
+                              for o in objectives.objectives])
+
+    return reference_point(bounds   = bounds,
+                           maximize = [o.maximize for o in objectives.objectives],
+                           margin   = margin)
+
+
+def hypervolume_from_objectives(objectives, ref_point):
+    """The hypervolume the measurements of a `DecoupledObjectives` dominate,
+    in the objectives' own units.
+
+    The objectives are flipped to larger-is-better by their own `signs`, so a
+    minimized objective is handled without the caller negating anything, and
+    the volume is measured between the non-dominated front and `ref_point`. A
+    measurement beyond the reference on any objective adds nothing.
+
+    Every objective must be measured at the same actions, in the same order:
+    row `i` of the front is one point in objective space, so pairing the values
+    by position is only meaningful when position means the same action in every
+    column.
+
+    Args:
+        objectives: a `DecoupledObjectives`, in raw units.
+        ref_point: (m,) worst value per objective that still counts, in raw
+            units and objective order -- see `reference_point_from_objectives`.
+
+    Returns:
+        The hypervolume as a float, in the product of the objectives' units.
+    """
+    objs = objectives.objectives
+    if not objs:
+        raise ValueError('no objectives to take a hypervolume of')
+
+    actions = objs[0].xdata
+    for o in objs[1:]:
+        if o.xdata.shape != actions.shape or not np.allclose(o.xdata, actions):
+            raise ValueError(f'{o.name} is measured at different actions than '
+                             f'{objs[0].name}; a hypervolume pairs the values '
+                             'by position, so every objective needs the same '
+                             'actions in the same order')
+
+    ref_point = np.asarray(ref_point, dtype=float).ravel()
+    if len(ref_point) != len(objs):
+        raise ValueError(f'{len(ref_point)} reference values for {len(objs)} '
+                         'objectives; they are positional, so one per objective')
+
+    # maximization space, where the front is larger-is-better in every column
+    signs  = objectives.signs
+    values = signs * np.column_stack([o.ydata for o in objs])
+    front  = get_nondominated(values)
+
+    # the front sits above the reference in that space, so the difference is
+    # negative -- which is the minimization space HV measures from the origin
+    return hypervolume_from_nondominated(signs * ref_point - values[front])

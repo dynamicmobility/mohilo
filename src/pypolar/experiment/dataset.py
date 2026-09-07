@@ -10,7 +10,8 @@ refitting anything.
 """
 
 import json
-from dataclasses import asdict, dataclass, field
+from copy import deepcopy
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -23,8 +24,10 @@ from pypolar.optimization.gp import DTYPE, BoTorchGP, DecoupledMOGP, NoiseModel
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
 
 
-def _gp_record(gp: BoTorchGP | DecoupledMOGP):
-    """The arguments a GP was built with, read off the GP itself.
+def gp_record(gp: BoTorchGP | DecoupledMOGP):
+    """The arguments a GP was built with, read off the GP itself. This is what
+    `get_model` rebuilds one from, so anything writing a model into a trial
+    goes through here rather than spelling the dict out.
     """
     record = {
         'noise'            : asdict(gp.noise),
@@ -36,6 +39,11 @@ def _gp_record(gp: BoTorchGP | DecoupledMOGP):
         return record | {'objectives': gp.objectives.names}
 
     return record | {'objective': gp.objective.name}
+
+
+def state_dict_record(gp: BoTorchGP | DecoupledMOGP):
+    """A fitted GP's tensors as lists, which is what json holds."""
+    return {key: value.tolist() for key, value in gp.model.state_dict().items()}
 
 
 def _aux_array(value):
@@ -216,16 +224,114 @@ class ExperimentDataset:
             action       = None if action is None
                            else np.asarray(action, dtype=float).ravel(),
             source       = source,
-            state_dict   = None if gp is None
-                           else {key: value.tolist()
-                                 for key, value in gp.model.state_dict().items()},
-            gp           = None if gp is None else _gp_record(gp),
+            state_dict   = None if gp is None else state_dict_record(gp),
+            gp           = None if gp is None else gp_record(gp),
             aux          = {name: _aux_array(value)
                             for name, value in (aux or {}).items()},
         )
         self.trials.append(record)
 
         return record
+
+    def delete_trial(self, trial: int): # TODO: check and clean up this function
+        """A copy of this run with one trial removed, and returns it. This one
+        is left untouched.
+
+        A trial's `measurements` is a *cumulative* snapshot, so removing the
+        record alone would leave the trial's own measurements inside every
+        later snapshot. The rows it contributed are stripped from those too,
+        which is what makes the deletion reach a GP refit from a later trial.
+        Which rows those are is read per objective off the snapshot lengths --
+        the ones trial `i` holds and trial `i - 1` does not -- so an objective
+        that collected a different number of values than usual is handled with
+        no assumption about the repeat count.
+
+        Every model from `trial` on is cleared: each was fit to measurements
+        including the deleted ones, so its state dict no longer describes a fit
+        to the measurements the record now holds. Earlier fits never saw them
+        and are kept.
+
+        Args:
+            trial: the step to remove. Negative indices count from the end.
+
+        Returns:
+            a new `ExperimentDataset`, its trials renumbered from zero and its
+            `path` unset, so saving it needs a path and cannot overwrite the
+            record it came from.
+
+        Raises:
+            IndexError: there is no such trial.
+        """
+        index    = range(len(self.trials))[trial]
+        deleted  = self.trials[index]
+        previous = self.trials[index - 1].measurements if index else {}
+
+        # per objective, the half-open row range trial `index` added
+        added = {}
+        for name, record in deleted.measurements.items():
+            stop  = len(record['ydata'])
+            start = len(previous[name]['ydata']) if name in previous else 0
+            if stop > start:
+                added[name] = (start, stop)
+
+        trials = []
+        for position, record in enumerate(self.trials):
+            if position == index:
+                continue
+            record = deepcopy(record)
+            if position > index:
+                for name, (start, stop) in added.items():
+                    rows = range(start, stop)
+                    measurement = record.measurements[name]
+                    measurement['ydata'] = np.delete(measurement['ydata'], rows, axis=0)
+                    measurement['xdata'] = np.delete(measurement['xdata'], rows, axis=0)
+                record.state_dict = None
+                record.gp         = None
+
+            record.trial = len(trials)
+            trials.append(record)
+
+        return replace(self, trials=trials, path=None)
+
+    def refit(self, fit_gp):
+        """A copy of this run with every trial's GP refit, and returns it. This
+        one is left untouched.
+
+        A recorded state dict is the fit the run made *live*, under the
+        hyperparameters it was configured with. Refitting is how a run is read
+        back under different ones -- a different noise model or lengthscale
+        floor -- and how a run edited by `delete_trial` gets its models back,
+        since that clears every fit conditioned on a measurement it removed.
+
+        Args:
+            fit_gp: called as `fit_gp(objectives)` with one trial's
+                `DecoupledObjectives`, and returns the `BoTorchGP` or
+                `DecoupledMOGP` fit to them. Every hyperparameter is bound into
+                this callable, so each trial is refit under exactly one
+                configuration.
+
+        Returns:
+            a new `ExperimentDataset`, its `path` unset, so saving it needs a
+            path and cannot overwrite the record it came from.
+        """
+        trials = []
+        for position, record in enumerate(self.trials):
+            record   = deepcopy(record)
+            fittable = record.measurements and all(
+                len(m['ydata']) for m in record.measurements.values()
+            )
+            if fittable:
+                gp = fit_gp(self.get_objectives(position))
+                record.state_dict = state_dict_record(gp)
+                record.gp         = gp_record(gp)
+            else:
+                # an objective with no measurement has no posterior to fit
+                record.state_dict = None
+                record.gp         = None
+
+            trials.append(record)
+
+        return replace(self, trials=trials, path=None)
 
     def save(self, path=None):
         """Writes the run to json, and returns where it went.

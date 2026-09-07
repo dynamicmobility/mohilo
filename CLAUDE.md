@@ -591,6 +591,64 @@ rather than an analytic bump. This is the only module that evaluates one, so
   instance-owned `default_rng(seed)`, so repeated calls advance one stream
   rather than repeating a seeded draw.
 
+### Experiment records (`experiment/dataset.py`)
+
+`ExperimentDataset` is what a finished run leaves behind: one json file holding
+every trial's measurements, the GP fit to them, and the action that GP chose
+next. Only the one method below is documented here; the rest of `experiment/`
+is not yet covered in this file.
+
+**A trial's `measurements` is a cumulative snapshot**, not the values that trial
+alone collected. `add_trial` records the objectives *as they stand*, so trial 12
+holds all thirteen measurements taken up to and including it, and trial 13 holds
+all fourteen. Everything that reads a dataset depends on this — `get_objective`
+and `get_objectives` hand a trial's snapshot straight to
+`Objective.from_record`, which is what lets a GP be refit at any point in the
+run.
+
+**`delete_trial(trial)`** returns a *copy* of the run with that trial removed,
+leaving the original untouched. Two things follow from the snapshot being
+cumulative, and both are the point of the method:
+
+1. **The rows the trial contributed are stripped from every later snapshot.**
+   Dropping the record alone would leave the deleted measurements sitting inside
+   trials 13 onward, so a GP refit from any later trial would still see them and
+   the deletion would achieve nothing. Which rows to remove is read per
+   objective off the snapshot lengths — the ones trial `i` holds and trial
+   `i - 1` does not — rather than from the configured repeat count, so a trial
+   whose survey timed out and returned two ratings instead of three is handled
+   with no assumption.
+2. **Every model from `trial` on is cleared** (`state_dict` and `gp` set to
+   None). Each of those fits was conditioned on a measurement that no longer
+   exists, so its state dict no longer describes a fit to the measurements the
+   record now holds, and `get_model` at such a trial returns None rather than a
+   posterior that quietly disagrees with the data beside it. Fits from before
+   the deleted trial never saw the point and are kept.
+
+Trials are renumbered from zero, and the copy's `path` is unset, so saving it
+takes an explicit path and cannot overwrite the record it came from.
+
+**`refit(fit_gp)`** returns a copy with every trial's GP refit. `fit_gp` is
+called as `fit_gp(objectives)` with one trial's `DecoupledObjectives` and
+returns the fitted GP, so every hyperparameter — the noise model, the
+lengthscale floor, whether the kernel is fitted at all — is bound into that
+callable and every trial is refit under exactly one configuration. It is the
+same discipline `loo` uses for the same reason.
+
+Two uses. A recorded state dict is the fit the run made *live*, under whatever
+it was configured with, so refitting is how a finished run is read back under a
+different noise prior or a different `min_length_scale`; and it is how a run
+edited by `delete_trial` gets its models back, since that clears every fit
+conditioned on a measurement it removed. A trial where any objective has no
+measurement has no posterior to fit, so its model stays cleared rather than
+raising — a run that declared an objective and never measured it comes back with
+no models at all.
+
+`gp_record(gp)` and `state_dict_record(gp)` are the two module-level functions
+that turn a fitted GP into the dict a trial holds; `add_trial` and `refit` both
+go through them, so the record format `get_model` reads back is spelled in one
+place.
+
 ### Metrics (`performance/mo.py`, `performance/loo.py`, `performance/regret.py`, `utils/pareto.py`)
 
 - `get_nondominated(F)` — indices of the non-dominated front of `F` (higher is

@@ -12,7 +12,7 @@ from pypolar.optimization.objectives import (
     as_bounds,
     sample_actions
 )
-from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, get_nondominated_tol, hypervolume_from_nondominated, sparsity_from_normalized_nondominated
+from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, reference_point_from_objectives, get_nondominated_tol, hypervolume_from_nondominated, hypervolume_from_objectives, sparsity_from_normalized_nondominated
 from pypolar.utils.plotting import (
     plot_test_function, 
     plot_fit_1d, 
@@ -48,6 +48,8 @@ from pypolar.experiment import (
     Device,
     ExperimentDataset,
     TrialDataset,
+    gp_record,
+    state_dict_record,
     Ledger,
     Logger,
     Probe,
@@ -104,12 +106,16 @@ __all__ = [
     "get_nondominated",
     "get_nondominated_tol",
     "reference_point",
+    "reference_point_from_objectives",
     "hypervolume_from_nondominated",
+    "hypervolume_from_objectives",
     "sparsity_from_normalized_nondominated",
     # experiment
     "Device",
     "ExperimentDataset",
     "TrialDataset",
+    "gp_record",
+    "state_dict_record",
     "Ledger",
     "Logger",
     "Probe",

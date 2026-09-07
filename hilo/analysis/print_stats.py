@@ -19,9 +19,11 @@ print(c)
 print()
 print(met.ydata)
 
-pareto = np.stack([-c[[1, 3, 5]], met.ydata[[1, 3, 5]] - 6]).T
-antipareto = np.stack([-c[[0, 2, 4]], met.ydata[[0, 2, 4]] - 6]).T
+pareto = np.stack([-c[[1, 3, 5]], met.ydata[[1, 3, 5]]]).T
+antipareto = np.stack([-c[[0, 2, 4]], met.ydata[[0, 2, 4]]]).T
 print(pareto)
+print()
+print(antipareto)
 
-print(plr.hypervolume_from_nondominated(pareto))
-print(plr.hypervolume_from_nondominated(antipareto))
+print(plr.hypervolume_from_nondominated(pareto - 6))
+print(plr.hypervolume_from_nondominated(antipareto - 6))
