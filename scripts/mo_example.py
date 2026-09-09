@@ -19,19 +19,6 @@ RUNS_PER_ACQF = 3
 OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS    = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
-
-def fit_gp(
-    objective   : plr.DecoupledObjectives,
-    noise       : plr.NoiseModel = None,
-    hypers      : plr.GPHyperparameters = None
-):
-    return plr.DecoupledMOGP(
-        objectives          = objective,
-        noise               = hilo.GP_NOISE,
-        fit_hyperparameters = True,
-        min_length_scale    = hilo.MIN_LENGTHSCALE,
-    )
-
 def aux(
     gp              : plr.DecoupledMOGP,
     ground_truth    : plr.MOSyntheticOracle
@@ -76,7 +63,6 @@ def run_experiment(
         else:
             # fit gp + Acquisition strategy for the rest
             source = dataset.acquisition.strategy
-            # gp = fit_gp(experiment.objectives)
             action = acqf.query(gp, q=1)[0]
 
         experiment.begin_trial(
@@ -89,7 +75,12 @@ def run_experiment(
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
 
-        gp = fit_gp(experiment.objectives)
+        gp = plr.DecoupledMOGP(
+            objectives          = experiment.objectives,
+            noise               = hilo.GP_NOISE,
+            fit_hyperparameters = True,
+            min_length_scale    = hilo.MIN_LENGTHSCALE,
+        )
         dataset.add_trial(
             objectives  = experiment.objectives,
             gp          = gp,
@@ -97,14 +88,6 @@ def run_experiment(
             source      = source,
             aux         = aux(gp, ground_truth)
         )
-
-    # the run's final state: every measurement, and the fit to all of them
-    gp = fit_gp(experiment.objectives)
-    dataset.add_trial(
-        objectives  = experiment.objectives,
-        gp          = gp,
-        aux         = aux(gp, ground_truth)
-    )
 
     return experiment, gp, dataset
 
@@ -155,9 +138,6 @@ def run_trial(acq_strat, trial):
         dataset           = dataset,
         ground_truth      = hilo.MO_TRUTH
     )
-    # mu, std, models = plr.loo(gp.objective, fit_gp, noise=GP_NOISE)
-    # resid = mu - gp.objective.ydata
-    # print('SCORE', r2_score(gp.objective.ydata, mu))
     print(f'wrote {dataset.save()}')
 
 def main():

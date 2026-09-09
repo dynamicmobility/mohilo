@@ -386,6 +386,16 @@ class MOSyntheticOracle:
     def objective(self, index) -> SyntheticOracle:
         """Objective `index`, as a scalar `SyntheticOracle`."""
         return self.objectives[index]
+    
+    @property
+    def bounds(self):
+        bs = [self.objectives[i].truth.bounds for i in range(len(self.objectives))]
+        bs = np.asarray(bs)
+        lo, hi = bs[:, 0].max(0), bs[:, 1].min(0)
+        if np.any(lo > hi):
+            raise Exception(f'Found incompatible action bounds. collective lows = {lo}, collective highs = {hi}')
+        # return bs
+        return np.stack([lo, hi])
 
     def __len__(self):
         return len(self.objectives)
@@ -405,8 +415,8 @@ class MOSyntheticOracle:
     def from_name(
         cls,
         func            : str,
-        dim             : int,
-        box             : float,
+        dim             : int           = None,
+        box             : float         = None,
         seed            : int           = 0,
         rel_noise_std   : float         = 0.0,
         num_objectives  : int | None    = None,

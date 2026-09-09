@@ -441,11 +441,6 @@ class DecoupledObjectives:
     def signs(self):
         """(m,) +1 where an objective is maximized and -1 where it is
         minimized, in objective order.
-
-        The direction belongs here rather than to a groundtruth: a truth only
-        says what a function is worth at an action, and BoTorch states every
-        one of its own in the minimizing sense. Which way each is optimized is
-        the task, which is what this class describes.
         """
         return np.array([o.sign for o in self.objectives])
 

@@ -38,7 +38,7 @@ def _attained_fraction(
             `max_hypervolume`.
         signs: (m,) +1 on a maximized objective, -1 on a minimized one.
     """
-    values = signs * np.asarray(true_objs, dtype=float)
+    values = signs * np.asarray(true_objs, dtype=float) # force than attained frac is always in max space and build a transform for this in objs
     front  = get_nondominated(values)
 
     return hypervolume_from_nondominated(

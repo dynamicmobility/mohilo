@@ -6,12 +6,14 @@ from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
 import numpy as np
 
 def get_nondominated(F, epsilon=None):
+    """Gets nondominated points in the maximization space"""
     nds = NonDominatedSorting(epsilon=epsilon)
     front_indices = nds.do(-F, only_non_dominated_front=True)
     return front_indices
 
 def get_nondominated_tol(F, tol=0.0, block=512):
-    """Non-dominated front with a tolerance for "just barely" dominated points.
+    """Non-dominated front with a tolerance for "just barely" dominated points
+    in the maximization space.
 
     ``tol`` is a fraction of each objective's range (so it is scale-invariant
     across objectives and configs). A point is dropped only when some other
