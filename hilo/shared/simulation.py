@@ -18,15 +18,16 @@ SURVEY_TIMEOUT   = 0.0
 SURVEY_PERIOD    = 0.0
 METABOLIC_PERIOD = 0.0
 REF_MARGIN       = 0.1  # reference sits this fraction of the front's extent past its nadir
-TRUE_NOISE       = 0.5
+TRUE_NOISE       = 0.0 #0.5
 
 # Optimization
 SEED             = 95
 NUM_QUERIES      = 45
 ACQ_STRAT        = 'qlognehvi'
 ACQ_KWARGS       = {}
-GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
-MIN_LENGTHSCALE  = 0.2
+# GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
+GP_NOISE         = plr.NoiseModel.prior(0.01)
+MIN_LENGTHSCALE  = 0.05
 NUM_RANDOM       = 3
 
 
@@ -50,14 +51,13 @@ REF_POINT       = plr.reference_point(
     margin   = REF_MARGIN
 )
 
-# the reference the run optimizes against travels with the groundtruth, so a
-# metric reading a saved run back scores it against the same one
+# recorded on the params, so a metric reading a saved run back scores it
+# against the reference the run optimized against
 GROUND_TRUTH_PARAMS = replace(GROUND_TRUTH_PARAMS, ref_point=tuple(REF_POINT))
-MO_TRUTH            = GROUND_TRUTH_PARAMS.build()
 
 # Actions
-DIM             = MO_TRUTH.objectives[0].truth.dim
-BOUNDS          = plr.as_bounds(MO_TRUTH.objectives[0].truth.bounds)
+DIM             = MO_TRUTH.get_oracle(0).truth.dim
+BOUNDS          = plr.as_bounds(MO_TRUTH.get_oracle(0).truth.bounds)
 ACTION_NAMES     = [f'x{i}' for i in range(DIM)]
 OUTPUT_DIR       = Path('hilo/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 

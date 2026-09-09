@@ -281,21 +281,18 @@ class MOSyntheticOracle:
         measure: 'std' or 'range', as `SyntheticOracle` takes it.
         n_spread: points in each spread scan.
         seed: seeds the scans and the noise draws.
-        ref_point: (m,) the worst value per objective that still counts, in the
-            truth's own units. A `MultiObjectiveTestProblem` supplies its own,
-            so it is required only for a list of functions.
 
     Attributes:
-        objectives: the m `SyntheticOracle`s, in the truth's objective order.
+        oracles: the m `SyntheticOracle`s, in the truth's objective order.
         measure_spread: (m,) each objective's measured spread, in its own units.
         noise_std: (m,) the absolute noise standard deviation applied to each.
-        ref_point: (m,) the hypervolume reference, in the truth's own units.
         scan_actions, scan_values: the (n_spread, d) Sobol scan of the box and
             the (n_spread, m) noiseless values there.
-        sampled_max_hypervolume: the hypervolume of the scan's own front with
-            every objective minimized, the multi-objective analog of a
-            `SyntheticOracle`'s `sample_min`. `max_hypervolume` is the same
-            measurement in any direction.
+
+    The truth carries no direction of its own -- BoTorch states every one of its
+    functions in the minimizing sense -- so which way each column is optimized,
+    and hence what its hypervolume means, comes from a `DecoupledObjectives`
+    handed to `max_hypervolume`.
     """
 
     def __init__(
@@ -343,42 +340,43 @@ class MOSyntheticOracle:
         # TODO: make this more efficient in the future. Currently samples each objective many times (see how __call__ works for each objective)
         self.scan_values = self(self.scan_actions, noise=False)
 
-    # def max_hypervolume(self, signs=None):
-    #     """The hypervolume of the scan's own front, in the direction `signs`
-    #     states: +1 where an objective is maximized, -1 where it is minimized.
-    #     """
-    #     signs = (-np.ones(len(self.objectives)) if signs is None
-    #              else np.asarray(signs, dtype=float).ravel())
-    #     if len(signs) != len(self.objectives):
-    #         raise ValueError(f'{len(signs)} signs for {len(self.objectives)} '
-    #                          'objectives; they are positional, so one per column')
-
-    #     key = tuple(signs)
-    #     if key not in self._max_hypervolume:
-    #         values = signs * self.scan_values
-    #         self._max_hypervolume[key] = hypervolume_from_nondominated(
-    #             signs * self.ref_point - values[get_nondominated(values)]
-    #         )
-
-    #     return self._max_hypervolume[key]
+        self._max_hypervolume = {}
 
     def max_hypervolume(self, objectives, ref_point=None):
-        assert len(self.oracles) == objectives.num_objectives
+        """The hypervolume of the scan's own front, in the directions
+        `objectives` states -- the best a finite scan of the box manages, and
+        the denominator a run's attained hypervolume is a fraction of.
+
+        Args:
+            objectives: a `DecoupledObjectives`, one per truth column in the
+                truth's own order. Only its directions are read.
+            ref_point: (m,) the worst value per objective that still counts, in
+                the truth's own units. None reads it off the scan.
+
+        Returns:
+            The hypervolume as a float.
+        """
+        if objectives.num_objectives != len(self.oracles):
+            raise ValueError(f'{objectives.num_objectives} objectives '
+                             f'{objectives.names} against {len(self.oracles)} '
+                             'truth columns; they are positional, so one per '
+                             "column in the truth's order")
+
         if ref_point is None:
-            ref_point = reference_point(
-                values    = self.scan_values,
-                maximize  = [o.maximize for o in objectives]
+            ref_point = reference_point(values   = self.scan_values,
+                                        maximize = objectives.maximize)
+
+        # the direction is the whole key: the same scan against the same
+        # reference measures a different region read the other way
+        key = (tuple(objectives.signs), tuple(np.ravel(ref_point)))
+        if key not in self._max_hypervolume:
+            values = objectives.maximization_space(self.scan_values)
+            ref    = objectives.maximization_space(ref_point)[0]
+            self._max_hypervolume[key] = hypervolume_from_nondominated(
+                ref - values[get_nondominated(values)]
             )
-        ms_values = objectives.maximization_space(self.scan_values)
-        ms_ref    = objectives.maximization_space(ref_point[np.newaxis, :])
 
-        return hypervolume_from_nondominated(ms_ref[0] - ms_values)
-
-
-    @property
-    def sampled_max_hypervolume(self): # TODO: remove
-        """`max_hypervolume` with every objective minimized."""
-        return self.max_hypervolume()
+        return self._max_hypervolume[key]
 
     def get_oracle(self, index) -> SyntheticOracle:
         """Objective `index`, as a scalar `SyntheticOracle`."""
@@ -418,8 +416,7 @@ class MOSyntheticOracle:
         rel_noise_std   : float         = 0.0,
         num_objectives  : int | None    = None,
         measure         : str           = 'range',
-        n_spread        : int           = SPREAD_SAMPLES,
-        ref_point       : np.ndarray | None = None
+        n_spread        : int           = SPREAD_SAMPLES
     ):
         """One oracle, from arguments plain enough to store and replay."""
         truth = construct_function(
@@ -437,8 +434,7 @@ class MOSyntheticOracle:
             rel_noise_std   = rel_noise_std,
             measure         = measure,
             n_spread        = n_spread,
-            seed            = seed,
-            ref_point       = ref_point
+            seed            = seed
         )
 
 @dataclass(frozen=True)
@@ -453,9 +449,10 @@ class SyntheticOracleParams:
         num_objectives: m, for the multi-objective families that take it
             (DTLZ*, ZDT*, GMM). Single-objective params leave it None.
         ref_point: (m,) hypervolume reference in the truth's own units, or None
-            to take the function's own. Recorded here so a metric scores a run
-            against the reference the run was optimized against; a hypervolume
-            is only comparable under one reference. Multi-objective only.
+            to let a metric read one off the truth's scan. Recorded here rather
+            than on the oracle so a metric scores a run against the reference
+            the run was optimized against; a hypervolume is only comparable
+            under one reference. Multi-objective only.
     """
 
     func            : str
@@ -516,8 +513,10 @@ class SyntheticOracleParams:
         if not self.multi_objective:
             return SyntheticOracle.from_name(**shared)
 
+        # ref_point is recorded, not built in: it states how a hypervolume is
+        # read, which is a metric's argument rather than the truth's property
         oracle = MOSyntheticOracle.from_name(num_objectives=self.num_objectives,
-                                             ref_point=self.ref_point, **shared)
+                                             **shared)
         if len(self.objectives) != len(oracle):
             raise ValueError(f'{self.func} has {len(oracle)} output columns, got '
                              f'{len(self.objectives)} objective names')

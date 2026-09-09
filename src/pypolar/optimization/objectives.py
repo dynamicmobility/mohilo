@@ -241,16 +241,15 @@ class Objective:
         return mu, std
     
     def maximization_space(self, data):
-        """Converts data from the input space to output space to be maximized.
-        No scaling effect.
+        """Raw values with this objective's direction applied, so larger is
+        better. Sign only: no scale and no shift, so the values stay in the
+        objective's own units and the map does not move as points arrive.
         """
-        return self.ytransform.scale * data
-    
+        return self.sign * data
+
     def minimization_space(self, data):
-        """Converts data from the input space to output space to be minimized.
-        No scaling effect.
-        """
-        return -1.0 * self.ytransform.scale * data
+        """`maximization_space` the other way up, so smaller is better."""
+        return -self.sign * data
     
     def __iadd__(self, other):
         """Appends another objective's measurements to this one, in place.
@@ -438,14 +437,24 @@ class DecoupledObjectives:
         ])
     
     def maximization_space(self, data: np.ndarray):
-        assert data.shape[1] == self.num_objectives
-        ret = [obj.maximization_space(d) for obj, d in zip(self.objectives, data.T)]
-        return ret
+        """(n, m) raw values with each column's own direction applied, so every
+        column is larger-is-better. Sign only, so the values stay in each
+        objective's own units."""
+        data = np.atleast_2d(np.asarray(data, dtype=float))
+        if data.shape[1] != self.num_objectives:
+            raise ValueError(f'{data.shape[1]} columns for {self.num_objectives} '
+                             f'objectives {self.names}; they are positional, so '
+                             'one column per objective in this order')
 
-    def maximization_space(self, data: np.ndarray):
-        assert data.shape[1] == self.num_objectives
-        ret = [obj.minimization_space(d) for obj, d in zip(self.objectives, data.T)]
-        return ret
+        return np.column_stack([
+            obj.maximization_space(column)
+            for obj, column in zip(self.objectives, data.T)
+        ])
+
+    def minimization_space(self, data: np.ndarray):
+        """`maximization_space` the other way up, so every column is
+        smaller-is-better."""
+        return -self.maximization_space(data)
 
     @property
     def names(self):
@@ -468,6 +477,7 @@ class DecoupledObjectives:
     
     @property
     def maximize(self):
+        """(m,) whether each objective is maximized, in objective order."""
         return [o.maximize for o in self.objectives]
 
     # TODO: check over this later
