@@ -16,7 +16,7 @@ from botorch.test_functions.base import (
 
 from pypolar.optimization.gp import DTYPE
 from pypolar.optimization.objectives import sample_actions
-from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated
+from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated, reference_point
 
 SPREAD_SAMPLES = 4096   # Sobol points a spread is measured over
 PROBE_SAMPLES  = 32     # Sobol points a candidate instance is probed at
@@ -305,13 +305,12 @@ class MOSyntheticOracle:
         measure         : str   = 'range',
         n_spread        : int   = SPREAD_SAMPLES,
         seed            : int   = 0,
-        ref_point       : np.ndarray | None = None
     ):
         self.truth         = truth
         self.rel_noise_std = rel_noise_std
 
         if isinstance(truth, MultiObjectiveTestProblem):
-            self.objectives = [
+            self.oracles = [
                 SyntheticOracle(
                     truth           = MO2SO(truth, w),
                     rel_noise_std   = rel_noise_std,
@@ -322,7 +321,7 @@ class MOSyntheticOracle:
                 for i, w in enumerate(np.eye(truth.num_objectives))
             ]
         else:
-            self.objectives = [
+            self.oracles = [
                 SyntheticOracle(
                     truth           = synfunc,
                     rel_noise_std   = rel_noise_std,
@@ -332,24 +331,11 @@ class MOSyntheticOracle:
                 )
                 for i, synfunc in enumerate(truth)  
             ]
-        self.measure_spread = np.array([o.measure_spread for o in self.objectives])
-        self.noise_std      = np.array([o.noise_std for o in self.objectives])
-
-        if ref_point is None:
-            if not isinstance(truth, MultiObjectiveTestProblem):
-                raise ValueError('ref_point is required for a list of functions')
-            ref_point = truth.ref_point.numpy()
-        
-        self.ref_point = np.broadcast_to(
-            array = np.asarray(
-                ref_point, 
-                dtype=float
-            ),
-            shape = (len(self.objectives),)
-        )
+        self.measure_spread = np.array([o.measure_spread for o in self.oracles])
+        self.noise_std      = np.array([o.noise_std for o in self.oracles])
 
         self.scan_actions = sample_actions(
-            bounds    = self.objectives[0].truth.bounds,
+            bounds    = self.oracles[0].truth.bounds,
             n         = n_spread,
             kind      = 'sobol',
             seed      = seed
@@ -357,39 +343,50 @@ class MOSyntheticOracle:
         # TODO: make this more efficient in the future. Currently samples each objective many times (see how __call__ works for each objective)
         self.scan_values = self(self.scan_actions, noise=False)
 
-        self._max_hypervolume = {}
+    # def max_hypervolume(self, signs=None):
+    #     """The hypervolume of the scan's own front, in the direction `signs`
+    #     states: +1 where an objective is maximized, -1 where it is minimized.
+    #     """
+    #     signs = (-np.ones(len(self.objectives)) if signs is None
+    #              else np.asarray(signs, dtype=float).ravel())
+    #     if len(signs) != len(self.objectives):
+    #         raise ValueError(f'{len(signs)} signs for {len(self.objectives)} '
+    #                          'objectives; they are positional, so one per column')
 
-    def max_hypervolume(self, signs=None):
-        """The hypervolume of the scan's own front, in the direction `signs`
-        states: +1 where an objective is maximized, -1 where it is minimized.
-        """
-        signs = (-np.ones(len(self.objectives)) if signs is None
-                 else np.asarray(signs, dtype=float).ravel())
-        if len(signs) != len(self.objectives):
-            raise ValueError(f'{len(signs)} signs for {len(self.objectives)} '
-                             'objectives; they are positional, so one per column')
+    #     key = tuple(signs)
+    #     if key not in self._max_hypervolume:
+    #         values = signs * self.scan_values
+    #         self._max_hypervolume[key] = hypervolume_from_nondominated(
+    #             signs * self.ref_point - values[get_nondominated(values)]
+    #         )
 
-        key = tuple(signs)
-        if key not in self._max_hypervolume:
-            values = signs * self.scan_values
-            self._max_hypervolume[key] = hypervolume_from_nondominated(
-                signs * self.ref_point - values[get_nondominated(values)]
+    #     return self._max_hypervolume[key]
+
+    def max_hypervolume(self, objectives, ref_point=None):
+        assert len(self.oracles) == objectives.num_objectives
+        if ref_point is None:
+            ref_point = reference_point(
+                values    = self.scan_values,
+                maximize  = [o.maximize for o in objectives]
             )
+        ms_values = objectives.maximization_space(self.scan_values)
+        ms_ref    = objectives.maximization_space(ref_point[np.newaxis, :])
 
-        return self._max_hypervolume[key]
+        return hypervolume_from_nondominated(ms_ref[0] - ms_values)
+
 
     @property
-    def sampled_max_hypervolume(self):
+    def sampled_max_hypervolume(self): # TODO: remove
         """`max_hypervolume` with every objective minimized."""
         return self.max_hypervolume()
 
-    def objective(self, index) -> SyntheticOracle:
+    def get_oracle(self, index) -> SyntheticOracle:
         """Objective `index`, as a scalar `SyntheticOracle`."""
-        return self.objectives[index]
+        return self.oracles[index]
     
     @property
     def bounds(self):
-        bs = [self.objectives[i].truth.bounds for i in range(len(self.objectives))]
+        bs = [self.oracles[i].truth.bounds for i in range(len(self.oracles))]
         bs = np.asarray(bs)
         lo, hi = bs[:, 0].max(0), bs[:, 1].min(0)
         if np.any(lo > hi):
@@ -398,10 +395,10 @@ class MOSyntheticOracle:
         return np.stack([lo, hi])
 
     def __len__(self):
-        return len(self.objectives)
+        return len(self.oracles)
 
     def __getitem__(self, index):
-        return self.objectives[index]
+        return self.oracles[index]
 
     def __call__(self, X, noise=True):
         """Values at the (n, d) actions X, returned (n, m).
@@ -409,7 +406,7 @@ class MOSyntheticOracle:
         Each column draws from its own objective's generator, so the noise is
         independent across the objectives.
         """
-        return np.stack([o(X, noise=noise) for o in self.objectives], axis=-1)
+        return np.stack([o(X, noise=noise) for o in self.oracles], axis=-1)
     
     @classmethod
     def from_name(

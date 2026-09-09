@@ -8,7 +8,7 @@ from pypolar.feedback.synthetic import MOSyntheticOracle
 from pypolar.optimization.objectives import DecoupledObjectives
 from pypolar.utils.pareto import (gd_plus, get_nondominated, get_nondominated_tol,
                                   get_pareto_statistics,
-                                  hypervolume_from_nondominated)
+                                  hypervolume_from_nondominated, reference_point)
 
 
 def _signs(objectives, ground_truth: MOSyntheticOracle):
@@ -24,22 +24,26 @@ def _signs(objectives, ground_truth: MOSyntheticOracle):
 
 
 def _attained_fraction(
-    true_objs       : np.ndarray,
+    pred_values       : np.ndarray,
     ground_truth    : MOSyntheticOracle,
-    signs           : np.ndarray
+    # signs           : np.ndarray
 ):
     """Fraction of the truth's own hypervolume that a set of objective
     vectors from the truth function covers (usually, the predicted Pareto
     optimal actions that the GP predicted).
 
     Args:
-        true_objs: (n, m) *true* objective values, in the truth's own raw units.
+        true_objs: (n, m) *true* objective values, in the truth's own raw units in maximization space
         ground_truth: the oracle, carrying `ref_point` and the scan's
             `max_hypervolume`.
         signs: (m,) +1 on a maximized objective, -1 on a minimized one.
     """
-    values = signs * np.asarray(true_objs, dtype=float) # force than attained frac is always in max space and build a transform for this in objs
-    front  = get_nondominated(values)
+    # values = signs * np.asarray(true_objs, dtype=float) # force than attained frac is always in max space and build a transform for this in objs
+    front  = get_nondominated(pred_values)
+    hv = hypervolume_from_nondominated(
+        ref_point - pred_values[front]
+    )
+    return hv / max_hv
 
     return hypervolume_from_nondominated(
         signs * ground_truth.ref_point - values[front]
@@ -47,26 +51,52 @@ def _attained_fraction(
 
 
 def normalized_hypervolume_regret( # TODO: potentially add a k-sampling to avoid the fact that hypervolume strictly increases with more points
-    gp,
-    ground_truth    : MOSyntheticOracle,
-    tol             : float = 0.0
+    # gp,
+    # ground_truth    : MOSyntheticOracle,
+    pred_values     : np.ndarray,
+    objectives, # plr.DecoupledObjectives
+    max_hv          : np.ndarray,
+    tol             : float = 0.0,
+    ref_point       : np.ndarray = None
 ):
     """The inference hypervolume regret of a model: one minus the ratio between
     the ground truth's max hypervolume and the hypervolume produced by the GP's
     predicted Pareto optimal actions. Between 0 and 1 (0 is better).
 
     Args:
-        gp: a `DecoupledMOGP`, or anything whose `posterior_at` returns
-            (n, m) means in maximization space.
-        ground_truth: the oracle, whose `scan_actions` and `scan_values` are
-            the discretization the fronts are compared over.
-        tol: relaxes non-domination by a fraction of each objective's range
-            (see `get_nondominated_tol`), keeping near-ties on the estimated
-            front. Optimistic, since hypervolume only grows as the set does.
-
+        pred_values: raw values predicted to be on the front
+        objectives: a DecoupledObjectives structure holding the maximization direction of each objective
+        max_hv: the maximum possible hypervolume (replace with groundtruth?)
+        tol: tolerance for Pareto dominated exclusion
+        ref: the reference point for hypervolume calc. if None, it is inferred from objectives and pred_values
     Returns:
         The regret, as a fraction of the truth's hypervolume in [0, 1].
     """
+
+    # values = signs * np.asarray(true_objs, dtype=float) # force than attained frac is always in max space and build a transform for this in objs
+    if ref_point is None:
+        ref_point = reference_point(
+            values = pred_values,
+            maximize = objectives.maximize
+        )
+
+    ms_values = objectives.maximization_space(pred_values)
+    front  = get_nondominated(ms_values)
+    hv = hypervolume_from_nondominated(
+        ref_point - ms_values[front]
+    )
+    return hv / max_hv
+
+    mu, _ = gp.posterior_at(ground_truth.scan_actions)
+    front = get_nondominated(mu, tol)
+    
+    max_hv = ground_truth.max_hypervolume()
+    return 1.0 - _attained_fraction(
+        pred_values=
+    )
+
+
+
     signs = _signs(gp.objectives, ground_truth)
     mu, _ = gp.posterior_at(ground_truth.scan_actions)
     front = get_nondominated_tol(mu, tol)

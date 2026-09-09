@@ -77,14 +77,14 @@ def make_probes_mo(ipad=None, multithread=False):
     probes = [
         plr.Probe(
             name              = METABOLIC,
-            caller            = lambda action, trial_num: MO_TRUTH.objective(0)(action),
+            caller            = lambda action, trial_num: MO_TRUTH.get_oracle(0)(action),
             repeats           = REPEATS[METABOLIC],
             obj_name          = METABOLIC,
             separate_thread   = multithread
         ),
         plr.Probe(
             name              = COMFORT,
-            caller            = lambda action, trial, timeout, period: MO_TRUTH.objective(1)(action),
+            caller            = lambda action, trial, timeout, period: MO_TRUTH.get_oracle(1)(action),
             repeats           = REPEATS[COMFORT],
             obj_name          = COMFORT,
             separate_thread   = multithread

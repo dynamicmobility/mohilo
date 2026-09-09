@@ -240,6 +240,18 @@ class Objective:
         std = self.ytransform.inv_scale(std)
         return mu, std
     
+    def maximization_space(self, data):
+        """Converts data from the input space to output space to be maximized.
+        No scaling effect.
+        """
+        return self.ytransform.scale * data
+    
+    def minimization_space(self, data):
+        """Converts data from the input space to output space to be minimized.
+        No scaling effect.
+        """
+        return -1.0 * self.ytransform.scale * data
+    
     def __iadd__(self, other):
         """Appends another objective's measurements to this one, in place.
         The two must name the same quantity and optimize it in the same
@@ -424,6 +436,16 @@ class DecoupledObjectives:
         return np.column_stack([
             self.objectives[i].ytransform(data[:, i]) for i in range(len(self))
         ])
+    
+    def maximization_space(self, data: np.ndarray):
+        assert data.shape[1] == self.num_objectives
+        ret = [obj.maximization_space(d) for obj, d in zip(self.objectives, data.T)]
+        return ret
+
+    def maximization_space(self, data: np.ndarray):
+        assert data.shape[1] == self.num_objectives
+        ret = [obj.minimization_space(d) for obj, d in zip(self.objectives, data.T)]
+        return ret
 
     @property
     def names(self):
@@ -443,6 +465,10 @@ class DecoupledObjectives:
         minimized, in objective order.
         """
         return np.array([o.sign for o in self.objectives])
+    
+    @property
+    def maximize(self):
+        return [o.maximize for o in self.objectives]
 
     # TODO: check over this later
     @property
@@ -570,7 +596,7 @@ class DecoupledObjectives:
             np.array([o.standard_y.min() for o in self._select(objs)]), objs
         )
 
-    def range(self, objs=None):
+    def range(self, objs=None): # TODO: this is in standardized values, shouldnt it be in raw units?
         """Per-objective [min, max] of the standardized values. Shape (num_objs, 2),
         or (2,) for a single objective."""
         return np.stack([self.min(objs), self.max(objs)], axis=-1)
