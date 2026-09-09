@@ -41,11 +41,11 @@ python -m pytest tests/ -v
 
 
 ```
-python -m hilo.fit_mogp --subject MB03 --no-emulate --connect
+python -m hilo.fit_mogp --subject MB05 --no-emulate --connect
 ```
 
 ```
-python -m hilo.fit_mogp --subject MB03 --no-emulate --connect --resume PATH
+python -m hilo.fit_mogp --subject MB05 --no-emulate --connect --resume PATH
 ```
 
 ```

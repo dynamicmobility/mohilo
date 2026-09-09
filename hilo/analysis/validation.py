@@ -38,9 +38,9 @@ def compare_ordering(
         op = Op('<=') if obj.maximize else Op('>=')
         
         print(f'For objective {obj.name}')
-        print(f'LEFT vs. MIDDLE:\t {left:.2f} {op.op} {middle:.2f}. {op(left, middle)}.')
-        print(f'MIDDLE vs. RIGHT:\t {middle:.2f} {op.op} {right:.2f}. {op(middle, right)}.')
-        print(f'LEFT vs. RIGHT: \t {left:.2f} {op.op} {right:.2f}. {op(left, right)}.')
+        print(f'LEFT vs. MIDDLE:\t {left:.4f} {op.op} {middle:.4f}. {op(left, middle)}.')
+        print(f'MIDDLE vs. RIGHT:\t {middle:.4f} {op.op} {right:.4f}. {op(middle, right)}.')
+        print(f'LEFT vs. RIGHT: \t {left:.4f} {op.op} {right:.2f}. {op(left, right)}.')
         print()
     print('============================')
 
