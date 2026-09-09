@@ -9,17 +9,12 @@ from pypolar.feedback.oracles import (
     MultiObjectiveOracle,
     NoisyRegressionOracle,
 )
-from pypolar.feedback.rewards import (
-    InternalReward,
-    IdealPoint,
-    NonStationaryIdealPoint,
-    MultiObjectiveIdealPoint,
-    BoundedIdealPoint
-)
+from pypolar.feedback.rewards import InternalReward
 from pypolar.feedback.synthetic import (
     SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
     MO_SYNTHETIC_FUNCTIONS,
+    IdealPoint,
     SyntheticOracle,
     MOSyntheticOracle,
     SyntheticOracleParams,
@@ -37,13 +32,10 @@ __all__ = [
     "MultiObjectiveOracle",
     "NoisyRegressionOracle",
     "InternalReward",
-    "IdealPoint",
-    "NonStationaryIdealPoint",
-    "MultiObjectiveIdealPoint",
-    "BoundedIdealPoint",
     "SYNTHETIC_FUNCTIONS",
     "SYNTHETIC_1D_FUNCTIONS",
     "MO_SYNTHETIC_FUNCTIONS",
+    "IdealPoint",
     "SyntheticOracle",
     "MOSyntheticOracle",
     "SyntheticOracleParams",

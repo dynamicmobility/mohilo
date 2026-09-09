@@ -15,11 +15,83 @@ from botorch.test_functions.base import (
 )
 
 from pypolar.optimization.gp import DTYPE
-from pypolar.optimization.objectives import sample_actions
+from pypolar.optimization.objectives import as_bounds, sample_actions
 from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated, reference_point
 
 SPREAD_SAMPLES = 4096   # Sobol points a spread is measured over
 PROBE_SAMPLES  = 32     # Sobol points a candidate instance is probed at
+
+class IdealPoint(SyntheticTestFunction): # TODO: check this with plotting
+    r"""A quadratic bowl with a single optimum at a declared point.
+
+        f(x) = sum_k weights_k * (x_k - optimum_k)^2 + offset
+
+    Stated in the minimizing sense, as every BoTorch test function is, so the
+    optimum is a minimum and its value is `offset`. Direction is `Objective`'s
+    to state, through `maximize`.
+
+    Args:
+        optimum: (d,) the minimizer, or a scalar shared by every dimension.
+            Defaults to the origin, so the class is constructible from a `dim`
+            and a `box` alone, the way a registry entry is.
+        weights: per-dimension curvature, a scalar or (d,). Larger is sharper.
+        offset: the value at the optimum.
+        dim: d. Needed only to widen a scalar `optimum`.
+        bounds: (low, high) pairs, one per dimension -- the orientation a
+            `SyntheticTestFunction` constructor takes. Defaults to the
+            zero-centered box just wide enough to hold the optimum, at half-width
+            1 or more, so bowls with different optima share a box by default.
+        noise_std, negate, dtype: as `SyntheticTestFunction` takes them.
+    """
+
+    def __init__(
+        self,
+        optimum     : np.ndarray | float   = 0.0,
+        weights     : np.ndarray | float   = 1.0,
+        offset      : float                = 0.0,
+        dim         : int | None           = None,
+        bounds      : list[tuple[float, float]] | None = None,
+        noise_std   : float | None         = None,
+        negate      : bool                 = False,
+        dtype       : torch.dtype          = DTYPE
+    ):
+        optimum = np.atleast_1d(np.asarray(optimum, dtype=float))
+        if optimum.ndim != 1:
+            raise ValueError('optimum must be a scalar or (d,), got shape '
+                             f'{optimum.shape}')
+        if dim is not None:
+            if optimum.size == 1:
+                optimum = np.full(dim, optimum.item())
+            elif optimum.size != dim:
+                raise ValueError(f'optimum has {optimum.size} entries against '
+                                 f'dim {dim}')
+
+        weights = np.asarray(weights, dtype=float)
+        if weights.size not in (1, optimum.size):
+            raise ValueError(f'weights has {weights.size} entries against '
+                             f'{optimum.size} action dimensions')
+        weights = np.broadcast_to(weights, optimum.shape).astype(float)
+
+        self.dim             = optimum.size
+        self.continuous_inds = list(range(self.dim))
+        if bounds is None:
+            half   = max(1.0, float(np.abs(optimum).max()))
+            bounds = [(-half, half)] * self.dim
+
+        # the base class checks a custom box against these, so a box excluding
+        # the optimum raises here rather than silently moving it
+        self._optimizers    = [tuple(optimum)]
+        self._optimal_value = float(offset)
+        super().__init__(noise_std=noise_std, negate=negate, bounds=bounds,
+                         dtype=dtype)
+
+        self.register_buffer('optimum', torch.tensor(optimum, dtype=dtype))
+        self.register_buffer('weights', torch.tensor(weights, dtype=dtype))
+        self.offset = float(offset)
+
+    def _evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
+        return ((X - self.optimum) ** 2 * self.weights).sum(-1) + self.offset
+
 
 SYNTHETIC_FUNCTIONS = {
     'Ackley'                  : synthetic.Ackley,
@@ -33,6 +105,7 @@ SYNTHETIC_FUNCTIONS = {
     'Griewank'                : synthetic.Griewank,
     'Hartmann'                : synthetic.Hartmann,
     'HolderTable'             : synthetic.HolderTable,
+    'IdealPoint'              : IdealPoint,
     'Levy'                    : synthetic.Levy,
     'Michalewicz'             : synthetic.Michalewicz,
     'Powell'                  : synthetic.Powell,
@@ -52,6 +125,7 @@ SYNTHETIC_1D_FUNCTIONS = {
     'Ackley'                  : synthetic.Ackley,
     'DixonPrice'              : synthetic.DixonPrice,
     'Griewank'                : synthetic.Griewank,
+    'IdealPoint'              : IdealPoint,
     'Levy'                    : synthetic.Levy,
     'Michalewicz'             : synthetic.Michalewicz,
     'Rastrigin'               : synthetic.Rastrigin,
@@ -90,6 +164,11 @@ def truth_at(
         return truth(torch.as_tensor(X, dtype=DTYPE), noise=False).numpy()
 
 
+def _bound_pairs(box, dim):
+    """A box, as the (low, high)-per-dimension list a botorch constructor takes."""
+    return [tuple(pair) for pair in as_bounds(box, dim=dim).T.tolist()]
+
+
 def construct_function(
     func              : type[SyntheticTestFunction] | type[MultiObjectiveTestProblem],
     dim               : int,
@@ -100,14 +179,15 @@ def construct_function(
     """One non-constant instance of func at the requested dim, or None if it has
     no such instance.
 
-    Defaults to the [-box, box] action box and falls back to the function's own
+    Defaults to the action box `box` states and falls back to the function's own
     default bounds. No multi-objective problem accepts a `bounds` argument at
     all, so for those the box is inert and `truth.bounds` is the domain.
 
     Args:
         func: a `SyntheticTestFunction` or `MultiObjectiveTestProblem` subclass.
         dim: the action dimension wanted.
-        box: half-width of the preferred action box, or None when the
+        box: the preferred action box, anything `as_bounds` takes -- a scalar
+            half-width for `[-box, box]`, or a (low, high) pair. None when the
             function states its own.
         num_objectives: m, for the families that take it (DTLZ*, ZDT*, GMM).
         seed: seeds the non-constant probe.
@@ -119,8 +199,10 @@ def construct_function(
     takes  = signature(func).parameters
     shared = {'num_objectives': num_objectives} if num_objectives is not None else {}
 
-    boxed = [] if box is None else [{'dim': dim, 'bounds': [(-box, box)] * dim},
-                                    {'bounds': [(-box, box)] * dim}]
+    # botorch's constructors take the transposed (low, high)-per-dimension form
+    pairs = None if box is None else _bound_pairs(box, dim)
+    boxed = [] if box is None else [{'dim': dim, 'bounds': pairs},
+                                    {'bounds': pairs}]
 
     tried = []
     for kwargs in (*boxed, {'dim': dim}, {}):
@@ -445,9 +527,17 @@ class SyntheticOracleParams:
         func: a key of either registry.
         objectives: one objective name per output column, in column order.
         dim, box, seed, rel_noise_std, measure, n_spread: as the oracles'
-            `from_name` takes them.
+            `from_name` takes them. `box` is anything `as_bounds` accepts -- a
+            scalar half-width, or a (low, high) pair.
         num_objectives: m, for the multi-objective families that take it
             (DTLZ*, ZDT*, GMM). Single-objective params leave it None.
+        optima: one ideal point per output column, `IdealPoint` only. Setting it
+            is what makes a single-objective function multi-objective: the truth
+            becomes m bowls, one per entry, sharing the one box `box` states.
+            The shared box is required rather than defaulted because
+            `MOSyntheticOracle.bounds` *intersects* its members' boxes, so bowls
+            left on their own defaults would land on a box excluding some of
+            their own optima.
         ref_point: (m,) hypervolume reference in the truth's own units, or None
             to let a metric read one off the truth's scan. Recorded here rather
             than on the oracle so a metric scores a run against the reference
@@ -464,6 +554,7 @@ class SyntheticOracleParams:
     measure         : str           = 'range'
     n_spread        : int           = SPREAD_SAMPLES
     num_objectives  : int | None    = None
+    optima          : tuple | None  = None
     ref_point       : tuple | None  = None
 
     def __post_init__(self):
@@ -476,8 +567,33 @@ class SyntheticOracleParams:
             object.__setattr__(self, 'ref_point',
                                tuple(np.ravel(self.ref_point).tolist()))
 
+        # a list field would make the frozen dataclass unhashable, and json
+        # reads every sequence back as one
+        if self.box is not None and np.ndim(self.box) > 0:
+            object.__setattr__(self, 'box',
+                               tuple(map(float, np.ravel(self.box))))
+        if self.optima is not None:
+            object.__setattr__(self, 'optima',
+                               tuple(tuple(map(float, np.ravel(o)))
+                                     for o in self.optima))
+
         if self.func not in SYNTHETIC_FUNCTIONS and self.func not in MO_SYNTHETIC_FUNCTIONS:
             raise ValueError(f'{self.func!r} is in neither synthetic registry')
+
+        if self.optima is not None:
+            if self.func != 'IdealPoint':
+                raise ValueError(f'optima states one ideal point per column, '
+                                 f'which only IdealPoint takes, not {self.func}')
+            if self.box is None:
+                raise ValueError('optima needs a box, since the bowls share one')
+            if self.num_objectives is not None:
+                raise ValueError('optima already states m, so num_objectives '
+                                 'does not apply')
+            if len(self.optima) != len(names):
+                raise ValueError(f'{len(self.optima)} optima against '
+                                 f'{len(names)} objective names; they are one '
+                                 'per output column')
+
         if not self.multi_objective:
             if self.num_objectives is not None:
                 raise ValueError(f'{self.func} is single-objective, so '
@@ -492,7 +608,7 @@ class SyntheticOracleParams:
     @property
     def multi_objective(self):
         """Whether these build a `MOSyntheticOracle`."""
-        return self.func in MO_SYNTHETIC_FUNCTIONS
+        return self.func in MO_SYNTHETIC_FUNCTIONS or self.optima is not None
 
     def build(self) -> SyntheticOracle | MOSyntheticOracle:
         """The oracle itself.
@@ -512,6 +628,21 @@ class SyntheticOracleParams:
         }
         if not self.multi_objective:
             return SyntheticOracle.from_name(**shared)
+
+        if self.optima is not None:
+            # one bowl per column, every one on the same box, so the
+            # intersection `MOSyntheticOracle.bounds` takes is that box itself
+            bounds = _bound_pairs(self.box, self.dim)
+            oracle = MOSyntheticOracle(
+                truth           = [IdealPoint(optimum=o, dim=self.dim,
+                                              bounds=bounds)
+                                   for o in self.optima],
+                rel_noise_std   = self.rel_noise_std,
+                measure         = self.measure,
+                n_spread        = self.n_spread,
+                seed            = self.seed
+            )
+            return oracle
 
         # ref_point is recorded, not built in: it states how a hypervolume is
         # read, which is a metric's argument rather than the truth's property

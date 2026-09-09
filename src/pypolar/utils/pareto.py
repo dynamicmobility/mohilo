@@ -1,5 +1,6 @@
 from pymoo.indicators.hv import HV
 from pymoo.indicators.gd_plus import GDPlus
+from pymoo.indicators.igd_plus import IGDPlus
 from pymoo.util.normalization import normalize
 from pymoo.indicators.spacing import SpacingIndicator
 from pymoo.util.nds.non_dominated_sorting import NonDominatedSorting
@@ -124,6 +125,27 @@ def gd_plus(F, true_front, ideal, nadir):
         The indicator as a float, 0 when every point of ``F`` is on the front.
     """
     return GDPlus(true_front, zero_to_one=True, ideal=ideal, nadir=nadir)(F)
+
+
+def igd_plus(F, true_front, ideal, nadir):
+    """Normalized IGD+ of a set against a known Pareto front, in minimization
+    space. `gd_plus` the other way round: the nearest member of ``F`` is taken
+    per *front* point rather than the nearest front point per member of ``F``,
+    so this measures how much of the front is covered where `gd_plus` measures
+    how far the members sit from it.
+
+    A point of ``F`` that is nearest to nothing contributes nothing, so a stray
+    is ignored here and a gap is not; `gd_plus` reads exactly the other way.
+
+    Args:
+        F: ``(n, m)`` points to score, in minimization space.
+        true_front: ``(k, m)`` the true Pareto front, same space.
+        ideal, nadir: ``(m,)`` the best and worst value per objective.
+
+    Returns:
+        The indicator as a float, 0 when the front is covered exactly.
+    """
+    return IGDPlus(true_front, zero_to_one=True, ideal=ideal, nadir=nadir)(F)
 
 
 def reference_point(values=None, bounds=None, maximize=None, margin=0.1):

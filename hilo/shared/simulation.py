@@ -18,25 +18,29 @@ SURVEY_TIMEOUT   = 0.0
 SURVEY_PERIOD    = 0.0
 METABOLIC_PERIOD = 0.0
 REF_MARGIN       = 0.1  # reference sits this fraction of the front's extent past its nadir
-TRUE_NOISE       = 0.0 #0.5
+TRUE_NOISE       = 0.01
 
 # Optimization
 SEED             = 95
 NUM_QUERIES      = 45
 ACQ_STRAT        = 'qlognehvi'
 ACQ_KWARGS       = {}
-# GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
-GP_NOISE         = plr.NoiseModel.prior(0.01)
+GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
+# GP_NOISE         = plr.NoiseModel.prior(0.01)
 MIN_LENGTHSCALE  = 0.05
 NUM_RANDOM       = 3
 
 
-GT_NAME = 'DTLZ1'
+GT_NAME = 'IdealPoint'
+# one quadratic bowl per objective, both on the box `box` states -- the shared
+# box is what keeps both optima inside the action space, since
+# MOSyntheticOracle.bounds intersects its members' boxes
 GROUND_TRUTH_PARAMS = plr.SyntheticOracleParams(
     func          = GT_NAME,
     objectives    = (METABOLIC, COMFORT),
-    dim           = 3, #if GT_NAME == 'DTLZ2' else 2,
-    box           = None, # mo functions dont take bounds
+    optima        = ((1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    dim           = 3,
+    box           = (0.0, 3.0),
     seed          = SEED,
     rel_noise_std = TRUE_NOISE,
     measure = 'std'

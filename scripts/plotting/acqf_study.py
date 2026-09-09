@@ -43,7 +43,7 @@ def single_objective_study(datasets: list[plr.ExperimentDataset]):
 
 def multi_objective_study(datasets: list[plr.ExperimentDataset]):
     regrets = {}
-    keys = ['hv_regret', 'hv_regret_attained', 'front_alignment']
+    keys = ['hv_regret', 'hv_regret_attained', 'front_alignment', 'front_coverage']
     data = {k: {} for k in keys}
     for dataset in datasets:
         acqf = dataset.get_sources()[-1]
@@ -58,7 +58,7 @@ def multi_objective_study(datasets: list[plr.ExperimentDataset]):
     # for k in keys:
     #     data[k] = np.array(data[k])
             
-    fig, axs = plt.subplots(ncols=3, figsize=(12,4))
+    fig, axs = plt.subplots(ncols=4, figsize=(16,4))
     axs = axs.flatten()
     colors = ['C0', 'C1', 'C2', 'C3', 'C4']
     # one color per acquisition function, shared by every panel
@@ -84,7 +84,7 @@ def multi_objective_study(datasets: list[plr.ExperimentDataset]):
 
 
 if __name__ == '__main__':
-    datasets = load_data(Path('scripts/output/experiments/20260909_131158/'))
+    datasets = load_data(Path('scripts/output/experiments/20260909_170406'))
     if datasets[0].get_objectives().num_objectives > 1:
         multi_objective_study(datasets)
     else:

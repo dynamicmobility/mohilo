@@ -16,7 +16,7 @@ warnings.filterwarnings('ignore', category=NumericalWarning)
 # TODO: go through all the reference setting/computing and min/max objective logic in this codebase
 # ACQ_STRATS    = ['qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi']
 ACQ_STRATS    = ['qlognparego']
-RUNS_PER_ACQF = 3
+RUNS_PER_ACQF = 1
 OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS    = {}   # acquisition knobs overriding acquisition_factory_1d's own
 
@@ -44,6 +44,13 @@ def aux(
             ref_point       = hilo.REF_POINT
         ),
         'front_alignment'    : plr.front_alignment_regret(
+            raw_actions     = recommended,
+            ground_truth    = ground_truth,
+            objectives      = gp.objectives
+        ),
+        # precision and coverage read opposite ways: a tight front scores well
+        # on alignment and badly here, a broad one with strays the other way
+        'front_coverage'     : plr.front_coverage_regret(
             raw_actions     = recommended,
             ground_truth    = ground_truth,
             objectives      = gp.objectives

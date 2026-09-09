@@ -27,7 +27,7 @@ pyPolar/
 │   │   ├── objectives.py           # AffineTransform, Objective, DecoupledObjectives
 │   │   └── gp.py                   # build_botorch_gp, GPHyperparameters, BoTorchGP, DecoupledMOGP
 │   ├── feedback/
-│   │   ├── rewards.py              # InternalReward hierarchy (groundtruth objectives)
+│   │   ├── rewards.py              # InternalReward, the abstract reward base
 │   │   ├── oracles.py              # Simulated humans: Bradley-Terry, noisy regression
 │   │   ├── acquisition.py          # AcquisitionFunction: a botorch acqf over an Objective
 │   │   └── synthetic.py            # truth_at, construct_function, SyntheticFunction
@@ -543,10 +543,10 @@ each sub-model has its own kernel, fitted from its own term of the
 Simulated humans and groundtruth objectives, all numpy, no GP dependency. Kept
 for simulation work; `plot_pilot.py` uses real data and touches none of it.
 
-**`rewards.py`** — `InternalReward` subclasses, called as `reward(x)` or
-`.compute(x)`: `IdealPoint(w, delta, gamma=0.0)`,
-`BoundedIdealPoint(w, delta, gamma=0.0, lower_bound=-1.0, upper_bound=1.0)`,
-`MultiObjectiveIdealPoint`, `NonStationaryIdealPoint`.
+**`rewards.py`** — `InternalReward`, the abstract base the oracles call as
+`reward(x)` or `.compute(x)`. The hand-written ideal-point rewards that used to
+live here are gone; every groundtruth is a BoTorch `SyntheticTestFunction` now,
+including the quadratic one — see `IdealPoint` in `synthetic.py`.
 
 **`oracles.py`** — `NoisyRegressionOracle(reward_fn, noise_std, rng)` returns a
 reward plus Gaussian noise; `BradleyTerryOracle(beta_boltzmann, reward_fn, rng)`
@@ -565,6 +565,20 @@ rather than an analytic bump. This is the only module that evaluates one, so
   `construct_function` is the authority, and it takes a box: a box that excludes
   a function's known optimizer drops it, which puts StyblinskiTang (optimizer at
   −2.904) outside the set below a half-width of 2.91.
+- `IdealPoint(optimum, weights=1.0, offset=0.0, dim=None, bounds=None)` — a
+  quadratic bowl, `sum_k weights_k (x_k - optimum_k)^2 + offset`, with its one
+  optimum where you put it. A `SyntheticTestFunction` like every other truth
+  here, so it is stated in the minimizing sense (BoTorch's convention, and what
+  `Objective(maximize=False)` expects) and `optimal_value` is `offset`. `dim`
+  widens a scalar `optimum`; `weights` may be scalar or per-dimension. The
+  default box is zero-centered at half-width 1, widened only if the optimum
+  falls outside it, so several bowls with nearby optima share a box and drop
+  straight into `MOSyntheticOracle(truth=[bowl_a, bowl_b])`. A run records that
+  MO truth as `SyntheticOracleParams(func='IdealPoint', optima=(...,), box=...)`
+  — `optima` is one ideal point per output column, and the shared `box` is
+  required rather than defaulted because `MOSyntheticOracle.bounds` *intersects*
+  its members' boxes, so bowls left on their own defaults would land on a box
+  excluding some of their own optima.
 - `truth_at(truth, X)` — noiseless values of the truth at the `(n, d)` actions
   `X`, returned `(n,)`. The evaluation is `noise=False`, so a metric is never
   scored against a lucky draw. Takes an *instance*, not a subclass.

@@ -101,6 +101,13 @@ def aux(
             raw_actions     = recommended,
             ground_truth    = ground_truth,
             objectives      = objectives
+        ),
+        # precision and coverage read opposite ways: a tight front scores well
+        # on alignment and badly here, a broad one with strays the other way
+        'front_coverage'     : plr.front_coverage_regret(
+            raw_actions     = recommended,
+            ground_truth    = ground_truth,
+            objectives      = objectives
         )
     }
 

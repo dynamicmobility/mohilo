@@ -14,6 +14,7 @@ import numpy as np
 from pypolar.feedback.synthetic import MOSyntheticOracle
 from pypolar.optimization.objectives import DecoupledObjectives
 from pypolar.utils.pareto import (gd_plus, get_nondominated, get_nondominated_tol,
+                                  igd_plus,
                                   get_pareto_statistics,
                                   hypervolume_from_nondominated, reference_point)
 
@@ -127,13 +128,45 @@ def attained_hypervolume_regret(
                                          tol, ref_point)
 
 
+def _indicator_inputs(
+    raw_actions     : np.ndarray,
+    ground_truth    : MOSyntheticOracle,
+    objectives      : DecoupledObjectives
+):
+    """The three arrays GD+ and IGD+ both take, in minimization space.
+
+    Returns `(F, true_front, ideal, nadir)`: the nominated actions' true values,
+    the truth's own front, and the per-objective range the distances are stated
+    in. All four come from the one `scan_values`, so the range normalizing a
+    distance is the range of the very points being scored -- each oracle's own
+    `sample_min`/`sample_max` come from a scan drawn at `seed + i` rather than
+    the shared `seed`, which is a different point set for every objective past
+    the first.
+    """
+    values   = objectives.maximization_space(ground_truth.scan_values)
+    attained = objectives.maximization_space(
+        ground_truth(raw_actions, noise=False))
+
+    # in maximization space the largest is best, so it is the ideal once negated
+    return (-attained,
+            -values[get_nondominated(values)],
+            -values.max(axis=0),
+            -values.min(axis=0))
+
+
 def front_alignment_regret(
     raw_actions     : np.ndarray,
     ground_truth    : MOSyntheticOracle,
     objectives      : DecoupledObjectives
 ):
     """The GD+ indicator. How far the front a run recommends sits from the true
-    Pareto front, in objective space.
+    Pareto front, in objective space -- its *precision*.
+
+    Averaged over the nominated actions, so one action off the front raises it
+    and a gap in coverage does not: a single action sitting exactly on the front
+    scores 0.0 while covering none of it. `front_coverage_regret` is the
+    complement that reads the other way, and the two are only meaningful as a
+    pair.
 
     The recommended actions are scored on the *truth's* own values there, which
     is the convention GD+ is stated in: it measures whether the right actions
@@ -154,21 +187,41 @@ def front_alignment_regret(
         The regret, in fractions of the truth's objective ranges. 0.0 exactly
         when every recommended action lies on the true front.
     """
-    values   = objectives.maximization_space(ground_truth.scan_values)
-    attained = objectives.maximization_space(
-        ground_truth(raw_actions, noise=False))
+    F, true_front, ideal, nadir = _indicator_inputs(raw_actions, ground_truth,
+                                                    objectives)
+    return gd_plus(F=F, true_front=true_front, ideal=ideal, nadir=nadir)
 
-    corners = objectives.maximization_space(np.stack([
-        [o.sample_min for o in ground_truth.oracles],
-        [o.sample_max for o in ground_truth.oracles]
-    ]))
 
-    return gd_plus(
-        F           = -attained,
-        true_front  = -values[get_nondominated(values)],
-        ideal       = -corners.max(axis=0),
-        nadir       = -corners.min(axis=0)
-    )
+def front_coverage_regret(
+    raw_actions     : np.ndarray,
+    ground_truth    : MOSyntheticOracle,
+    objectives      : DecoupledObjectives
+):
+    """The IGD+ indicator. How much of the true Pareto front a run's recommended
+    front reaches -- its *coverage*.
+
+    `front_alignment_regret` the other way round. The nearest nominated action
+    is taken per *front* point rather than the nearest front point per nominated
+    action, which inverts what the score is blind to: an action nearest to
+    nothing contributes nothing, so a stray costs exactly zero here, while a
+    stretch of the front no action comes near costs the distance to it.
+
+    That is the pair's whole point. A small, tightly clustered front is precise
+    but covers little, and GD+ alone calls it perfect; a broad front with some
+    members off the mark offers a run more usable options, and IGD+ alone calls
+    it perfect. Neither is a verdict on its own.
+
+    Args:
+        raw_actions, ground_truth, objectives: as `front_alignment_regret`
+            takes them.
+
+    Returns:
+        The regret, in fractions of the truth's objective ranges. 0.0 when
+        every point of the true front has a recommended action on it.
+    """
+    F, true_front, ideal, nadir = _indicator_inputs(raw_actions, ground_truth,
+                                                    objectives)
+    return igd_plus(F=F, true_front=true_front, ideal=ideal, nadir=nadir)
 
 
 def groundtruth_hypervolume(estimated_objs, true_objs, tol=0.0):
