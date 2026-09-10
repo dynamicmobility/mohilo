@@ -68,3 +68,5 @@ core.*
 output/
 docs/
 scripts/1d/output
+
+pyPolar.code-workspace
