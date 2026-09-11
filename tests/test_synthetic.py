@@ -26,6 +26,8 @@ from pypolar.feedback.synthetic import (
     construct_function,
     truth_at,
 )
+from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from pypolar.utils.pareto import reference_point
 
 BOX  = 5.0
 SEED = 3
@@ -33,8 +35,19 @@ SEED = 3
 # a Sobol scan of the whole box, so a spread read off it is the module's own
 N_SPREAD = 256
 
-# above 1D Levy's largest value on [-5, 5] (3.884), so the whole front counts
-LEVY_REF = 4.0
+
+def minimized_objectives(oracle, maximize=False):
+    """Objectives over the oracle's own scan, one per truth column. Only their
+    directions are read, so a handful of points is enough."""
+    return DecoupledObjectives([
+        Objective.from_data(
+            actions  = oracle.scan_actions[:8],
+            values   = oracle.scan_values[:8, i],
+            maximize = maximize,
+            name     = f'y{i}'
+        )
+        for i in range(len(oracle))
+    ])
 
 
 @pytest.fixture
@@ -190,7 +203,7 @@ class TestMOSyntheticOracle:
 
     def test_it_is_one_oracle_per_objective(self, oracle, branin_currin):
         assert len(oracle) == branin_currin.num_objectives
-        assert oracle[0] is oracle.objective(0)
+        assert oracle[0] is oracle.get_oracle(0)
         assert oracle.measure_spread.shape == (branin_currin.num_objectives,)
 
     def test_the_noiseless_call_is_the_truth(self, oracle, branin_currin):
@@ -217,9 +230,7 @@ class TestMOSyntheticOracle:
         assert abs(corr) < 0.2
 
     def test_a_list_of_scalar_truths_is_the_same_object(self, levy):
-        # a list of functions carries no reference point, so one is required
-        oracle = MOSyntheticOracle([levy, levy], ref_point=LEVY_REF, n_spread=N_SPREAD,
-                                   seed=SEED)
+        oracle = MOSyntheticOracle([levy, levy], n_spread=N_SPREAD, seed=SEED)
         X = np.linspace(-BOX, BOX, 7)[:, None]
 
         assert len(oracle) == 2
@@ -238,10 +249,13 @@ class TestMOSyntheticOracle:
         assert len(oracle) == 3
 
 
-class TestSampledMaxHypervolume:
+class TestMaxHypervolume:
     """The multi-objective analog of `sample_min`: the best a finite scan of
     the box manages, which is what a hypervolume attained during a run gets
-    normalized by."""
+    normalized by. The truth states no direction of its own, so which way each
+    column is read -- and hence which region is measured -- comes from the
+    objectives handed in.
+    """
 
     @pytest.mark.parametrize('func,kwargs', [
         ('BraninCurrin', {}),
@@ -255,39 +269,51 @@ class TestSampledMaxHypervolume:
         rather than this module's coarse one, since the ratio is what a coarse
         scan degrades: over six seeds it runs 0.918 to 0.972 at 4096 points and
         drops to 0.70 at 256.
+
+        The truth's own `ref_point` is passed, since `_max_hv` is measured
+        against exactly that one.
         """
         truth  = getattr(multi_objective, func)(**kwargs)
         oracle = MOSyntheticOracle(truth, seed=SEED)
+        scanned = oracle.max_hypervolume(
+            objectives = minimized_objectives(oracle),
+            ref_point  = truth.ref_point.numpy()
+        )
 
-        assert 0.85 < oracle.sampled_max_hypervolume / truth._max_hv < 1.0
+        assert 0.85 < scanned / truth._max_hv < 1.0
 
-    def test_the_reference_defaults_to_the_truths_own(self, branin_currin):
-        oracle = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
+    def test_the_reference_defaults_to_the_scans_own(self, branin_currin):
+        """Without one, it is read off the scan the same way `reference_point`
+        reads it, so the default is the scan's own worst end plus a margin."""
+        oracle     = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
+        objectives = minimized_objectives(oracle)
 
-        np.testing.assert_allclose(oracle.ref_point, branin_currin.ref_point.numpy())
+        assert oracle.max_hypervolume(objectives) == oracle.max_hypervolume(
+            objectives,
+            ref_point = reference_point(values=oracle.scan_values,
+                                        maximize=[False, False])
+        )
 
     def test_a_looser_reference_admits_more_volume(self, branin_currin):
         """The reference is the worst value per objective that still counts, so
         relaxing it can only add volume. This is what pins which way round the
         front is measured from it."""
-        tight = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
-        loose = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED,
-                                  ref_point=branin_currin.ref_point.numpy() + 10.0)
+        oracle     = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
+        objectives = minimized_objectives(oracle)
+        tight      = branin_currin.ref_point.numpy()
 
-        assert loose.sampled_max_hypervolume > tight.sampled_max_hypervolume > 0
+        assert (oracle.max_hypervolume(objectives, tight + 10.0)
+                > oracle.max_hypervolume(objectives, tight) > 0)
 
-    def test_a_list_of_functions_requires_a_reference(self, levy):
-        # a MultiObjectiveTestProblem carries one; a list of scalar truths does not
-        with pytest.raises(ValueError, match='ref_point'):
-            MOSyntheticOracle([levy, levy], n_spread=N_SPREAD, seed=SEED)
+    def test_the_direction_picks_the_region(self, branin_currin):
+        # the same scan against its own reference, read the other way, measures
+        # a different region -- neither is the other's complement
+        oracle = MOSyntheticOracle(branin_currin, n_spread=N_SPREAD, seed=SEED)
 
-    def test_one_reference_covers_every_objective(self, levy):
-        spec   = dict(n_spread=N_SPREAD, seed=SEED)
-        scalar = MOSyntheticOracle([levy, levy], ref_point=LEVY_REF, **spec)
-        pair   = MOSyntheticOracle([levy, levy], ref_point=[LEVY_REF] * 2, **spec)
+        minimized = oracle.max_hypervolume(minimized_objectives(oracle))
+        maximized = oracle.max_hypervolume(minimized_objectives(oracle, True))
 
-        np.testing.assert_allclose(scalar.ref_point, [LEVY_REF] * 2)
-        assert scalar.sampled_max_hypervolume == pair.sampled_max_hypervolume
+        assert minimized > 0 and maximized > 0 and minimized != maximized
 
     def test_the_scan_ignores_the_observation_noise(self, branin_currin):
         """The scan reads the truth with noise=False, so how noisy an oracle is
@@ -296,7 +322,8 @@ class TestSampledMaxHypervolume:
         clean = MOSyntheticOracle(branin_currin, rel_noise_std=0.0, **spec)
         noisy = MOSyntheticOracle(branin_currin, rel_noise_std=0.5, **spec)
 
-        assert clean.sampled_max_hypervolume == noisy.sampled_max_hypervolume
+        assert (clean.max_hypervolume(minimized_objectives(clean))
+                == noisy.max_hypervolume(minimized_objectives(noisy)))
 
 
 class TestRegistries:
@@ -346,20 +373,14 @@ class TestSyntheticOracleParams:
         # asdict writes the names as a list, and a list is what json reads back
         assert SyntheticOracleParams(**asdict(params)) == params
 
-    def test_the_reference_point_reaches_the_oracle_it_builds(self):
-        # without it the oracle takes the function's own, so a run's reference
-        # would be silently swapped for a different one when it is read back
-        oracle = SyntheticOracleParams(ref_point=(9.0, 9.0), **self.MO_SPEC).build()
+    def test_the_reference_point_is_recorded_not_built_in(self):
+        # a reference states how a hypervolume is read, which is a metric's
+        # argument rather than a property of the truth. It is kept on the params
+        # so a run read back is scored against the reference it was run under
+        params = SyntheticOracleParams(ref_point=(9.0, 9.0), **self.MO_SPEC)
 
-        np.testing.assert_allclose(oracle.ref_point, [9.0, 9.0])
-
-    def test_without_one_the_function_supplies_its_own(self):
-        params = SyntheticOracleParams(**self.MO_SPEC)
-
-        assert params.ref_point is None
-        np.testing.assert_allclose(
-            params.build().ref_point,
-            multi_objective.BraninCurrin().ref_point.numpy())
+        assert params.ref_point == (9.0, 9.0)
+        assert not hasattr(params.build(), 'ref_point')
 
     def test_the_reference_point_survives_the_round_trip(self):
         # json reads a tuple back as a list, so it is coerced the way the

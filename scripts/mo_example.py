@@ -14,43 +14,46 @@ import hilo.shared.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 # TODO: go through all the reference setting/computing and min/max objective logic in this codebase
-ACQ_STRATS    = ['qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi']
-RUNS_PER_ACQF = 3
+# ACQ_STRATS    = ['qlognehvi', 'qlognparego', 'qhvkg', 'qlogehvi']
+ACQ_STRATS    = ['qlognparego']
+RUNS_PER_ACQF = 1
 OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 ACQ_KWARGS    = {}   # acquisition knobs overriding acquisition_factory_1d's own
-
-
-def fit_gp(
-    objective   : plr.DecoupledObjectives,
-    noise       : plr.NoiseModel = None,
-    hypers      : plr.GPHyperparameters = None
-):
-    return plr.DecoupledMOGP(
-        objectives          = objective,
-        noise               = hilo.GP_NOISE,
-        fit_hyperparameters = True,
-        min_length_scale    = hilo.MIN_LENGTHSCALE,
-    )
 
 def aux(
     gp              : plr.DecoupledMOGP,
     ground_truth    : plr.MOSyntheticOracle
 ):
-    queried = np.vstack([gp.objectives[i].xdata for i in range(len(gp.objectives))])
+    queried = np.vstack([o.xdata for o in gp.objectives.objectives])
+
+    mu, _       = gp.posterior_at(ground_truth.scan_actions, raw=True)
+    front       = plr.get_nondominated(gp.objectives.maximization_space(mu))
+    recommended = ground_truth.scan_actions[front]
 
     return {
         'hv_regret'          : plr.normalized_hypervolume_regret(
-            gp              = gp,
-            ground_truth    = ground_truth
+            raw_actions     = recommended,
+            ground_truth    = ground_truth,
+            objectives      = gp.objectives,
+            ref_point       = hilo.REF_POINT
         ),
         'hv_regret_attained' : plr.attained_hypervolume_regret(
             raw_actions     = queried,
             ground_truth    = ground_truth,
-            objectives      = gp.objectives
+            objectives      = gp.objectives,
+            ref_point       = hilo.REF_POINT
         ),
         'front_alignment'    : plr.front_alignment_regret(
-            gp              = gp,
-            ground_truth    = ground_truth
+            raw_actions     = recommended,
+            ground_truth    = ground_truth,
+            objectives      = gp.objectives
+        ),
+        # precision and coverage read opposite ways: a tight front scores well
+        # on alignment and badly here, a broad one with strays the other way
+        'front_coverage'     : plr.front_coverage_regret(
+            raw_actions     = recommended,
+            ground_truth    = ground_truth,
+            objectives      = gp.objectives
         )
     }
 
@@ -76,7 +79,6 @@ def run_experiment(
         else:
             # fit gp + Acquisition strategy for the rest
             source = dataset.acquisition.strategy
-            # gp = fit_gp(experiment.objectives)
             action = acqf.query(gp, q=1)[0]
 
         experiment.begin_trial(
@@ -89,7 +91,12 @@ def run_experiment(
         experiment.wait_for_measurements()
         experiment.end_trial() # updates the objectives
 
-        gp = fit_gp(experiment.objectives)
+        gp = plr.DecoupledMOGP(
+            objectives          = experiment.objectives,
+            noise               = hilo.GP_NOISE,
+            fit_hyperparameters = True,
+            min_length_scale    = hilo.MIN_LENGTHSCALE,
+        )
         dataset.add_trial(
             objectives  = experiment.objectives,
             gp          = gp,
@@ -97,14 +104,6 @@ def run_experiment(
             source      = source,
             aux         = aux(gp, ground_truth)
         )
-
-    # the run's final state: every measurement, and the fit to all of them
-    gp = fit_gp(experiment.objectives)
-    dataset.add_trial(
-        objectives  = experiment.objectives,
-        gp          = gp,
-        aux         = aux(gp, ground_truth)
-    )
 
     return experiment, gp, dataset
 
@@ -118,7 +117,7 @@ def setup_experiment(acq_strat, seed):
         strategy          = acq_strat,
         seed              = seed,
         num_objectives    = 2,
-        raw_ref_point     = hilo.MO_TRUTH.ref_point,
+        raw_ref_point     = hilo.REF_POINT,
         **ACQ_KWARGS
     )
     assert experiment.objectives.names == list(hilo.GROUND_TRUTH_PARAMS.objectives)
@@ -155,9 +154,6 @@ def run_trial(acq_strat, trial):
         dataset           = dataset,
         ground_truth      = hilo.MO_TRUTH
     )
-    # mu, std, models = plr.loo(gp.objective, fit_gp, noise=GP_NOISE)
-    # resid = mu - gp.objective.ydata
-    # print('SCORE', r2_score(gp.objective.ydata, mu))
     print(f'wrote {dataset.save()}')
 
 def main():

@@ -84,9 +84,9 @@ def make_gif(dataset: plr.ExperimentDataset, path: Path = None, fps: float = FPS
     # runs. It spans the front and the reference point, which is the region
     # hypervolume is measured over: a measurement beyond the reference is worse
     # than the worst value that counts, and falls outside the view
-    span = np.vstack([front, truth.ref_point])
-    low  = span.min(axis=0) - 0.05 * np.ptp(span, axis=0)
-    high = span.max(axis=0) + 0.05 * np.ptp(span, axis=0)
+    # span = np.vstack([front, truth.ref_point])
+    # low  = span.min(axis=0) - 0.05 * np.ptp(span, axis=0)
+    # high = span.max(axis=0) + 0.05 * np.ptp(span, axis=0)
 
     fig, ax = plt.subplots(figsize=(5.5, 5), constrained_layout=True)
     writer  = PillowWriter(fps=fps)

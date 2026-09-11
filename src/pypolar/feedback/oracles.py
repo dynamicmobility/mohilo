@@ -34,7 +34,7 @@ class MultiObjectiveOracle(BradleyTerryOracle):
     def __init__(
         self,
         beta_boltzmann    : float,
-        reward_fn         : rewards.MultiObjectiveIdealPoint,
+        reward_fn         : rewards.InternalReward,
         rng               : np.random.Generator
     ): 
         super().__init__(beta_boltzmann, reward_fn, rng)

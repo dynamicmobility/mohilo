@@ -323,9 +323,10 @@ class TestGetGroundtruthAndAcquisition:
         back = ExperimentDataset.load(data.save())
 
         assert back.groundtruth.ref_point == ref
-        np.testing.assert_allclose(back.get_groundtruth().ref_point, ref)
 
-    def test_without_one_the_truth_falls_back_to_its_own(self, objectives, tmp_path):
+    def test_without_one_the_metric_reads_the_scans_own(self, objectives, tmp_path):
+        # a reference is a metric's argument, not the truth's property, so an
+        # unrecorded one is not replaced by a default at build time
         params = SyntheticOracleParams(func='DTLZ2', objectives=('cost', 'comfort'),
                                        dim=3, box=None, num_objectives=2)
         data   = ExperimentDataset(name='mo', groundtruth=params,
@@ -334,7 +335,7 @@ class TestGetGroundtruthAndAcquisition:
         back = ExperimentDataset.load(data.save())
 
         assert back.groundtruth.ref_point is None
-        np.testing.assert_allclose(back.get_groundtruth().ref_point, [1.1, 1.1])
+        assert not hasattr(back.get_groundtruth(), 'ref_point')
 
     def test_a_run_with_no_groundtruth_says_so(self, objectives):
         # which is every real study: nothing knows the truth to record

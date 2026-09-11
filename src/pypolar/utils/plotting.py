@@ -185,14 +185,14 @@ def plot_loo_curve(
 
 
 def plot_mo_space(
-        ax          : plt.Axes,
-        true_front  : np.ndarray = None,
-        measured    : np.ndarray = None,
-        predicted   : np.ndarray = None,
-        overlays    : dict = None,
-        names       : tuple = None,
-        title       : str = None
-    ):
+    ax          : plt.Axes,
+    true_front  : np.ndarray = None,
+    measured    : np.ndarray = None,
+    predicted   : np.ndarray = None,
+    overlays    : dict = None,
+    names       : tuple = None,
+    title       : str = None
+):
     """Plot one 2D objective space: the truth's Pareto front as a line, the
     points a run measured and the front a model infers as clouds, and any number
     of labeled overlays on top.
