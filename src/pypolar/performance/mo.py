@@ -55,7 +55,6 @@ def _attained_fraction(
     values = objectives.maximization_space(raw_values)
     ref    = objectives.maximization_space(ref_point)[0]
     front  = get_nondominated_tol(values, tol)
-
     return hypervolume_from_nondominated(
         ref - values[front]
     ) / ground_truth.max_hypervolume(objectives, ref_point)

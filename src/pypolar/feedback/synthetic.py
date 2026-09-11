@@ -454,8 +454,9 @@ class MOSyntheticOracle:
         if key not in self._max_hypervolume:
             values = objectives.maximization_space(self.scan_values)
             ref    = objectives.maximization_space(ref_point)[0]
+            nd_idx = get_nondominated(values)
             self._max_hypervolume[key] = hypervolume_from_nondominated(
-                ref - values[get_nondominated(values)]
+                ref - values[nd_idx]
             )
 
         return self._max_hypervolume[key]

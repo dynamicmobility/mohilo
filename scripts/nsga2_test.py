@@ -13,7 +13,7 @@ warnings.filterwarnings('ignore', category=NumericalWarning)
 
 # TODO: go through all the reference setting/computing and min/max objective logic in this codebase
 OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
-POP_SIZE      = 9    # NSGA2 spends this many evaluations per generation
+POP_SIZE      = 15    # NSGA2 spends this many evaluations per generation
 
 # the three front colors, validated as a scatter palette (all-pairs CVD dE 9.2)
 TRUE_FRONT    = '#2a78d6'
@@ -259,19 +259,18 @@ def main():
         maximize = hilo.MAXIMIZE
     ).objectives
 
-    pop_size = 5   #100
     queried, measured = run_nsga2(
         ground_truth = hilo.MO_TRUTH,
         objectives   = objectives,
         num_queries  = hilo.NUM_QUERIES,
-        pop_size     = pop_size,
+        pop_size     = POP_SIZE,
     )
     evals, curves = nsga2_metrics(
         queried      = queried,
         measured     = measured,
         objectives   = objectives,
         ground_truth = hilo.MO_TRUTH,
-        pop_size     = pop_size
+        pop_size     = POP_SIZE
     )
     for name, curve in curves.items():
         print(f'{name:<20}: {curve[0]:.4f} -> {curve[-1]:.4f}')
@@ -283,7 +282,7 @@ def main():
         # actually occupies
         ax.plot(evals, curve, marker='.')
         ax.set(xlabel='evaluations', ylabel=name)
-    fig.suptitle(f'NSGA2 (pop_size={pop_size}, {len(evals)} generations) '
+    fig.suptitle(f'NSGA2 (pop_size={POP_SIZE}, {len(evals)} generations) '
                  f'on {hilo.GT_NAME}')
     fig.tight_layout()
     path = OUTPUT_DIR / 'nsga2_regret.png'
@@ -299,7 +298,7 @@ def main():
         ground_truth = hilo.MO_TRUTH,
         ref_point    = hilo.REF_POINT
     )
-    ax.set_title(f'NSGA2 (pop_size={pop_size}, {len(queried)} evaluations) '
+    ax.set_title(f'NSGA2 (pop_size={POP_SIZE}, {len(queried)} evaluations) '
                  f'on {hilo.GT_NAME}')
     fig.tight_layout()
     path = OUTPUT_DIR / 'nsga2_front.png'
