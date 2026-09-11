@@ -79,7 +79,8 @@ def make_figure(
         action_labels   = ['Hip Flexion Scale', 'Hip Extension Scale', 'Delay'],
         bounds          = model.objectives.action_bounds
     )
-
+    p_ax = plr.dress_axis(p_ax)
+    a_ax = plr.dress_axis(a_ax)
     fig.savefig(path, dpi=dpi)
 
     return path

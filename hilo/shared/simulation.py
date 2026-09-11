@@ -18,7 +18,7 @@ SURVEY_TIMEOUT   = 0.0
 SURVEY_PERIOD    = 0.0
 METABOLIC_PERIOD = 0.0
 REF_MARGIN       = 0.1  # reference sits this fraction of the front's extent past its nadir
-TRUE_NOISE       = 0.5
+TRUE_NOISE       = 0.01
 
 # Optimization
 SEED             = 95
@@ -26,16 +26,21 @@ NUM_QUERIES      = 45
 ACQ_STRAT        = 'qlognehvi'
 ACQ_KWARGS       = {}
 GP_NOISE         = plr.NoiseModel.prior(TRUE_NOISE)
-MIN_LENGTHSCALE  = 0.2
+# GP_NOISE         = plr.NoiseModel.prior(0.01)
+MIN_LENGTHSCALE  = 0.05
 NUM_RANDOM       = 3
 
 
-GT_NAME = 'DTLZ1'
+GT_NAME = 'IdealPoint'
+# one quadratic bowl per objective, both on the box `box` states -- the shared
+# box is what keeps both optima inside the action space, since
+# MOSyntheticOracle.bounds intersects its members' boxes
 GROUND_TRUTH_PARAMS = plr.SyntheticOracleParams(
     func          = GT_NAME,
     objectives    = (METABOLIC, COMFORT),
-    dim           = 3, #if GT_NAME == 'DTLZ2' else 2,
-    box           = None, # mo functions dont take bounds
+    optima        = ((1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    dim           = 3,
+    box           = (0.0, 3.0),
     seed          = SEED,
     rel_noise_std = TRUE_NOISE,
     measure = 'std'
@@ -50,14 +55,13 @@ REF_POINT       = plr.reference_point(
     margin   = REF_MARGIN
 )
 
-# the reference the run optimizes against travels with the groundtruth, so a
-# metric reading a saved run back scores it against the same one
+# recorded on the params, so a metric reading a saved run back scores it
+# against the reference the run optimized against
 GROUND_TRUTH_PARAMS = replace(GROUND_TRUTH_PARAMS, ref_point=tuple(REF_POINT))
-MO_TRUTH            = GROUND_TRUTH_PARAMS.build()
 
 # Actions
-DIM             = MO_TRUTH.objectives[0].truth.dim
-BOUNDS          = plr.as_bounds(MO_TRUTH.objectives[0].truth.bounds)
+DIM             = MO_TRUTH.get_oracle(0).truth.dim
+BOUNDS          = plr.as_bounds(MO_TRUTH.get_oracle(0).truth.bounds)
 ACTION_NAMES     = [f'x{i}' for i in range(DIM)]
 OUTPUT_DIR       = Path('hilo/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 
@@ -77,14 +81,14 @@ def make_probes_mo(ipad=None, multithread=False):
     probes = [
         plr.Probe(
             name              = METABOLIC,
-            caller            = lambda action, trial_num: MO_TRUTH.objective(0)(action),
+            caller            = lambda action, trial_num: MO_TRUTH.get_oracle(0)(action),
             repeats           = REPEATS[METABOLIC],
             obj_name          = METABOLIC,
             separate_thread   = multithread
         ),
         plr.Probe(
             name              = COMFORT,
-            caller            = lambda action, trial, timeout, period: MO_TRUTH.objective(1)(action),
+            caller            = lambda action, trial, timeout, period: MO_TRUTH.get_oracle(1)(action),
             repeats           = REPEATS[COMFORT],
             obj_name          = COMFORT,
             separate_thread   = multithread

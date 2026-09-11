@@ -2,9 +2,13 @@
 
 The module's contract is that a truth carries no direction -- BoTorch states
 every one of its own in the minimizing sense -- and that which way each column
-is optimized comes from the objectives. The tests below pin that the
-all-minimizing case is unchanged, that a maximized problem scores its own front
-as perfect rather than as worthless, and that the two cannot be mixed silently.
+is optimized comes from the objectives. Nothing here needs a model: the metrics
+take objective vectors and actions, so the tests below feed them directly.
+They pin that
+the all-minimizing case scores the scan's own front as perfect, that a
+maximized problem does too rather than scoring it as worthless, that the
+numerator and the denominator share one reference, and that the two directions
+cannot be mixed silently.
 """
 
 import numpy as np
@@ -14,11 +18,13 @@ from botorch.test_functions import multi_objective
 
 from pypolar.feedback.synthetic import MOSyntheticOracle
 from pypolar.optimization.objectives import DecoupledObjectives, Objective
-from pypolar.performance.mo import (_attained_fraction, _signs,
+from pypolar.performance.mo import (_attained_fraction,
                                     attained_hypervolume_regret,
                                     front_alignment_regret,
+                                    front_coverage_regret,
                                     normalized_hypervolume_regret)
-from pypolar.utils.pareto import (get_nondominated, hypervolume_from_nondominated)
+from pypolar.utils.pareto import (get_nondominated, hypervolume_from_nondominated,
+                                  reference_point)
 
 SEED     = 3
 N_SPREAD = 256      # a Sobol scan small enough to keep the suite quick
@@ -44,38 +50,46 @@ def make_objectives(oracle, maximize):
     ])
 
 
-class StubGP:
-    """The `posterior_at` contract the metrics ask for, and the objectives they
-    read the direction off. A real fit would only add noise to what is being
-    tested."""
-
-    def __init__(self, objectives, mu):
-        self.objectives = objectives
-        self._mu        = mu
-
-    def posterior_at(self, action, **kwargs):
-        return self._mu, np.zeros_like(self._mu)
-
-
 class TestDirectionIsTheObjectives:
 
     def test_minimizing_reproduces_the_hardcoded_formula(self, oracle):
-        # what the module computed before the direction was an argument
-        front    = oracle.scan_values[get_nondominated(-oracle.scan_values)]
-        expected = hypervolume_from_nondominated(front - oracle.ref_point)
+        # what the module computed when the direction was a sign array: the
+        # scan's own minimizing front, measured from a reference below it
+        objectives = make_objectives(oracle, maximize=False)
+        ref        = reference_point(values=oracle.scan_values,
+                                     maximize=[False, False])
 
-        assert oracle.max_hypervolume() == expected
-        assert oracle.sampled_max_hypervolume == expected
-        np.testing.assert_allclose(oracle.max_hypervolume([-1.0, -1.0]), expected)
+        front    = oracle.scan_values[get_nondominated(-oracle.scan_values)]
+        expected = hypervolume_from_nondominated(front - ref)
+
+        assert oracle.max_hypervolume(objectives) == pytest.approx(expected)
 
     def test_a_direction_is_measured_once_and_kept(self, oracle):
-        assert oracle.max_hypervolume([1.0, 1.0]) is oracle.max_hypervolume([1.0, 1.0])
+        objectives = make_objectives(oracle, maximize=True)
+
+        assert (oracle.max_hypervolume(objectives)
+                is oracle.max_hypervolume(objectives))
 
     def test_maximizing_is_a_different_hypervolume(self, oracle):
-        # the same scan against the same reference, read the other way, so the
+        # the same scan against its own reference, read the other way, so the
         # two measure different regions and neither is the other's complement
-        assert oracle.max_hypervolume([1.0, 1.0]) > 0
-        assert oracle.max_hypervolume([1.0, 1.0]) != oracle.max_hypervolume()
+        maximized = oracle.max_hypervolume(make_objectives(oracle, True))
+        minimized = oracle.max_hypervolume(make_objectives(oracle, False))
+
+        assert maximized > 0
+        assert maximized != minimized
+
+    def test_the_map_is_sign_only(self, oracle):
+        # no scale and no shift, so it does not move as measurements arrive and
+        # the values stay in the objectives' own units
+        objectives = make_objectives(oracle, maximize=False)
+
+        np.testing.assert_allclose(
+            objectives.maximization_space(oracle.scan_values),
+            -oracle.scan_values)
+        np.testing.assert_allclose(
+            make_objectives(oracle, True).maximization_space(oracle.scan_values),
+            oracle.scan_values)
 
     def test_signs_come_from_the_objectives(self, oracle):
         np.testing.assert_array_equal(
@@ -90,17 +104,34 @@ class TestAttainedFraction:
     def test_the_scan_scores_itself_perfectly(self, oracle, maximize):
         # the denominator is the scan's own front, so the whole scan attains
         # exactly it -- whichever way the objectives are pointed
-        signs = make_objectives(oracle, maximize).signs
+        objectives = make_objectives(oracle, maximize)
 
-        assert _attained_fraction(oracle.scan_values, oracle, signs) == 1.0
+        assert _attained_fraction(oracle.scan_values, objectives,
+                                  oracle) == pytest.approx(1.0)
 
-    def test_the_wrong_direction_attains_nothing(self, oracle):
-        # the minimizing front scored as if it were maximized: every point is
-        # worse than the reference in some column, so its hypervolume is zero.
-        # This is the failure the direction argument exists to prevent
+    def test_the_wrong_direction_scores_far_worse(self, oracle):
+        # the direction reaches the reference as well as the values, so a set
+        # read the wrong way up is scored self-consistently rather than being
+        # measured from a reference on the wrong side. It is still nearly
+        # worthless -- the minimizing front is a poor maximizing one -- which
+        # is what the direction argument exists to make visible
         front = oracle.scan_values[get_nondominated(-oracle.scan_values)]
 
-        assert _attained_fraction(front, oracle, np.array([1.0, 1.0])) == 0.0
+        assert _attained_fraction(front, make_objectives(oracle, False),
+                                  oracle) == pytest.approx(1.0)
+        assert _attained_fraction(front, make_objectives(oracle, True),
+                                  oracle) < 0.1
+
+    def test_one_reference_covers_both_halves(self, oracle):
+        # numerator and denominator are measured from the same reference, so a
+        # reference the caller supplies moves the ratio only where the set is
+        # short of the front -- not by rescaling one half of it
+        objectives = make_objectives(oracle, maximize=False)
+        ref        = reference_point(values=oracle.scan_values,
+                                     maximize=[False, False], margin=0.5)
+
+        assert _attained_fraction(oracle.scan_values, objectives, oracle,
+                                  ref_point=ref) == pytest.approx(1.0)
 
 
 class TestRegrets:
@@ -108,23 +139,48 @@ class TestRegrets:
     @pytest.mark.parametrize('maximize', [False, True])
     def test_the_true_front_scores_zero_regret(self, oracle, maximize):
         objectives = make_objectives(oracle, maximize)
-        # a model that knows the truth exactly: the posterior mean *is* the
-        # truth in maximization space, so its inferred front is the true one
-        gp = StubGP(objectives, objectives.signs * oracle.scan_values)
 
-        assert normalized_hypervolume_regret(gp, oracle) == pytest.approx(0.0)
-        assert front_alignment_regret(gp, oracle) == pytest.approx(0.0)
+        assert normalized_hypervolume_regret(
+            oracle.scan_actions, oracle, objectives) == pytest.approx(0.0)
+
+    def test_a_partial_front_scores_worse_than_the_whole(self, oracle):
+        objectives = make_objectives(oracle, maximize=False)
+
+        whole = normalized_hypervolume_regret(oracle.scan_actions, oracle,
+                                              objectives)
+        part  = normalized_hypervolume_regret(oracle.scan_actions[:16], oracle,
+                                              objectives)
+
+        assert 0.0 <= whole < part <= 1.0
 
     @pytest.mark.parametrize('maximize', [False, True])
-    def test_gd_plus_is_finite_and_non_negative(self, oracle, maximize):
+    def test_the_observation_noise_cannot_flatter_a_run(self, oracle, maximize):
+        """The actions are scored on the truth, so how noisy the oracle is
+        cannot move the number -- and the regret stays in [0, 1]. Scored on the
+        values a run claims instead, a lucky draw reports a point as better than
+        anything the box holds and the regret comes out negative."""
         objectives = make_objectives(oracle, maximize)
-        # a model that has it exactly backwards, which is the case that put
-        # ideal above nadir and made pymoo's normalization raise
-        gp = StubGP(objectives, -objectives.signs * oracle.scan_values)
+        noisy      = MOSyntheticOracle(multi_objective.BraninCurrin(),
+                                       rel_noise_std=0.5, n_spread=N_SPREAD,
+                                       seed=SEED)
 
-        alignment = front_alignment_regret(gp, oracle)
+        clean_regret = normalized_hypervolume_regret(oracle.scan_actions[:32],
+                                                     oracle, objectives)
+        noisy_regret = normalized_hypervolume_regret(noisy.scan_actions[:32],
+                                                     noisy, objectives)
 
-        assert np.isfinite(alignment) and alignment > 0
+        assert clean_regret == pytest.approx(noisy_regret)
+        assert 0.0 <= clean_regret <= 1.0
+
+    def test_the_two_hypervolume_regrets_are_one_measurement(self, oracle):
+        # they differ only in what is handed to them: the front a run would
+        # recommend, or every action it queried
+        objectives = make_objectives(oracle, maximize=False)
+
+        assert normalized_hypervolume_regret(
+            oracle.scan_actions[:32], oracle, objectives
+        ) == attained_hypervolume_regret(
+            oracle.scan_actions[:32], oracle, objectives)
 
     @pytest.mark.parametrize('maximize', [False, True])
     def test_attained_regret_takes_the_objectives(self, oracle, maximize):
@@ -144,6 +200,93 @@ class TestRegrets:
 
         assert minimized != maximized
 
+    @pytest.mark.parametrize('maximize', [False, True])
+    def test_gd_plus_is_zero_on_the_true_front(self, oracle, maximize):
+        # the actions a run that knew the truth exactly would nominate: the
+        # scan's own front, which is the front the indicator measures against
+        objectives = make_objectives(oracle, maximize)
+        values     = objectives.maximization_space(oracle.scan_values)
+        front      = get_nondominated(values)
+
+        assert front_alignment_regret(oracle.scan_actions[front], oracle,
+                                      objectives) == pytest.approx(0.0)
+
+    @pytest.mark.parametrize('maximize', [False, True])
+    def test_gd_plus_is_finite_and_non_negative(self, oracle, maximize):
+        # a run that has it exactly backwards nominates the anti-front, which
+        # is the case that put ideal above nadir and made pymoo's normalization
+        # raise
+        objectives = make_objectives(oracle, maximize)
+        anti       = get_nondominated(
+            -objectives.maximization_space(oracle.scan_values))
+
+        alignment = front_alignment_regret(oracle.scan_actions[anti], oracle,
+                                           objectives)
+
+        assert np.isfinite(alignment) and alignment > 0
+
+
+class TestFrontCoverage:
+    """IGD+, the complement of GD+. The pair only means anything together: one
+    is blind to gaps and the other to strays, and the tests below pin exactly
+    which is blind to which."""
+
+    @pytest.mark.parametrize('maximize', [False, True])
+    def test_igd_plus_is_zero_on_the_true_front(self, oracle, maximize):
+        objectives = make_objectives(oracle, maximize)
+        values     = objectives.maximization_space(oracle.scan_values)
+        front      = get_nondominated(values)
+
+        assert front_coverage_regret(oracle.scan_actions[front], oracle,
+                                     objectives) == pytest.approx(0.0)
+
+    @pytest.mark.parametrize('maximize', [False, True])
+    def test_igd_plus_is_finite_and_non_negative(self, oracle, maximize):
+        objectives = make_objectives(oracle, maximize)
+        anti       = get_nondominated(
+            -objectives.maximization_space(oracle.scan_values))
+
+        coverage = front_coverage_regret(oracle.scan_actions[anti], oracle,
+                                         objectives)
+
+        assert np.isfinite(coverage) and coverage > 0
+
+    def test_a_stray_costs_gd_plus_but_not_igd_plus(self, oracle):
+        # a nominated action nearest to no front point is never the minimizer
+        # of any front point's distance, so it cannot move IGD+
+        objectives = make_objectives(oracle, maximize=False)
+        values     = objectives.maximization_space(oracle.scan_values)
+        front      = oracle.scan_actions[get_nondominated(values)]
+        stray      = oracle.scan_actions[np.argmin(values.sum(axis=1))][None, :]
+        padded     = np.vstack([front, stray])
+
+        assert front_alignment_regret(padded, oracle, objectives) > \
+               front_alignment_regret(front, oracle, objectives)
+        assert front_coverage_regret(padded, oracle, objectives) == \
+               pytest.approx(front_coverage_regret(front, oracle, objectives))
+
+    def test_a_gap_costs_igd_plus_but_not_gd_plus(self, oracle):
+        # one true-front action covers none of the rest of the front, which is
+        # perfect precision and the worst coverage the front's own points allow
+        objectives = make_objectives(oracle, maximize=False)
+        values     = objectives.maximization_space(oracle.scan_values)
+        front      = oracle.scan_actions[get_nondominated(values)]
+        one        = front[:1]
+
+        assert front_alignment_regret(one, oracle, objectives) == pytest.approx(0.0)
+        assert front_coverage_regret(one, oracle, objectives) > \
+               front_coverage_regret(front, oracle, objectives)
+
+
+class TestIndicatorNormalization:
+
+    def test_ideal_and_nadir_come_from_the_scan_being_scored(self, oracle):
+        # each oracle scans at `seed + i` while `scan_values` is drawn at
+        # `seed`, so the per-oracle sample_min/sample_max are a different point
+        # set for every column past the first; the indicators normalize by the
+        # scan they actually score
+        assert oracle.scan_values[:, 1].max() != oracle.oracles[1].sample_max
+
 
 class TestMismatch:
 
@@ -151,15 +294,10 @@ class TestMismatch:
         objectives = make_objectives(oracle, maximize=False)[['y0']]
 
         with pytest.raises(ValueError, match='truth columns'):
-            _signs(objectives, oracle)
+            oracle.max_hypervolume(objectives)
 
-    def test_a_mismatched_gp_raises_rather_than_scoring(self, oracle):
+    def test_a_mismatched_set_of_objectives_raises_rather_than_scoring(self, oracle):
         objectives = make_objectives(oracle, maximize=False)[['y0']]
-        gp         = StubGP(objectives, oracle.scan_values[:, :1])
 
-        with pytest.raises(ValueError, match='truth columns'):
-            normalized_hypervolume_regret(gp, oracle)
-
-    def test_max_hypervolume_checks_its_own_signs(self, oracle):
-        with pytest.raises(ValueError, match='signs'):
-            oracle.max_hypervolume([-1.0])
+        with pytest.raises(ValueError, match='objectives'):
+            normalized_hypervolume_regret(oracle.scan_actions, oracle, objectives)
