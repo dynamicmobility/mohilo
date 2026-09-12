@@ -9,11 +9,12 @@ from linear_operator.utils.warnings import NumericalWarning
 import pypolar as plr
 from tqdm import tqdm
 import hilo.shared.simulation as hilo
+import scripts.mo_example as mo
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 OUTPUT_DIR    = Path('scripts/output/experiments') / time.strftime('%Y%m%d_%H%M%S')
 POP_SIZE      = 5    # NSGA2 spends this many evaluations per generation
-N_TRIALS      = 50
+N_TRIALS      = 3
 
 from pymoo.algorithms.moo.nsga2 import NSGA2
 from pymoo.core.problem import Problem
@@ -147,7 +148,7 @@ def make_idealpoint_groundtruth(seed, bounds, noise):
     )
 
     gt = GROUND_TRUTH_PARAMS.build()
-    return gt
+    return gt, GROUND_TRUTH_PARAMS
 
 
 def run_nsga_trial(seed: int, pop_size: int, groundtruth: plr.MOSyntheticOracle):
@@ -171,28 +172,120 @@ def run_nsga_trial(seed: int, pop_size: int, groundtruth: plr.MOSyntheticOracle)
         ground_truth = groundtruth,
         pop_size     = pop_size
     )
-    return evals, curves
+    return evals, curves, queried, measured
 
-def run_mobo(seed, groundtruth):
-    pass
+def make_probes_mo(gt, ipad=None, multithread=False):
+    """One probe per objective, each measuring its own column of the MO truth.
+    """
+    probes = [
+        plr.Probe(
+            name              = hilo.METABOLIC,
+            caller            = lambda action, trial_num: gt.get_oracle(0)(action),
+            repeats           = 1,
+            obj_name          = hilo.METABOLIC,
+            separate_thread   = multithread
+        ),
+        plr.Probe(
+            name              = hilo.COMFORT,
+            caller            = lambda action, trial, timeout, period: gt.get_oracle(1)(action),
+            repeats           = 1,
+            obj_name          = hilo.COMFORT,
+            separate_thread   = multithread
+        )
+    ]
+    return probes
+
+
+def setup_experiment(acq_strat, seed, gt: plr.SyntheticOracle):
+    probes     = make_probes_mo(gt)
+    experiment = hilo.make_experiment_mo(
+        probes    = probes,
+        maximize  = hilo.MAXIMIZE
+    )
+    params     = plr.AcquisitionParams(
+        strategy          = acq_strat,
+        seed              = seed,
+        num_objectives    = 2,
+        raw_ref_point     = None,
+        **hilo.ACQ_KWARGS
+    )
+    # assert experiment.objectives.names == list(gt.objectives)
+
+    return experiment, params
+
+def run_mobo_trial(seed, groundtruth: plr.SyntheticOracle, gt_params: plr.SyntheticOracleParams):
+    experiment, params = setup_experiment(
+        acq_strat   = 'qlognparego',
+        seed        = seed,
+        gt          = groundtruth
+    )
+
+    dataset = plr.ExperimentDataset(
+        name         = 'qlognparego',
+        acquisition  = params,
+        groundtruth  = gt_params,
+        config       = mo.asdict(
+            hilo.Config(
+                gp_noise          = plr.NoiseModel.coerce(hilo.GP_NOISE),
+                min_lengthscale   = hilo.MIN_LENGTHSCALE,
+                num_queries       = hilo.NUM_QUERIES,
+                repeats           = hilo.REPEATS,
+                dim               = hilo.DIM,
+                seed              = hilo.SEED
+            )
+        ),
+        path         = OUTPUT_DIR / f'{seed}.json'
+    )
+
+    experiment, gp, dataset = mo.run_experiment(
+        experiment        = experiment,
+        acqf              = params.build(),
+        dataset           = dataset,
+        ground_truth      = groundtruth
+    )
+    print(f'wrote {dataset.save()}')
+
+    dataset: plr.ExperimentDataset = dataset
+    names = ('front_coverage',)
+    curves = {n: dataset.get_aux(n) for n in names}
+    curves['evals'] = np.arange(len(dataset)) + 1
+    return curves
+
 
 
 def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     for i in tqdm(range(N_TRIALS)):
-        gt = make_idealpoint_groundtruth(
+        hilo.BOUNDS     = (-3, 3)
+        hilo.TRUE_NOISE = 0.1
+        hilo.GP_NOISE   = plr.NoiseModel.prior(hilo.TRUE_NOISE)
+
+        gt, params = make_idealpoint_groundtruth(
             seed    = hilo.SEED + i,
-            bounds  = (-3.0, 3.0),
-            noise   = 0.1
+            bounds  = hilo.BOUNDS,
+            noise   = hilo.TRUE_NOISE
         )
-        evals, curves = run_nsga_trial(
+        evals, curves, queried, measured = run_nsga_trial(
             seed        = hilo.SEED + i,
             pop_size    = POP_SIZE,
-            groundtruth = gt
+            groundtruth = gt,
         )
+
         curves['evals'] = evals
         pd.DataFrame.from_dict(curves).to_csv(
             OUTPUT_DIR / f'NSGA2_trial{i}.csv'
+        )
+        # (N, d) actions and (N, m) noisy values, in query order
+        np.savez(OUTPUT_DIR / f'NSGA2_trial{i}.npz', queried=queried,
+                 measured=measured)
+
+        curves = run_mobo_trial(
+            seed        = hilo.SEED + i,
+            groundtruth = gt,
+            gt_params   = params
+        )
+        pd.DataFrame.from_dict(curves).to_csv(
+            OUTPUT_DIR / f'MOBO_trial{i}.csv'
         )
 
 
