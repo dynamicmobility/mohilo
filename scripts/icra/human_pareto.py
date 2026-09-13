@@ -73,7 +73,7 @@ def make_figure(
         mu, std           = model.posterior_at(X)
         raw_mu, raw_std   = model.posterior_at(X, raw=True)
         nd_idx            = front_order(mu, raw_mu)
-        colors            = model.objectives.xtransform(X) # normalization space
+        colors            = 1 - model.objectives.xtransform(X) # normalization space
 
         bounds = np.asarray([np.min(raw_mu, axis=0), np.max(raw_mu, axis=0)])
         obj_bounds.append(bounds)
@@ -86,9 +86,9 @@ def make_figure(
             colors                  = colors,
             connect                 = True,
             show_dominated          = True,
-            dominated_alpha         = 0.4,
-            outline_nondominated    = 2,
-            nondominated_s          = 30,
+            dominated_alpha         = 0.1,
+            outline_nondominated    = 1,
+            nondominated_s          = 80,
             label                   = names,
             set_lims                = False
         )
@@ -101,12 +101,13 @@ def make_figure(
             ax              = a_ax,
             nd_pts          = X[nd_idx],
             colors          = colors[nd_idx],
-            action_labels   = ['Hip Flexion Scale', 'Hip Extension Scale', 'Delay'],
+            action_labels   = ['Hip Flex. Scale', 'Hip Ext. Scale', 'Delay'],
             bounds          = model.objectives.action_bounds
         )
-        p_ax.set_title(f'Trial {trial}')
-        p_ax = plr.dress_axis(p_ax, label_size=16, num_xticks=5, num_yticks=6, title_size=18)
-        a_ax = plr.dress_axis(a_ax, label_size=16, num_xticks=4, num_yticks=4, num_zticks=4)
+        # p_ax.set_title(f'Trial {trial}')
+        p_ax = plr.dress_axis(p_ax, tick_size=20, label_size=22, num_xticks=5, num_yticks=6, title_size=30)
+        # p_ax.title.set_fontfamily('cmb10')   # Computer Modern bold; cmr10 has no bold weight
+        a_ax = plr.dress_axis(a_ax, tick_size=20, label_size=22, num_xticks=4, num_yticks=4, num_zticks=4)
         a_ax.patch.set_visible(False)   # an opaque background covers the row above's x labels
 
     obj_bounds = np.asarray(obj_bounds)       # (T, 2, m): trial, [low, high], objective
