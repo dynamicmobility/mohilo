@@ -123,7 +123,7 @@ def plot_fronts(ax, run: Path, trial: int = TRIAL):
         true_front = values['true front'],
         overlays   = {'MOBO last query': values['MOBO last query']},
         names      = [f'{name} ({"higher" if up else "lower"} is better)'
-                      for name, up in zip(dataset.groundtruth.objectives, maximize)],
+                      for name, up in zip(('$f_1$', '$f_2$'), maximize)],
         title      = f'noise {truth.rel_noise_std:g}, seed {hilo.SEED + trial}, '
                      f'{len(dataset)} evaluations'
     )

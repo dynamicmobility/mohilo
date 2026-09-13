@@ -25,6 +25,11 @@ SCAN       = 2**14      # Sobol points the front is read off
 SEED       = 95
 DPI        = 300
 
+ACTION_LABELS = ['Hip Flex. Scale', 'Hip Ext. Scale', 'Delay']   # action dimensions, in order
+SLICES        = 3       # delay levels the colormap key is drawn at
+SLICE_WIDTH   = 0.6     # key column width, relative to one trial column
+SLICE_GAP     = 1.0     # inches between stacked slices: room for one's x label and the next one's title
+
 
 def front_order(mu, raw_mu):
     """Sorted nondominated indexes of the Pareto front."""
@@ -50,18 +55,57 @@ def content_bbox(fig: plt.Figure, pad: float = 0.1):
     return Bbox.union(boxes).transformed(fig.dpi_scale_trans.inverted()).padded(pad)
 
 
+def action_colors(objectives: plr.DecoupledObjectives, actions: np.ndarray):
+    """(n, 3) RGB color of each raw action: its normalized (Hip Flex, Hip Ext,
+    Delay), so each channel depends on one dimension."""
+    # return 1 - objectives.xtransform(actions)
+    return objectives.xtransform(actions)
+
+
+def plot_color_slices(
+    axes        : list[plt.Axes],
+    objectives  : plr.DecoupledObjectives,
+    n_pixels    : int = 128
+):
+    """The action colormap as (Hip Flex, Hip Ext) images at evenly spaced
+    delays, highest delay in the first axes.
+
+    Blue depends on delay alone, so each slice shows every color at its delay
+    exactly, and colors between two slices are a blend of them.
+    """
+    (flex_lo, ext_lo, delay_lo), (flex_hi, ext_hi, delay_hi) = plr.as_bounds(objectives.action_bounds)
+    flex, ext = np.meshgrid(np.linspace(flex_lo, flex_hi, n_pixels),
+                            np.linspace(ext_lo, ext_hi, n_pixels))
+    for ax, delay in zip(axes, np.linspace(delay_hi, delay_lo, len(axes))):
+        actions = np.column_stack([flex.ravel(), ext.ravel(), np.full(flex.size, delay)])
+        image   = np.clip(action_colors(objectives, actions), 0, 1).reshape(n_pixels, n_pixels, 3)
+        ax.imshow(image, origin='lower', extent=(flex_lo, flex_hi, ext_lo, ext_hi), aspect='auto')
+        ax.set_box_aspect(1)
+        ax.set_title(f'{ACTION_LABELS[2]} = {delay:g}')
+        ax.set_xlabel(ACTION_LABELS[0])
+        ax.set_ylabel(ACTION_LABELS[1])
+
+    for ax in axes:
+        plr.dress_axis(ax, tick_size=14, label_size=16, title_size=18, num_xticks=3, num_yticks=3)
+        ax.grid(False)
+
+    return axes
+
+
 def make_figure(
     dataset   : plr.ExperimentDataset,
     path      : Path = None,
     trials    : list = [-1],
     scan      = SCAN,
     seed      = SEED,
-    dpi       = DPI
+    dpi       = DPI,
+    n_slices  = SLICES
 ):
     if path is None:
         path = OUTPUT_DIR / (dataset.subject + f'.jpg')
 
-    fig  = plt.figure(figsize=(5 * len(trials), 9))
+    fig  = plt.figure(figsize=(5 * (len(trials) + SLICE_WIDTH), 9))
+    grid = fig.add_gridspec(2, len(trials) + 1, width_ratios=[1] * len(trials) + [SLICE_WIDTH])
     obj_bounds = []
     p_axes     = []
     
@@ -73,12 +117,12 @@ def make_figure(
         mu, std           = model.posterior_at(X)
         raw_mu, raw_std   = model.posterior_at(X, raw=True)
         nd_idx            = front_order(mu, raw_mu)
-        colors            = 1 - model.objectives.xtransform(X) # normalization space
+        colors            = action_colors(model.objectives, X)
 
         bounds = np.asarray([np.min(raw_mu, axis=0), np.max(raw_mu, axis=0)])
         obj_bounds.append(bounds)
 
-        p_ax    = fig.add_subplot(2, len(trials), idx + 1)
+        p_ax    = fig.add_subplot(grid[0, idx])
         p_ax    = plr.plot_pareto(
             ax                      = p_ax,
             pareto                  = raw_mu,
@@ -96,12 +140,12 @@ def make_figure(
         p_ax.set_ylabel(r'Comfort Score ($\uparrow$)')
         p_axes.append(p_ax)
 
-        a_ax    = fig.add_subplot(2, len(trials), (idx + 1) + len(trials), projection='3d')
+        a_ax    = fig.add_subplot(grid[1, idx], projection='3d')
         a_ax = plr.plot_pareto_actions(
             ax              = a_ax,
             nd_pts          = X[nd_idx],
             colors          = colors[nd_idx],
-            action_labels   = ['Hip Flex. Scale', 'Hip Ext. Scale', 'Delay'],
+            action_labels   = ACTION_LABELS,
             bounds          = model.objectives.action_bounds
         )
         # p_ax.set_title(f'Trial {trial}')
@@ -122,6 +166,16 @@ def make_figure(
     # spacing between panels; the saved image is cropped to what is drawn
     fig.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95,
                         wspace=0.4, hspace=0.2)
+
+    # the colormap key: n_slices delay levels stacked in the last column, spanning both rows.
+    # hspace is a fraction of a slice's height, so it is solved for a gap of SLICE_GAP inches
+    height = fig.get_figheight() * (fig.subplotpars.top - fig.subplotpars.bottom)
+    room   = height - SLICE_GAP * (n_slices - 1)
+    if room <= 0:
+        raise ValueError(f'{n_slices} slices do not fit in {height:.1f} in with {SLICE_GAP} in gaps')
+    key    = grid[:, -1].subgridspec(n_slices, 1, hspace=SLICE_GAP * n_slices / room)
+    plot_color_slices([fig.add_subplot(key[i, 0]) for i in range(n_slices)], model.objectives)
+
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=dpi, bbox_inches=content_bbox(fig))
 
@@ -168,6 +222,12 @@ def parse_args():
         default = DPI,
         help    = 'DPI of the generated figure'
     )
+    p.add_argument(
+        '--slices',
+        type    = int,
+        default = SLICES,
+        help    = 'number of delay levels the colormap key is drawn at'
+    )
 
     return p.parse_args()
 
@@ -181,7 +241,8 @@ def main():
         path      = args.output,
         scan      = args.scan,
         seed      = args.seed,
-        dpi       = args.dpi
+        dpi       = args.dpi,
+        n_slices  = args.slices
     )
     print(f'Wrote to {path}')
 
