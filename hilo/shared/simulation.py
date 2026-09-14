@@ -18,7 +18,7 @@ SURVEY_TIMEOUT   = 0.0
 SURVEY_PERIOD    = 0.0
 METABOLIC_PERIOD = 0.0
 REF_MARGIN       = 0.1  # reference sits this fraction of the front's extent past its nadir
-TRUE_NOISE       = 0.01
+TRUE_NOISE       = 0.1
 
 # Optimization
 SEED             = 95

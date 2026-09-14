@@ -35,13 +35,13 @@ def aux(
             raw_actions     = recommended,
             ground_truth    = ground_truth,
             objectives      = gp.objectives,
-            ref_point       = hilo.REF_POINT
+            ref_point       = None #hilo.REF_POINT
         ),
         'hv_regret_attained' : plr.attained_hypervolume_regret(
             raw_actions     = queried,
             ground_truth    = ground_truth,
             objectives      = gp.objectives,
-            ref_point       = hilo.REF_POINT
+            ref_point       = None #hilo.REF_POINT
         ),
         'front_alignment'    : plr.front_alignment_regret(
             raw_actions     = recommended,
@@ -117,7 +117,7 @@ def setup_experiment(acq_strat, seed):
         strategy          = acq_strat,
         seed              = seed,
         num_objectives    = 2,
-        raw_ref_point     = hilo.REF_POINT,
+        raw_ref_point     = None #hilo.REF_POINT,
         **ACQ_KWARGS
     )
     assert experiment.objectives.names == list(hilo.GROUND_TRUTH_PARAMS.objectives)

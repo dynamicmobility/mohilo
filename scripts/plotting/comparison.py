@@ -12,9 +12,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pypolar as plr
+import hilo.shared.simulation as hilo
 
 DATASET = Path('scripts/output/experiments/20260910_140158')
 METRIC  = 'front_coverage'      # the IGD+ indicator (performance/mo.py)
+SKIP    = hilo.NUM_RANDOM       # rows at or below this many evaluations are dropped
 COLORS  = ['tab:blue', 'tab:red', 'tab:green', 'tab:orange', 'tab:purple']
 
 # CSV column -> (axis label, output filename stem). The keys are the whitelist
@@ -27,12 +29,17 @@ METRICS = {
 }
 
 
-def load(dataset: Path, metric: str = METRIC):
+def load(dataset: Path, metric: str = METRIC, skip: int = SKIP):
     """Every `*_trial*.csv` in `dataset`, grouped by the method its name states.
+
+    Rows at `skip` evaluations or fewer are dropped. Over that few points the
+    posterior is near flat, so nearly every scanned action is nondominated and
+    the metrics score a front the model never found.
 
     Args:
         dataset: the dataset directory.
         metric: the column to read.
+        skip: the evaluation count at or below which rows are dropped.
 
     Returns:
         {method: (evals, values)}, with `evals` (n_evals,) and `values`
@@ -42,6 +49,7 @@ def load(dataset: Path, metric: str = METRIC):
     for path in sorted(dataset.glob('*_trial*.csv')):
         method = path.stem.split('_trial')[0]
         frame  = pd.read_csv(path)
+        frame  = frame[frame['evals'] > skip]
         trials.setdefault(method, []).append(
             (frame['evals'].to_numpy(), frame[metric].to_numpy())
         )
