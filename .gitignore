@@ -70,3 +70,7 @@ docs/
 scripts/1d/output
 
 pyPolar.code-workspace
+
+
+*.mp4
+*.gif
