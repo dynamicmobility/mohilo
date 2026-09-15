@@ -57,8 +57,8 @@ def load(run_dir: Path, method: str):
 
 def conditions(dataset: Path, prefix: str):
     """The `<prefix><k>` subdirectories holding runs, as `(k, path)` by
-    increasing k."""
-    dirs = [(int(d.name[len(prefix):]), d) for d in dataset.iterdir()
+    increasing k, with k read as a float."""
+    dirs = [(float(d.name[len(prefix):]), d) for d in dataset.iterdir()
             if d.is_dir() and d.name.startswith(prefix)
             and any(d.glob('*_trial*.csv'))]
     return sorted(dirs)
@@ -90,7 +90,7 @@ def figure(dataset: Path, prefix: str, symbol: str, output: Path, ylim=None):
             evals, values = load(run_dir, method)
             mean, std = values.mean(axis=0), values.std(axis=0)
             ax.plot(evals, mean, color=color, lw=3, ls=style,
-                    label=f'{name} (${symbol}={k}$)')
+                    label=f'{name} (${symbol}={k:g}$)')
             ax.fill_between(evals, mean - std, mean + std, color=color,
                             alpha=0.12, lw=0)
 
