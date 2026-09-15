@@ -71,7 +71,7 @@ def shades(ramp, n: int):
     return [cmap(t) for t in (np.linspace(0, 1, n) if n > 1 else [0.5])]
 
 
-def figure(dataset: Path, prefix: str, symbol: str, output: Path):
+def figure(dataset: Path, prefix: str, symbol: str, output: Path, ylim=None):
     """Draw and write the figure for one ablation directory.
 
     Args:
@@ -96,13 +96,14 @@ def figure(dataset: Path, prefix: str, symbol: str, output: Path):
 
     ax.set_xlabel('Queries')
     ax.set_ylabel('IGD+')
+    ax.set_ylim(ylim)
     plr.dress_axis(ax, tick_size=TICK_SIZE, label_size=LABEL_SIZE)
     fig.savefig(output, bbox_inches='tight')
     print(f'wrote {output}')
 
 
 def main():
-    figure(DATASET, PREFIX, SYMBOL, OUTPUT)
+    figure(DATASET, PREFIX, SYMBOL, OUTPUT, ylim=(-0.05, 0.3))
 
 
 if __name__ == '__main__':

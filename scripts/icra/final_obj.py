@@ -12,10 +12,11 @@ DATASET = Path('scripts/output/final_exp/obj-100')
 OUTPUT  = DATASET / 'final_igd_plus.svg'
 PREFIX  = 'objs'    # the condition subdirectory prefix
 SYMBOL  = 'm'       # the label symbol the condition is named by
+YLIM    = (-0.05, 0.5)
 
 
 def main():
-    figure(DATASET, PREFIX, SYMBOL, OUTPUT)
+    figure(DATASET, PREFIX, SYMBOL, OUTPUT, YLIM)
 
 
 if __name__ == '__main__':
