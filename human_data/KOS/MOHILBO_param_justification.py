@@ -60,9 +60,9 @@ def main():
     ax.set_xlabel('Cycle (%)')
     ax.set_title('Parameterization Space for 1.25 m/s walk')
     ax.legend(loc='best')
-    fig.tight_layout()
     plr.dress_axis(ax)
-    fig.set_size_inches((6,3))
+    fig.set_size_inches((5,3))
+    fig.tight_layout()
     path = 'human_data/KOS/ctrl.svg'
     plt.savefig(path, transparent=True)
     print('saved to', path)

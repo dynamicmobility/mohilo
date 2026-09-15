@@ -143,7 +143,8 @@ def plot_fit_1d(
         paths    : np.ndarray      = None,
         vlines   : dict[str, float] = None,
         band_std : float           = 2.0,
-        title    : str             = None
+        title    : str             = None,
+        measurement_s: int = 8
     ) -> plt.Axes:
     """Plot a 1D model fit: a posterior mean and band, optional sample paths and
     truth curve, and the measurements the fit was made from.
@@ -187,17 +188,17 @@ def plot_fit_1d(
     ax.fill_between(x, mu - band_std * std, mu + band_std * std,
                     color=MODEL_COLOR, alpha=0.18, zorder=2,
                     label=f'posterior mean $\\pm$ {band_std:g}$\\sigma$')
-    ax.plot(x, mu, color=MODEL_COLOR, lw=1.8, ls='--', zorder=3,
+    ax.plot(x, mu, color=MODEL_COLOR, lw=1.8, ls='--', zorder=4,
             label='posterior mean')
     if truth is not None:
-        ax.plot(x, truth, color=TRUTH_COLOR, lw=1.8, zorder=4, label='truth')
+        ax.plot(x, truth, color=TRUTH_COLOR, lw=1.8, zorder=3, label='truth')
 
     for i, (label, action) in enumerate((vlines or {}).items()):
         color, ls = VLINE_STYLES[i % len(VLINE_STYLES)]
         ax.axvline(action, color=color, ls=ls, lw=1.2, zorder=5, label=label)
 
-    ax.scatter(np.ravel(xdata), np.ravel(ydata), s=8, color=TRUTH_COLOR,
-               zorder=-1, label='measurements')
+    ax.scatter(np.ravel(xdata), np.ravel(ydata), s=measurement_s, color=TRUTH_COLOR,
+               zorder=8, label='measurements')
 
     ax.set_xlabel('action')
     ax.set_ylabel('objective')
@@ -205,7 +206,6 @@ def plot_fit_1d(
         ax.set_title(title)
     ax.grid(alpha=0.3, lw=0.5)
     ax.set_axisbelow(True)
-    ax.legend(frameon=False, fontsize=8)
 
     return ax
 

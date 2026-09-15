@@ -140,8 +140,9 @@ def main():
     ax.set_ylim((3, None))
 
     path = 'human_data/MB04/met.svg'
-    fig.set_size_inches((8, 3))
+    fig.set_size_inches((6, 3))
     plr.dress_axis(ax)
+    fig.tight_layout()
     fig.savefig(path, transparent=True)
     print(path)
 

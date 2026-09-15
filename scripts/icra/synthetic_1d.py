@@ -123,7 +123,7 @@ def main():
     hilo.ACTION_NAMES   = [f'x{i}' for i in range(hilo.DIM)]
     hilo.TRUE_NOISE     = 0.1
     hilo.GP_NOISE       = plr.NoiseModel.prior(hilo.TRUE_NOISE)
-    hilo.NUM_QUERIES    = 15
+    hilo.NUM_QUERIES    = 7
     hilo.MAXIMIZE       = {hilo.METABOLIC: False, hilo.COMFORT: True}
 
 

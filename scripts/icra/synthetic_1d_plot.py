@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pypolar as plr
-from pypolar.utils.plotting import SAMPLE_COLOR
+from pypolar.utils.plotting import FONT, MATH_FONT, SAMPLE_COLOR
 from scripts.icra.validation_pareto import measured_at
 
 TRIAL       = -1          # the trial whose GP is drawn
@@ -26,12 +26,32 @@ DPI         = 300
 SURROGATE_COLOR  = '#D55E00'
 TRUTH_COLOR  = '#000000'
 SAMPLE_COLOR = '#009E73'
-ARROWS      = {True: r'$\uparrow$', False: r'$\downarrow$'}   # the direction an objective improves in
+ARROWS      = {True: r'max', False: r'min'}   # the direction an objective improves in
+OPT_COLORS  = ('blue', 'green')               # each objective's optimum star, in objective order
+OPT_LABELS  = ('Met. opt.', 'Comf. opt.')
+NEXT_COLOR  = 'red'                           # the next query's marker
+STAR_S      = 500                             # optimum and next-query marker area, in points^2
+MEASUREMENT_S = 70                            # measurement marker area, in points^2
 
 
 def truth_columns(dataset: plr.ExperimentDataset, objectives: plr.DecoupledObjectives):
     """The truth's output column for each objective, in `objectives` order."""
-    return [dataset.groundtruth.objectives.index(name) for name in objectives.names]
+    # return [dataset.groundtruth.objectives.index(name) for name in objectives.names]
+    return [0, 1]
+
+
+def true_optima(truth, objectives: plr.DecoupledObjectives, columns: list[int], n: int = GRID_POINTS):
+    """Each objective's best action on an `n`-point grid over the truth's box.
+
+    Returns:
+        actions: (m, 1) row i is objective i's optimal action.
+        values: (m, m) row i is every objective's noiseless truth at that action.
+    """
+    grid   = np.linspace(*truth.bounds[:, 0], n)[:, None]
+    values = truth(grid, noise=False)[:, columns]
+    best   = [np.argmax(o.ytransform(values[:, i])) for i, o in enumerate(objectives.objectives)]
+
+    return grid[best], values[best]
 
 
 def plot_fits(
@@ -62,6 +82,7 @@ def plot_fits(
     grid    = np.linspace(*truth.bounds[:, 0], n)[:, None]
     mu, std = gp.posterior_at(grid, raw=True)
     values  = truth(grid, noise=False)[:, truth_columns(dataset, gp.objectives)]
+    optimal_actions, optimal_values = true_optima(truth, gp.objectives, truth_columns(dataset, gp.objectives), n)
     for i, (ax, objective) in enumerate(zip(axes, gp.objectives.objectives)):
         plr.plot_fit_1d(
             ax       = ax,
@@ -72,11 +93,36 @@ def plot_fits(
             ydata    = objective.ydata,
             truth    = values[:, i],
             band_std = band_std,
-            title    = f'{objective.name}, {len(objective.ydata)} measurements'
+            title    = f'{objective.name}',
+            measurement_s=MEASUREMENT_S
         )
-        ax.set_xlabel(dataset.get_action_labels()[0])
+        ax.set_xlabel(r'Controller $\mathbf{a}$')
         ax.set_ylabel(f'{objective.name} ({ARROWS[objective.maximize]})')
-        plr.dress_axis(ax)
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+        ax.scatter(optimal_actions[i], optimal_values[i, i], s=STAR_S, c=OPT_COLORS[i], zorder=100, marker='*', label=OPT_LABELS[i])
+        # if i == 0:
+        #     ax.legend(frameon=True, fontsize=18)
+        plr.dress_axis(
+            ax,
+            label_size=24,
+            title_size=28
+        )
+    # every panel's entries, each label once
+    entries = {}
+    for ax in axes:
+        for handle, label in zip(*ax.get_legend_handles_labels()):
+            entries.setdefault(label, handle)
+    handles, labels = list(entries.values()), list(entries)
+    axes[0].figure.legend(
+        handles, labels,
+        loc            = 'upper center',
+        bbox_to_anchor = (0.5, 0.0),
+        ncol           = int(np.ceil(len(labels) / 2)),   # two rows
+        frameon        = True,
+        prop           = {'family': FONT, 'math_fontfamily': MATH_FONT, 'size': 24},
+    )
 
     return axes
 
@@ -141,17 +187,27 @@ def plot_front(
     ax.set_xlim(lims[:, 0])
     ax.set_ylim(lims[:, 1])
 
-    # Measured points (x)
+    # Measured points
     ax.scatter(
-        *measured.T, 
-        s         = 80,
-        marker    = 'x',
-        lw        = 1.0,
-        color     = SAMPLE_COLOR,
-        alpha     = 0.7,
-        zorder    = 6,
+        *measured.T,
+        s         = MEASUREMENT_S,
+        color     = TRUTH_COLOR,
+        zorder    = 8,
         label     = f'Measured feedback'
     )
+
+    # Each objective's true optimum, at every objective's truth there
+    truth   = dataset.get_groundtruth()
+    columns = truth_columns(dataset, objectives)
+    _, optimal_values = true_optima(truth, objectives, columns)
+    for i, value in enumerate(optimal_values):
+        ax.scatter(*value, s=STAR_S, c=OPT_COLORS[i], zorder=100, marker='*', label=OPT_LABELS[i])
+
+    # The action this trial's GP chose next, at its noiseless truth
+    action = dataset[trial].action
+    if action is not None:
+        ax.scatter(*truth(action[None, :], noise=False)[0, columns], s=STAR_S, c=NEXT_COLOR,
+                   zorder=101, marker='X', label='Next query')
 
     # True landscape
     ax.plot(
@@ -176,14 +232,19 @@ def plot_front(
     )
     
 
-    ax.legend(fontsize=8, loc='upper right', framealpha=0.9)
-
-    ax = plr.dress_axis(ax)
-
-    
-
+    # ax.legend(fontsize=8, loc='upper right', framealpha=0.9, markerscale=0.4)
     ax.set_xlabel(r'Metabolic Cost (W/kg, $\downarrow$)')
     ax.set_ylabel(r'Comfort ($\uparrow$)')
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    plr.dress_axis(
+        ax,
+        label_size=24,
+        title_size=28
+    )
+
     return ax
 
 
@@ -202,7 +263,7 @@ def make_figures(
     output.mkdir(parents=True, exist_ok=True)
 
     m         = len(dataset.groundtruth.objectives)
-    fig, axes = plt.subplots(1, m, figsize=(6 * m, 4.5), squeeze=False)
+    fig, axes = plt.subplots(1, m, figsize=(6 * m, 4.0), squeeze=False)
     plot_fits(axes[0], dataset, trial)
     fig.tight_layout()
     fits = output / f'{dataset.path.stem}_gp_fits.svg'
