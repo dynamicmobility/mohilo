@@ -34,8 +34,7 @@ def as_bounds(bounds, dim=None):
     if box.ndim == 1:
         box = box[:, None]
     if box.ndim != 2 or box.shape[0] != 2:
-        raise ValueError('bounds must be (2, d) [[low, ...], [high, ...]], got '
-                         f'shape {box.shape}')
+        raise ValueError(f'bounds must be (2, d) [[low, ...], [high, ...]], got shape {box.shape}')
     if dim is not None and box.shape[1] not in (1, dim):
         raise ValueError(f'bounds state {box.shape[1]} action dimensions, not {dim}')
 

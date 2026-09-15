@@ -565,20 +565,39 @@ rather than an analytic bump. This is the only module that evaluates one, so
   `construct_function` is the authority, and it takes a box: a box that excludes
   a function's known optimizer drops it, which puts StyblinskiTang (optimizer at
   −2.904) outside the set below a half-width of 2.91.
-- `IdealPoint(optimum, weights=1.0, offset=0.0, dim=None, bounds=None)` — a
-  quadratic bowl, `sum_k weights_k (x_k - optimum_k)^2 + offset`, with its one
-  optimum where you put it. A `SyntheticTestFunction` like every other truth
-  here, so it is stated in the minimizing sense (BoTorch's convention, and what
-  `Objective(maximize=False)` expects) and `optimal_value` is `offset`. `dim`
-  widens a scalar `optimum`; `weights` may be scalar or per-dimension. The
+- `IdealPoint(optimum, weights=1.0, offset=0.0, dim=None, bounds=None,
+  low=None, high=None)` — a quadratic bowl, `sum_k weights_k (x_k -
+  optimum_k)^2 + offset`, with its one optimum where you put it. A
+  `SyntheticTestFunction` like every other truth here, so it is stated in the
+  minimizing sense (BoTorch's convention, and what `Objective(maximize=False)`
+  expects) and `optimal_value` is the value at the optimum. `dim` widens a
+  scalar `optimum`; `weights` may be scalar or per-dimension, and negative
+  weights flip the bowl into a hump, whose `optimizers` and `optimal_value`
+  still report the ideal point — its maximum, not BoTorch's minimum. The
   default box is zero-centered at half-width 1, widened only if the optimum
   falls outside it, so several bowls with nearby optima share a box and drop
-  straight into `MOSyntheticOracle(truth=[bowl_a, bowl_b])`. A run records that
-  MO truth as `SyntheticOracleParams(func='IdealPoint', optima=(...,), box=...)`
-  — `optima` is one ideal point per output column, and the shared `box` is
-  required rather than defaulted because `MOSyntheticOracle.bounds` *intersects*
-  its members' boxes, so bowls left on their own defaults would land on a box
-  excluding some of their own optima.
+  straight into `MOSyntheticOracle(truth=[bowl_a, bowl_b])`.
+
+  `low` and `high`, set together, squash the bowl by a tanh into `[low, high]`.
+  With `q(x) = sum_k |weights_k| (x_k - optimum_k)^2`, positive weights give
+  `low + (high - low) tanh(q/2)`, exactly `low` at the optimum and saturating
+  toward `high`, and negative weights give `high - (high - low) tanh(q/2)`,
+  exactly `high` at the optimum. This is the old `rewards.py`
+  `BoundedIdealPoint` (commit c94d736) with its sign read the other way, since
+  those rewards were maximized; its `2 sigmoid(r) - 1` is `tanh(r/2)`, so the
+  same weights draw the same curves. A bounded bowl's weights must share one
+  sign, and `offset` must be 0: the old `gamma` was added before the squash and
+  pushed values out of the band (1.92 at the optimum of a `[-1, 1]` band for
+  `gamma = 1`). Under a noise stated relative to the spread and a standardizing
+  GP, `low` and `high` only change units, as `offset` does; the weights do not,
+  because the tanh bends the curve rather than rescaling it.
+
+  A run records that MO truth as `SyntheticOracleParams(func='IdealPoint',
+  optima=(...,), box=...)` — `optima` is one ideal point per output column, and
+  `weights`, `offset`, `low` and `high` take one entry per column the same way.
+  The shared `box` is required rather than defaulted because
+  `MOSyntheticOracle.bounds` *intersects* its members' boxes, so bowls left on
+  their own defaults would land on a box excluding some of their own optima.
 - `truth_at(truth, X)` — noiseless values of the truth at the `(n, d)` actions
   `X`, returned `(n,)`. The evaluation is `noise=False`, so a metric is never
   scored against a lucky draw. Takes an *instance*, not a subclass.

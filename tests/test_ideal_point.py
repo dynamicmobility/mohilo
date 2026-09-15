@@ -124,6 +124,52 @@ def test_several_bowls_compose_into_one_mo_oracle():
     assert np.argmin(values[:, 0]) != np.argmin(values[:, 1])
 
 
+class TestBounded:
+    """`IdealPoint(low=..., high=...)` -- the bowl squashed by a tanh into
+    [low, high], and flipped onto `high` by negative weights."""
+
+    LOW, HIGH = -1.0, 3.0
+    WIDE      = [(-50.0, 50.0)] * 2     # holds actions far enough out to saturate
+
+    def _bowl(self, **overrides):
+        return IdealPoint(**{'optimum': OPTIMUM, 'weights': WEIGHTS,
+                             'low': self.LOW, 'high': self.HIGH} | overrides)
+
+    def test_values_match_the_formula(self):
+        X        = sample_actions(bounds=self._bowl().bounds, n=64, kind='sobol', seed=0)
+        squashed = np.tanh(_closed_form(X, offset=0.0) / 2)
+        assert np.allclose(truth_at(self._bowl(), X),
+                           self.LOW + (self.HIGH - self.LOW) * squashed)
+        assert np.allclose(truth_at(self._bowl(weights=-WEIGHTS), X),
+                           self.HIGH - (self.HIGH - self.LOW) * squashed)
+
+    def test_a_bowl_sits_on_low_and_saturates_toward_high(self):
+        bowl   = self._bowl(bounds=self.WIDE)
+        values = truth_at(bowl, sample_actions(bounds=bowl.bounds, n=512, kind='sobol', seed=0))
+        assert truth_at(bowl, OPTIMUM[None, :])[0] == pytest.approx(self.LOW)
+        assert truth_at(bowl, OPTIMUM[None, :] + 40.0)[0] == pytest.approx(self.HIGH)
+        assert np.all((values >= self.LOW) & (values <= self.HIGH))
+        assert bowl.optimal_value == pytest.approx(self.LOW)
+
+    def test_negative_weights_flip_it_onto_high(self):
+        hump   = self._bowl(weights=-WEIGHTS, bounds=self.WIDE)
+        values = truth_at(hump, sample_actions(bounds=hump.bounds, n=512, kind='sobol', seed=0))
+        assert truth_at(hump, OPTIMUM[None, :])[0] == pytest.approx(self.HIGH)
+        assert truth_at(hump, OPTIMUM[None, :] + 40.0)[0] == pytest.approx(self.LOW)
+        assert np.all((values >= self.LOW) & (values <= self.HIGH))
+        assert hump.optimal_value == pytest.approx(self.HIGH)
+
+    def test_malformed_bounds_raise(self):
+        with pytest.raises(ValueError):
+            self._bowl(high=None)                   # one bound without the other
+        with pytest.raises(ValueError):
+            self._bowl(low=3.0, high=-1.0)          # low above high
+        with pytest.raises(ValueError):
+            self._bowl(offset=1.0)                  # the bounds fix the value at the optimum
+        with pytest.raises(ValueError):
+            self._bowl(weights=[1.0, -1.0])         # a saddle has no one direction to flip
+
+
 class TestParams:
     """`SyntheticOracleParams(func='IdealPoint', optima=...)` -- the record a run
     stores, and the m bowls it rebuilds into."""
@@ -160,10 +206,25 @@ class TestParams:
         assert np.allclose(np.diag(values), 0.0)
         assert np.all(np.diag(values[::-1]) > 0.0)
 
-    def test_a_json_round_trip_rebuilds_the_same_truth(self):
+    def test_bowl_arguments_reach_their_own_bowl(self):
+        oracle = self._params(weights=(2.0, -1.0), low=(0.0, -1.0), high=(1.0, 4.0)).build()
+        for one, weight, low, high in zip(oracle, (2.0, -1.0), (0.0, -1.0), (1.0, 4.0)):
+            assert np.allclose(one.truth.weights.numpy(), weight)
+            assert (one.truth.low, one.truth.high) == (low, high)
+
+        # the first bowl sits on its low at its optimum, the flipped second on its high
+        values = oracle(np.array([[1.0] * 3, [2.0] * 3]), noise=False)
+        assert values[0, 0] == pytest.approx(0.0)
+        assert values[1, 1] == pytest.approx(4.0)
+
+    @pytest.mark.parametrize('overrides', [
+        {},
+        {'weights': (2.0, -1.0), 'low': (0.0, -1.0), 'high': (1.0, 4.0)},
+    ])
+    def test_a_json_round_trip_rebuilds_the_same_truth(self, overrides):
         from dataclasses import asdict
         from pypolar.feedback.synthetic import SyntheticOracleParams
-        params = self._params()
+        params = self._params(**overrides)
         # json reads every sequence back as a list, which must not change
         # the truth or make the frozen record unhashable
         replayed = SyntheticOracleParams(**json.loads(json.dumps(asdict(params))))
@@ -188,3 +249,7 @@ class TestParams:
             self._params(objectives=('A',))      # one name per optimum
         with pytest.raises(ValueError):
             self._params(num_objectives=2)       # optima already state m
+        with pytest.raises(ValueError):
+            self._params(low=(0.0,), high=(1.0,))  # one bound per optimum
+        with pytest.raises(ValueError):
+            self._params(optima=None, objectives=('A',), low=(0.0,), high=(1.0,))  # bounds shape optima's bowls

@@ -22,25 +22,36 @@ SPREAD_SAMPLES = 4096   # Sobol points a spread is measured over
 PROBE_SAMPLES  = 32     # Sobol points a candidate instance is probed at
 
 class IdealPoint(SyntheticTestFunction): # TODO: check this with plotting
-    r"""A quadratic bowl with a single optimum at a declared point.
+    r"""A quadratic bowl with a single optimum at a declared point, optionally
+    squashed by a tanh into the band [low, high].
 
         f(x) = sum_k weights_k * (x_k - optimum_k)^2 + offset
 
-    Stated in the minimizing sense, as every BoTorch test function is, so the
-    optimum is a minimum and its value is `offset`. Direction is `Objective`'s
-    to state, through `maximize`.
+    With `low` and `high` set, and q(x) = sum_k |weights_k| * (x_k - optimum_k)^2,
+
+        f(x) = low  + (high - low) * tanh(q(x) / 2)     weights >= 0
+        f(x) = high - (high - low) * tanh(q(x) / 2)     weights <  0
+
+    Stated in the minimizing sense, as every BoTorch test function is, so with
+    positive weights the optimum is a minimum, valued `offset` or `low`.
+    Negative weights flip it into a maximum, valued `offset` or `high`, and
+    `optimizers`/`optimal_value` still report that point. Direction is
+    `Objective`'s to state, through `maximize`.
 
     Args:
         optimum: (d,) the minimizer, or a scalar shared by every dimension.
             Defaults to the origin, so the class is constructible from a `dim`
             and a `box` alone, the way a registry entry is.
-        weights: per-dimension curvature, a scalar or (d,). Larger is sharper.
-        offset: the value at the optimum.
+        weights: per-dimension curvature, a scalar or (d,). Larger is sharper,
+            and negative flips the bowl; a bounded bowl's weights share a sign.
+        offset: the value at the optimum of an unbounded bowl, 0 when bounded.
         dim: d. Needed only to widen a scalar `optimum`.
         bounds: (low, high) pairs, one per dimension -- the orientation a
             `SyntheticTestFunction` constructor takes. Defaults to the
             zero-centered box just wide enough to hold the optimum, at half-width
             1 or more, so bowls with different optima share a box by default.
+        low, high: the band a bounded bowl saturates into, both or neither, with
+            low < high. None leaves the bowl unbounded.
         noise_std, negate, dtype: as `SyntheticTestFunction` takes them.
     """
 
@@ -51,6 +62,8 @@ class IdealPoint(SyntheticTestFunction): # TODO: check this with plotting
         offset      : float                = 0.0,
         dim         : int | None           = None,
         bounds      : list[tuple[float, float]] | None = None,
+        low         : float | None         = None,
+        high        : float | None         = None,
         noise_std   : float | None         = None,
         negate      : bool                 = False,
         dtype       : torch.dtype          = DTYPE
@@ -71,6 +84,20 @@ class IdealPoint(SyntheticTestFunction): # TODO: check this with plotting
             raise ValueError(f'weights has {weights.size} entries against '
                              f'{optimum.size} action dimensions')
         weights = np.broadcast_to(weights, optimum.shape).astype(float)
+        flipped = bool(np.any(weights < 0))
+
+        if (low is None) != (high is None):
+            raise ValueError('low and high bound the bowl together, so set both '
+                             'or neither')
+        if low is not None:
+            if not low < high:
+                raise ValueError(f'low must be below high, got {low} and {high}')
+            if offset != 0.0:
+                raise ValueError('low and high fix the value at the optimum, so '
+                                 f'offset must be 0, got {offset}')
+            if flipped and np.any(weights > 0):
+                raise ValueError('a bounded bowl flips by the sign of its weights, '
+                                 f'so they must share one sign, got {weights}')
 
         self.dim             = optimum.size
         self.continuous_inds = list(range(self.dim))
@@ -81,16 +108,26 @@ class IdealPoint(SyntheticTestFunction): # TODO: check this with plotting
         # the base class checks a custom box against these, so a box excluding
         # the optimum raises here rather than silently moving it
         self._optimizers    = [tuple(optimum)]
-        self._optimal_value = float(offset)
+        self._optimal_value = float(offset if low is None
+                                    else high if flipped else low)
         super().__init__(noise_std=noise_std, negate=negate, bounds=bounds,
                          dtype=dtype)
 
         self.register_buffer('optimum', torch.tensor(optimum, dtype=dtype))
         self.register_buffer('weights', torch.tensor(weights, dtype=dtype))
-        self.offset = float(offset)
+        self.offset  = float(offset)
+        self.low     = None if low is None else float(low)
+        self.high    = None if high is None else float(high)
+        self.flipped = flipped
 
     def _evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
-        return ((X - self.optimum) ** 2 * self.weights).sum(-1) + self.offset
+        if self.low is None:
+            return ((X - self.optimum) ** 2 * self.weights).sum(-1) + self.offset
+
+        squashed = torch.tanh(((X - self.optimum) ** 2 * self.weights.abs()).sum(-1) / 2)
+        if self.flipped:
+            return self.high - (self.high - self.low) * squashed
+        return self.low + (self.high - self.low) * squashed
 
 
 SYNTHETIC_FUNCTIONS = {
@@ -539,6 +576,10 @@ class SyntheticOracleParams:
             `MOSyntheticOracle.bounds` *intersects* its members' boxes, so bowls
             left on their own defaults would land on a box excluding some of
             their own optima.
+        weights, offset, low, high: each bowl's `IdealPoint` arguments, one
+            entry per `optima` entry -- a weight is a scalar or (d,), the rest
+            scalars. None keeps `IdealPoint`'s own defaults: weight 1, offset 0
+            and no bound.
         ref_point: (m,) hypervolume reference in the truth's own units, or None
             to let a metric read one off the truth's scan. Recorded here rather
             than on the oracle so a metric scores a run against the reference
@@ -556,6 +597,10 @@ class SyntheticOracleParams:
     n_spread        : int           = SPREAD_SAMPLES
     num_objectives  : int | None    = None
     optima          : tuple | None  = None
+    weights         : tuple | None  = None
+    offset          : tuple | None  = None
+    low             : tuple | None  = None
+    high            : tuple | None  = None
     ref_point       : tuple | None  = None
 
     def __post_init__(self):
@@ -577,6 +622,14 @@ class SyntheticOracleParams:
             object.__setattr__(self, 'optima',
                                tuple(tuple(map(float, np.ravel(o)))
                                      for o in self.optima))
+        if self.weights is not None:
+            object.__setattr__(self, 'weights',
+                               tuple(tuple(map(float, np.ravel(w)))
+                                     for w in self.weights))
+        for field_name in ('offset', 'low', 'high'):
+            if getattr(self, field_name) is not None:
+                object.__setattr__(self, field_name,
+                                   tuple(map(float, np.ravel(getattr(self, field_name)))))
 
         if self.func not in SYNTHETIC_FUNCTIONS and self.func not in MO_SYNTHETIC_FUNCTIONS:
             raise ValueError(f'{self.func!r} is in neither synthetic registry')
@@ -594,6 +647,17 @@ class SyntheticOracleParams:
                 raise ValueError(f'{len(self.optima)} optima against '
                                  f'{len(names)} objective names; they are one '
                                  'per output column')
+
+        for field_name, value in (('weights', self.weights), ('offset', self.offset),
+                                  ('low', self.low), ('high', self.high)):
+            if value is None:
+                continue
+            if self.optima is None:
+                raise ValueError(f'{field_name} shapes the bowls optima declares, '
+                                 'so it needs optima')
+            if len(value) != len(names):
+                raise ValueError(f'{len(value)} {field_name} against {len(names)} '
+                                 'objective names; they are one per output column')
 
         if not self.multi_objective:
             if self.num_objectives is not None:
@@ -633,11 +697,18 @@ class SyntheticOracleParams:
         if self.optima is not None:
             # one bowl per column, every one on the same box, so the
             # intersection `MOSyntheticOracle.bounds` takes is that box itself
-            bounds = _bound_pairs(self.box, self.dim)
-            oracle = MOSyntheticOracle(
-                truth           = [IdealPoint(optimum=o, dim=self.dim,
+            m       = len(self.optima)
+            bounds  = _bound_pairs(self.box, self.dim)
+            weights = self.weights or (1.0,) * m
+            offset  = self.offset or (0.0,) * m
+            low     = self.low or (None,) * m
+            high    = self.high or (None,) * m
+            oracle  = MOSyntheticOracle(
+                truth           = [IdealPoint(optimum=o, weights=w, offset=c,
+                                              low=lo, high=hi, dim=self.dim,
                                               bounds=bounds)
-                                   for o in self.optima],
+                                   for o, w, c, lo, hi
+                                   in zip(self.optima, weights, offset, low, high)],
                 rel_noise_std   = self.rel_noise_std,
                 measure         = self.measure,
                 n_spread        = self.n_spread,
