@@ -71,15 +71,18 @@ def make_figures(
     p_ax.set_ylabel(r'Comfort Score ($\uparrow$)')
     plr.dress_axis(p_ax, tick_size=20, label_size=22, num_xticks=5, num_yticks=6, title_size=30)
 
+    X[:, 2] *= 0.005
+    bounds = model.objectives.action_bounds.copy()
+    bounds[:, 2] *= 0.005
     a_fig = plt.figure(figsize=(5, 4.5))
     a_ax  = plr.plot_pareto_actions(
         ax              = a_fig.add_subplot(projection='3d'),
         nd_pts          = X[nd_idx],
         colors          = colors[nd_idx],
         action_labels   = ACTION_LABELS,
-        bounds          = model.objectives.action_bounds
+        bounds          = bounds
     )
-    plr.dress_axis(a_ax, tick_size=20, label_size=22, num_xticks=4, num_yticks=4, num_zticks=4)
+    plr.dress_axis(a_ax, tick_size=20, label_size=22, num_xticks=3, num_yticks=3, num_zticks=4)
 
     # hspace is a fraction of a slice's height, so it is solved for a gap of SLICE_GAP inches
     k_fig  = plt.figure(figsize=(3, 3 * n_slices + SLICE_GAP * (n_slices - 1)))

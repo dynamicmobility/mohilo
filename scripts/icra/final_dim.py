@@ -34,8 +34,8 @@ METHODS = {
     'NSGA2'      : ('NSGA-II',  ('#42c891', '#1baf7a', '#015136'), '--'),
 }
 
-TICK_SIZE   = 22
-LABEL_SIZE  = 28
+TICK_SIZE   = 32
+LABEL_SIZE  = 36
 
 
 def load(run_dir: Path, method: str):
@@ -97,7 +97,7 @@ def figure(dataset: Path, prefix: str, symbol: str, output: Path, ylim=None):
     ax.set_xlabel('Queries')
     ax.set_ylabel('IGD+')
     ax.set_ylim(ylim)
-    plr.dress_axis(ax, tick_size=TICK_SIZE, label_size=LABEL_SIZE)
+    plr.dress_axis(ax, tick_size=TICK_SIZE, label_size=LABEL_SIZE,num_yticks=6)
     fig.savefig(output, bbox_inches='tight')
     print(f'wrote {output}')
 

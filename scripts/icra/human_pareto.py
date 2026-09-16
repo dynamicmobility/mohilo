@@ -140,13 +140,17 @@ def make_figure(
         p_ax.set_ylabel(r'Comfort Score ($\uparrow$)')
         p_axes.append(p_ax)
 
+        # X[:, 2] *= 0.005
+        # bounds = model.objectives.action_bounds.copy()
+        # bounds[:, 2] *= 0.005
         a_ax    = fig.add_subplot(grid[1, idx], projection='3d')
         a_ax = plr.plot_pareto_actions(
             ax              = a_ax,
             nd_pts          = X[nd_idx],
             colors          = colors[nd_idx],
             action_labels   = ACTION_LABELS,
-            bounds          = model.objectives.action_bounds
+            bounds          = model.objectives.action_bounds,
+            # bounds          = bounds
         )
         # p_ax.set_title(f'Trial {trial}')
         p_ax = plr.dress_axis(p_ax, tick_size=20, label_size=22, num_xticks=5, num_yticks=6, title_size=30)

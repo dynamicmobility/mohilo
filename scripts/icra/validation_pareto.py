@@ -110,10 +110,10 @@ def plot_validation(
     for source, color in SOURCE_COLORS.items():
         rows = sources == source
         for start, end in zip(predicted[rows], measured[rows]):
-            ax.plot(*np.stack([start, end]).T, color=color, lw=1.5, zorder=5)
-        ax.scatter(*predicted[rows].T, marker='*', s=250, color=color,
+            ax.plot(*np.stack([start, end]).T, color=color, lw=3, zorder=5)
+        ax.scatter(*predicted[rows].T, marker='*', s=450, color=color,
                    edgecolor='black', lw=0.8, zorder=6)
-        ax.scatter(*measured[rows].T, marker='s', s=80, color=color,
+        ax.scatter(*measured[rows].T, marker='s', s=100, color=color,
                    edgecolor='black', lw=0.8, zorder=6)
 
     ax.set_xlabel(r'Metabolic Cost (W/kg, $\downarrow$)')
@@ -130,17 +130,27 @@ def make_figure(
     scan    : int  = SCAN,
     seed    : int  = SEED,
     dpi     : int  = DPI,
-    layout  : str  = 'vertical'
+    layout  : str  = 'vertical',
+    renames : list[str]  = None
 ):
     """Every subject's validation panel, one per row (`layout='vertical'`) or
     one per column (`'horizontal'`), written to `path`."""
     rows, cols = LAYOUTS[layout](len(runs))
     fig, axes  = plt.subplots(rows, cols, figsize=(5 * cols, 5 * rows), squeeze=False)
-    for i, (ax, run) in enumerate(zip(axes.ravel(), runs)):
+    if renames is None:
+        renames = [None,] * len(runs)
+    for i, (ax, run, rename) in enumerate(zip(axes.ravel(), runs, renames)):
         plot_validation(ax, run, trial, scan, seed)
         if i == 0:
             ax.legend(handles=legend_handles(), fontsize=10, framealpha=0.9)
-        plr.dress_axis(ax, label_size=16, num_xticks=5, num_yticks=6, title_size=18)
+        if rename: ax.set_title(f'Subject {''.join(rename)}')
+        plr.dress_axis(
+            ax, 
+            label_size=22, 
+            num_xticks=5, 
+            num_yticks=6, 
+            title_size=26
+        )
 
     fig.tight_layout()
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -169,6 +179,13 @@ def parse_args():
         type    = int,
         default = TRIAL,
         help    = 'the optimization trial whose GP is drawn'
+    )
+    p.add_argument(
+        '--renames',
+        type    = list[str],
+        nargs   = '*',
+        default = None,
+        help    = 'subject moniker rename'
     )
     p.add_argument(
         '--scan',
@@ -207,7 +224,8 @@ def main():
         scan    = args.scan,
         seed    = args.seed,
         dpi     = args.dpi,
-        layout  = args.layout
+        layout  = args.layout,
+        renames = args.renames
     )
     print(f'Wrote to {path}')
 

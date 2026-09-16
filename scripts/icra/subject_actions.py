@@ -21,6 +21,7 @@ from scripts.icra.human_pareto import ACTION_LABELS, content_bbox
 from scripts.icra.validation_pareto import front_order
 
 SUBJECTS    = ['MB02', 'MB04', 'MB05']
+RENAME      = {'MB02': 'MB01', 'MB04': 'MB02', 'MB05': 'MB03'}
 DATA_DIR    = Path('human_data')
 OUTPUT      = Path('hilo/output/subject_actions.jpg')
 
@@ -64,7 +65,7 @@ def plot_subject(
     """One subject's (k, 2) or (k, 3) Pareto actions as a path of points in
     `color`, on a 2D or 3D `ax` to match. Returns the `ax`."""
     shade = {'depthshade': False} if ax.name == '3d' else {}
-    ax.plot(*actions.T, lw=1.5, color=color, alpha=0.8, zorder=1)
+    # ax.plot(*actions.T, lw=1.5, color=color, alpha=0.8, zorder=1)
     ax.scatter(*actions.T, s=25, c=color, edgecolors='black', linewidths=0.6,
                zorder=2, **shade)
 
@@ -91,7 +92,13 @@ def dress_panel(
     else:
         ax.set_box_aspect(1)
 
-    return plr.dress_axis(ax, tick_size=14, label_size=16, **ticks)
+    # return plr.dress_axis(ax, tick_size=14, label_size=16, **ticks)
+    return plr.dress_axis(
+        ax, 
+        label_size=22,  
+        title_size=26,
+        **ticks
+    )
 
 
 def make_figure(
@@ -127,10 +134,9 @@ def make_figure(
         for actions, color in zip(fronts, SUBJECT_COLORS):
             plot_subject(ax, actions[:, list(dims)], color)
         if i == 0:
-            handles = [Line2D([], [], color=color, marker='o', mec='black', label=f'Subject {d.subject}')
+            handles = [Line2D([], [], color=color, marker='o', mec='black', label=f'Subject {RENAME[d.subject]}')
                        for d, color in zip(datasets, SUBJECT_COLORS)]
-            ax.legend(handles=handles, fontsize=12, framealpha=0.9, loc='lower left',
-                      bbox_to_anchor=(0, 1.02), ncols=len(handles))
+            ax.legend(handles=handles, fontsize=20, framealpha=0.9, loc='upper left')
         dress_panel(ax, dims, bounds, elev, azim)   # after the legend, so its text takes the house font
 
     fig.subplots_adjust(wspace=0.4)
