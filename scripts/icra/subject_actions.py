@@ -66,6 +66,7 @@ def plot_subject(
     `color`, on a 2D or 3D `ax` to match. Returns the `ax`."""
     shade = {'depthshade': False} if ax.name == '3d' else {}
     # ax.plot(*actions.T, lw=1.5, color=color, alpha=0.8, zorder=1)
+    actions[:, 2] *= 0.005
     ax.scatter(*actions.T, s=25, c=color, edgecolors='black', linewidths=0.6,
                zorder=2, **shade)
 
@@ -81,11 +82,12 @@ def dress_panel(
 ):
     """Label and limit each axis of `ax` by the action dimension `dims` puts on
     it, over the (2, d) `bounds`, and apply the house style. Returns the `ax`."""
+    bounds[:, 2] *= 0.005
     for axis, dim in zip(('x', 'y', 'z'), dims):
         getattr(ax, f'set_{axis}label')(ACTION_LABELS[dim])
         getattr(ax, f'set_{axis}lim')(bounds[:, dim])
 
-    ticks = {'num_xticks': 4, 'num_yticks': 4}
+    ticks = {'num_xticks': 3, 'num_yticks': 3}
     if ax.name == '3d':
         ax.view_init(elev=elev, azim=azim)
         ticks['num_zticks'] = 4
@@ -97,6 +99,7 @@ def dress_panel(
         ax, 
         label_size=22,  
         title_size=26,
+        tick_size=18,
         **ticks
     )
 
