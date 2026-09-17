@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="pyPolar: multi-objective Bayesian optimization for human-in-the-loop robotics.">
+  <title>pyPolar: Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics</title>
+  <!-- Favicon: <link rel="icon" type="image/x-icon" href="static/images/favicon.ico"> -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <!-- Banner video: <video class="hero-video" autoplay muted loop playsinline><source src="static/videos/banner.mp4" type="video/mp4"></video> -->
+      <div class="container">
+        <h1 class="title">pyPolar</h1>
+        <h2 class="subtitle">Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics</h2>
+
+        <div class="authors">
+          <span><a href="https://njanwani.github.io/" target="_blank">Neil Janwani</a>,</span>
+          <span><a href="#">Author Two</a>,</span>
+          <span><a href="#">Author Three</a></span>
+        </div>
+        <div class="affiliation">Dynamic Mobility Lab, Georgia Tech<br>In Review</div>
+
+        <div class="links">
+          <a class="button" href="https://arxiv.org/abs/XXXX.XXXXX" target="_blank">
+            <i class="ai ai-arxiv"></i><span>arXiv</span>
+          </a>
+          <a class="button" href="https://github.com/dynamicmobility/pyPolar" target="_blank">
+            <i class="fab fa-github"></i><span>Code</span>
+          </a>
+          <a class="button" href="./">
+            <i class="fas fa-book"></i><span>Documentation</span>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Teaser figure/video: <section class="section"><div class="container"><img src="static/images/teaser.png" alt="..."><p class="caption">...</p></div></section> -->
+
+    <section class="section">
+      <div class="container narrow">
+        <h2 class="section-title">Abstract</h2>
+        <p>
+          Personalizing assistive and wearable robots to an individual user requires
+          balancing several competing objectives, such as metabolic cost, walking speed,
+          and subjective comfort, each of which is expensive and noisy to measure on a
+          human. We present pyPolar, an open-source library for multi-objective Bayesian
+          optimization in human-in-the-loop settings. pyPolar models each objective with
+          an independent Gaussian process over a shared action space, allowing objectives
+          to be measured on decoupled schedules and at different rates. Built entirely on
+          BoTorch, it provides principled noise modeling, leave-one-out diagnostics, and
+          Pareto-front estimation from sparse human data. We evaluate pyPolar on synthetic
+          benchmarks and on pilot data from human subjects, and show that it recovers
+          accurate trade-off fronts from few measurements. pyPolar is designed to make
+          multi-objective personalization reproducible and accessible to the robotics
+          community.
+        </p>
+      </div>
+    </section>
+
+    <!-- Method overview figure: <section class="section"><div class="container"><img src="static/images/method.png" alt="..."></div></section> -->
+
+    <!-- Results figures/videos: <section class="section"><div class="container"><video controls src="static/videos/results.mp4"></video></div></section> -->
+
+    <section class="section">
+      <div class="container narrow">
+        <h2 class="section-title">BibTeX</h2>
+        <pre><code>@article{janwani2026pypolar,
+  title   = {pyPolar: Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics},
+  author  = {Janwani, Neil and others},
+  journal = {arXiv preprint arXiv:XXXX.XXXXX},
+  year    = {2026}
+}</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Page template adapted from the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a>.</p>
+  </footer>
+</body>
+</html>
