@@ -167,7 +167,15 @@ def make_figure(
               'missing measurement and are not drawn')
         if i == 0:
             ax.legend(handles=legend_handles(final_gp), fontsize=10, framealpha=0.9)
-        plr.dress_axis(ax, label_size=16, num_xticks=5, num_yticks=6, title_size=18)
+        # plr.dress_axis(ax, label_size=16, num_xticks=5, num_yticks=6, title_size=18)
+        ax.set_title('Subject MB02')
+        plr.dress_axis(
+            ax, 
+            label_size=22, 
+            num_xticks=5, 
+            num_yticks=6, 
+            title_size=26
+        )
 
     if norm is not None:
         cbar = fig.colorbar(ScalarMappable(norm, CMAP), ax=axes.ravel().tolist())
