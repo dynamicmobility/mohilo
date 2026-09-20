@@ -20,7 +20,7 @@ import pypolar as plr
 DATASET = Path('hilo/output/experiments/Aug28_Neil/MT01.json')
 OUTPUT  = Path('hilo/output/front_samples.gif')
 
-SCAN       = 2**15      # Sobol points the front is read off
+SCAN       = 2**12      # Sobol points the front is read off
 SEED       = 95
 FPS        = 1.5
 DPI        = 120
