@@ -19,15 +19,18 @@ from manim import (
     config,
 )
 
-# Palette: light ink on black, one color per objective and one accent for the optimum.
+# Palette: light ink on black, one color per objective, one accent for the optimum,
+# and a green/red pair kept free to mean gain and loss.
 BG = ManimColor("#000000")
 INK = ManimColor("#F2F2F2")
 BOX_FILL = ManimColor("#12171D")
 BOX_STROKE = ManimColor("#8AA0B4")
 ARROW_COLOR = ManimColor("#C7D3DE")
 COST_COLOR = ManimColor("#4CC9F0")
-COMFORT_COLOR = ManimColor("#F25F5C")
+COMFORT_COLOR = ManimColor("#C08CF5")
 STAR_COLOR = ManimColor("#FFB703")
+GAIN_COLOR = ManimColor("#4FD17A")
+LOSS_COLOR = ManimColor("#F25F5C")
 SAMPLE_COLOR = ManimColor("#F2F2F2")
 DROP_COLOR = ManimColor("#6E7B87")
 

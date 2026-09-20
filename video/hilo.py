@@ -36,6 +36,19 @@ from manim import (
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from video.clip import VideoClip  # noqa: E402
+from video.objectives import (  # noqa: E402
+    COMFORT_OPTIMUM_A,
+    COMFORT_WIDTH,
+    CONVEX,
+    COST_WIDTH,
+    CURVE_X_RANGE,
+    CURVE_Y_MAX,
+    OPTIMUM_A,
+    comfort,
+    cost,
+    curve_domain,
+    scalarized_argmin,
+)
 from video.style import (  # noqa: E402
     ARROW_COLOR,
     AXIS_LABEL_SIZE,
@@ -76,25 +89,6 @@ CLIP_CROP = "608:1080:656:0"
 CLIP_H = 4.5
 CLIP_Y = BOX_Y - 0.35
 
-# True draws a cost bowl with its minimum starred; False flips it to a hump
-# with its maximum starred.
-CONVEX = True
-
-CURVE_X_RANGE = (0.0, 1.0)
-CURVE_Y_MAX = 1.15
-OPTIMUM_A = 0.3
-CURVE_FLOOR = 0.12
-CURVE_PEAK = 1.0
-# Narrows the parabolas: each is as wide as this fraction of the span that would
-# put CURVE_PEAK at the far end of the x range. Comfort is the wider of the two,
-# which is what keeps its value at the cost optimum clear of the cost curve.
-COST_WIDTH = 0.55
-COMFORT_WIDTH = 0.72
-
-# The second objective: the same parabola as a hump, peaking at a different
-# action, so the cost optimum is not the comfort optimum.
-COMFORT_OPTIMUM_A = 0.58
-
 # Plot geometry, as offsets from the optimization box's center. AXIS_X_MAX runs
 # the x axis past CURVE_X_RANGE so its tip clears the right-hand comfort axis,
 # which stands at CURVE_X_RANGE[1].
@@ -111,7 +105,7 @@ GAP_ARROW_Y = 1.07
 EQUATION_Y = -3.6
 # The written width, which is what sets the type size: the equation is typeset at
 # EQUATION_SIZE and then scaled to this.
-EQUATION_W = 10.0
+EQUATION_W = 9.04
 SWEEP_TIME = 2.0
 SWEEP_LINE_WIDTH = 4.0
 
@@ -125,67 +119,6 @@ SAMPLE_MARGIN = 0.03
 # Measurement noise on the sampled costs, in the units of the drawn curve.
 SAMPLE_NOISE_STD = 0.07
 TRAIL_OPACITY = 0.5
-
-
-def reach(optimum, width):
-    """The half-width over which the parabola about `optimum` rises by its full range."""
-    return width * max(optimum - CURVE_X_RANGE[0], CURVE_X_RANGE[1] - optimum)
-
-
-def parabola(a, optimum, width, convex=True):
-    """A parabola about `optimum`, rising from CURVE_FLOOR at a rate set by `reach`.
-
-    At `width = 1` it reaches CURVE_PEAK at whichever end of the x range is
-    further from the optimum; narrower than that it leaves the axes before then,
-    and `curve_domain` is what keeps it on screen. `convex=False` flips the bowl
-    into a hump, putting CURVE_PEAK at the optimum.
-    """
-    scale = (CURVE_PEAK - CURVE_FLOOR) / reach(optimum, width) ** 2
-    value = scale * (a - optimum) ** 2 + CURVE_FLOOR
-    return value if convex else CURVE_PEAK + CURVE_FLOOR - value
-
-
-def curve_domain(optimum, width, convex=True):
-    """The x interval over which that parabola stays inside the axes.
-
-    A bowl is drawn up to CURVE_Y_MAX and a hump down to the x axis, so each
-    curve ends at an edge of the plot rather than being clipped flat against it.
-    """
-    headroom = CURVE_Y_MAX - CURVE_FLOOR if convex else CURVE_PEAK
-    half = reach(optimum, width) * np.sqrt(headroom / (CURVE_PEAK - CURVE_FLOOR))
-    return [
-        max(CURVE_X_RANGE[0], optimum - half),
-        min(CURVE_X_RANGE[1], optimum + half),
-    ]
-
-
-def curvature(optimum, width):
-    """The multiplier on `(a - optimum) ** 2` in that parabola."""
-    return (CURVE_PEAK - CURVE_FLOOR) / reach(optimum, width) ** 2
-
-
-def scalarized_argmin(w1):
-    """The action minimizing `w1 * cost - (1 - w1) * comfort`, with `w` on the simplex.
-
-    Cost is a bowl `kc (a - ac)^2` and comfort a hump `-kf (a - af)^2`, both up to
-    a constant, so subtracting the hump leaves a sum of two upward parabolas. Its
-    minimum is where the derivative vanishes, at the curvature-weighted average of
-    the two optima, which runs from `ac` at `w1 = 1` to `af` at `w1 = 0`.
-    """
-    cost_weight = w1 * curvature(OPTIMUM_A, COST_WIDTH)
-    comfort_weight = (1.0 - w1) * curvature(COMFORT_OPTIMUM_A, COMFORT_WIDTH)
-    numerator = cost_weight * OPTIMUM_A + comfort_weight * COMFORT_OPTIMUM_A
-    return numerator / (cost_weight + comfort_weight)
-
-
-def cost(a):
-    """The metabolic cost curve: a bowl bottoming out at OPTIMUM_A."""
-    return parabola(a, OPTIMUM_A, COST_WIDTH, convex=CONVEX)
-
-
-def comfort(a):
-    """The comfort curve: a hump peaking at COMFORT_OPTIMUM_A."""
-    return parabola(a, COMFORT_OPTIMUM_A, COMFORT_WIDTH, convex=not CONVEX)
 
 
 def sample_measurements():
@@ -352,9 +285,16 @@ class HiloScene(Scene):
                 stroke_width=SWEEP_LINE_WIDTH,
             )
         )
+        # The same symbol the equation defines, read off the x axis under the line.
+        moving_label = MathTex(r"\bm{a}_{\bm{w}}", font_size=AXIS_LABEL_SIZE, color=INK)
+        moving_label.add_updater(
+            lambda m: m.next_to(
+                axes.c2p(scalarized_argmin(weight.get_value()), 0.0), DOWN, buff=0.15
+            )
+        )
 
         self.play(Write(equation, run_time=1.4))
-        self.play(Create(sweep, run_time=0.5))
+        self.play(Create(sweep, run_time=0.5), FadeIn(moving_label, run_time=0.5))
         self.play(weight.animate.set_value(0.0), run_time=SWEEP_TIME)
         self.wait(0.4)
         self.play(weight.animate.set_value(1.0), run_time=SWEEP_TIME)
@@ -367,7 +307,7 @@ class HiloScene(Scene):
         new equation.
         """
         lhs = MathTex(
-            r"\bm{a}_{\mathrm{scalarized}} = \argmin_{\bm{a} \in \mathcal{A}}\;",
+            r"\bm{a}_{\bm{w}} = \argmin_{\bm{a} \in \mathcal{A}}\;",
             r"w_1 f_{\mathrm{Metabolic}}",
             "-",
             r"w_2 f_{\mathrm{Comfort}}",
@@ -449,6 +389,7 @@ class HiloScene(Scene):
             labels = VGroup(axis, text)
         else:
             text.rotate(np.pi / 2).next_to(axes.y_axis, LEFT, buff=0.18)
-            labels = VGroup(action_label().next_to(axes.x_axis, DOWN, buff=0.18), text)
+            axis_label = action_label().next_to(axes.x_axis.get_end(), DOWN, buff=0.2)
+            labels = VGroup(axis_label, text)
 
         return labels, curve, star

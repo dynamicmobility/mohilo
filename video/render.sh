@@ -4,4 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 SCENE=${1:-HiloScene}
 shift || true
-exec manim -qh "${@}" video/hilo.py "$SCENE"
+case "$SCENE" in
+  HiloScene) FILE=video/hilo.py ;;
+  ParetoScene) FILE=video/pareto.py ;;
+  *) echo "unknown scene: $SCENE" >&2; exit 1 ;;
+esac
+exec manim -qh "${@}" "$FILE" "$SCENE"
