@@ -1,7 +1,9 @@
 # ICRA videos
 
 Manim scenes for the paper. Rendered with Manim Community v0.21.0 in the
-`pypolar` conda environment; nothing here imports `pypolar`.
+`pypolar` conda environment. Only `validation.py` reaches outside this package: it
+draws measured curves, so it imports `scripts.icra.final_dim` — and through it
+`pypolar`, `pandas` and `matplotlib` — rather than reading the CSVs itself.
 
 ```
 video/
@@ -10,6 +12,7 @@ video/
 ├── clip.py         # VideoClip: a video file drawn as frames inside a scene
 ├── hilo.py         # HiloScene: device and optimization exchanging feedback
 ├── pareto.py       # ParetoScene: the same objectives, and their front
+├── validation.py   # ValidationScene: the three synthetic ablations, side by side
 ├── subjects/       # subject footage
 ├── render.sh       # one scene at 1080p60
 └── media/          # manim output (images/, videos/)
@@ -20,7 +23,8 @@ video/
 ```bash
 conda activate pypolar
 video/render.sh                       # HiloScene at -qh (1080p60)
-video/render.sh ParetoScene           # the other scene, same quality
+video/render.sh ParetoScene           # the other scenes, same quality
+video/render.sh ValidationScene
 video/render.sh HiloScene -ql         # draft, 480p15
 manim -ql -s video/hilo.py HiloScene  # last frame only, as a PNG
 ```
@@ -156,3 +160,53 @@ comfort at `a_1`'s cost — which is above the front and so attained by no
 controller; the red leg is the walk back onto it. That is the point: the gain is
 only there if the loss is paid, and a move that was all green would mean `a_1`
 was dominated and not on the front at all.
+
+## ValidationScene
+
+The synthetic validation: IGD+ against query count for MO-HILBO and NSGA-II, one
+panel per ablation.
+
+It is revealed in two passes. The panels are built left to right in the order
+`noise`, `dim`, `objs`, each carrying MO-HILBO alone; then, a beat after the third,
+every panel's NSGA-II is drawn at once. `HILBO` and `NSGA` unpack `METHODS` in that
+order, and `_panel` returns its curves keyed by method so each pass takes the one it
+wants. Two things come of the split: the blue ramp is read without the green bands
+over it, and the comparison lands across all three panels in one beat rather than
+being made three separate times.
+
+The curves are not redrawn from the CSVs here. `ABLATIONS` names the three
+directories under `scripts/output/final_exp/`, and the mean and +/-1 std band come
+from `scripts.icra.final_dim`'s own `load`, `conditions` and `shades` — the same
+functions `final_noise.py`, `final_dim.py` and `final_obj.py` call. So the video
+reads the same CSVs, drops the same rows (`SKIP`, `MAX_QUERIES`), and takes the same
+blue-solid/green-dashed ramps as the paper figures, and cannot drift from them. Each
+panel keeps the `ylim` its own script passes, so the three y scales differ and the
+ticks are what says so.
+
+`on_axes` clips every point into the panel's `ylim` before `c2p` maps it. matplotlib
+clips a fill to the axes and manim does not, so an unclipped +/-1 std band would be
+drawn over the neighbouring panel; on `objs` the lightest band reaches 0.90 against a
+0.50 ceiling. It is a no-op for the mean curves, which are inside every `ylim`.
+
+The bands carry `z_index = -1` so they stay behind the means whichever is animated
+first, and `BAND_OPACITY` is above matplotlib's 0.12, which was chosen to read on
+white.
+
+`PANEL_X` spaces the three panels; the row is then centered on the frame as one
+group, because the leftmost panel sticks out by its y tick labels and rotated `IGD+`
+label where the rightmost one reaches only its axis tip, so placing the panels
+symmetrically would not center what is drawn. `X_MAX` is 105 rather than 100 because
+manim steps ticks outward from zero and excludes the upper bound, so a tick lands on
+100 only if the range runs past it.
+
+The legend is `scripts/table.tex` as a key. One column per condition, light shade
+first: the top two rows are each method's ramp at that shade, and the `\sigma`, `n`
+and `m` rows below say what that shade means in each panel. It is built about the
+origin and moved as a whole, since the row labels are far wider than the columns and
+would otherwise pull the block off center.
+
+Its `m` row reads 2, 3, 4, 5, which is what `scripts/table.tex` lists. The run
+directories are `objs1`..`objs4` and each holds that many measured objectives
+(`compare_objs.py` writes `objs{NUM_OBJS}`), so `final_obj.py` labels the same four
+lines `m = 1..4`. The numbers live in one place, `Ablation.labels`, if that needs to
+change.
