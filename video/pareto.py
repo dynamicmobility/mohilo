@@ -9,17 +9,16 @@ green leg and a red leg between two controllers.
 import sys
 from pathlib import Path
 
-import numpy as np
 from manim import (
     DOWN,
     LEFT,
     UP,
     Arrow,
-    Axes,
     Create,
     DashedLine,
     Dot,
     FadeIn,
+    FadeOut,
     GrowArrow,
     MathTex,
     Scene,
@@ -34,53 +33,37 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from video.objectives import (  # noqa: E402
     COMFORT_OPTIMUM_A,
-    CURVE_PEAK,
-    CURVE_Y_MAX,
-    OPTIMUM_A,
     attainable_actions,
     comfort,
-    comfort_domain,
     cost,
-    cost_domain,
+    front_actions,
 )
 from video.style import (  # noqa: E402
     AXIS_LABEL_SIZE,
+    AXIS_Y_MAX,
     COMFORT_COLOR,
+    COMFORT_Y,
     COST_COLOR,
+    CURVE_STROKE,
     DROP_COLOR,
     GAIN_COLOR,
     INK,
+    LANDSCAPE_STROKE,
     LOSS_COLOR,
+    METABOLIC_Y,
+    PLOT_SAMPLES,
     SCENE_TITLE_SIZE,
-    action_label,
+    TITLE_EDGE_BUFF,
+    action_axes,
+    action_plot,
+    front_axes as front_axes_builder,
 )
 
 TITLE = "Pareto Optimality"
-TITLE_EDGE_BUFF = 0.3
-
-# Left column: the two objectives against the action, stacked and sharing an x
-# axis, so one dashed line at an action crosses both.
-ACTION_W, ACTION_H = 4.0, 2.15
-ACTION_X = -4.55
-METABOLIC_Y = 1.15
-COMFORT_Y = -1.75
-AXIS_X_MAX = 1.05
-
-# Right panel: the objective space, cost across and comfort up. Both attainable
-# ranges are known from the curves, so the axes only add headroom for the tips.
-FRONT_W, FRONT_H = 5.3, 4.9
-FRONT_X = 3.0
-FRONT_Y = -0.3
-FRONT_X_MAX = CURVE_Y_MAX * 1.12
-FRONT_Y_MAX = CURVE_PEAK * 1.15
 
 # The two controllers compared on the front, both between the single-objective
 # optima so that neither dominates the other.
-A1, A2 = 0.35, 0.53
-
-CURVE_STROKE = 5.0
-LANDSCAPE_STROKE = 3.5
-PLOT_SAMPLES = 0.004
+A1, A2 = 0.34, 0.66
 
 # Where the label naming the front sits, in objective units. Its arrow lands on
 # the middle of the front, which is computed rather than placed.
@@ -92,113 +75,60 @@ LEG_STROKE = 4.0
 LEG_TIP = 0.22
 
 
-def front_actions():
-    """The actions whose objective values are Pareto optimal.
-
-    Below OPTIMUM_A both objectives are worse than at OPTIMUM_A, and above
-    COMFORT_OPTIMUM_A both are worse than there, so every non-dominated point comes
-    from between the two single-objective optima.
-    """
-    return [OPTIMUM_A, COMFORT_OPTIMUM_A]
-
-
 class ParetoScene(Scene):
     def construct(self):
         title = Tex(TITLE, font_size=SCENE_TITLE_SIZE, color=INK)
         title.to_edge(UP, buff=TITLE_EDGE_BUFF)
 
-        metabolic_axes = self._action_axes(METABOLIC_Y)
-        comfort_axes = self._action_axes(COMFORT_Y)
-        metabolic = self._action_plot(
-            metabolic_axes, "metabolic cost", cost, cost_domain(), COST_COLOR
+        metabolic_axes = action_axes(METABOLIC_Y)
+        comfort_axes = action_axes(COMFORT_Y)
+        metabolic = action_plot(
+            metabolic_axes, "metabolic cost", cost, attainable_actions(), COST_COLOR
         )
-        comfort_plot = self._action_plot(
-            comfort_axes, "comfort", comfort, comfort_domain(), COMFORT_COLOR, x_label=True
+        comfort_plot = action_plot(
+            comfort_axes, "comfort", comfort, attainable_actions(), COMFORT_COLOR,
+            x_label=True
         )
-        front_axes, front_labels = self._front_axes()
+        front_axes, front_labels = front_axes_builder()
         landscape, front = self._front_curves(front_axes)
         pointer, pointer_label = self._front_pointer(front_axes)
 
         self.play(Write(title, run_time=1.0))
+        # All three axes together, then all three curves together. Each curve is
+        # drawn from the smallest action to the largest, so the two action plots
+        # sweep left to right while the landscape traces that same sweep through
+        # objective space -- one action being swept, seen three ways.
         self.play(
-            Create(metabolic_axes, run_time=0.7),
-            Create(comfort_axes, run_time=0.7),
-            Write(metabolic[0], run_time=0.7),
-            Write(comfort_plot[0], run_time=0.7),
+            Create(metabolic_axes, run_time=0.8),
+            Create(comfort_axes, run_time=0.8),
+            Create(front_axes, run_time=0.8),
+            Write(metabolic[0], run_time=0.8),
+            Write(comfort_plot[0], run_time=0.8),
+            Write(front_labels, run_time=0.8),
         )
-        self.play(Create(metabolic[1], run_time=0.9), Create(comfort_plot[1], run_time=0.9))
+        self.play(
+            Create(metabolic[1], run_time=1.6),
+            Create(comfort_plot[1], run_time=1.6),
+            Create(landscape, run_time=1.6),
+        )
         self.wait(0.4)
 
-        self.play(Create(front_axes, run_time=0.8), Write(front_labels, run_time=0.8))
-        self.play(Create(landscape, run_time=1.6))
         self.play(Create(front, run_time=1.2))
         self.play(GrowArrow(pointer, run_time=0.6), Write(pointer_label, run_time=0.7))
         self.wait(0.4)
 
-        self._mark(A1, r"\bm{a}_1", metabolic_axes, comfort_axes, front_axes)
+        first = self._mark(A1, r"\bm{a}_1", metabolic_axes, comfort_axes, front_axes)
         self.wait(0.3)
-        self._tradeoff(front_axes)
-        self._mark(A2, r"\bm{a}_2", metabolic_axes, comfort_axes, front_axes)
+        legs = self._tradeoff(front_axes)
+        second = self._mark(A2, r"\bm{a}_2", metabolic_axes, comfort_axes, front_axes)
         self.wait(1.0)
 
-    def _action_axes(self, y):
-        """Axes for one objective against the action, in the left column."""
-        axes = Axes(
-            x_range=[0.0, AXIS_X_MAX, 1.0],
-            y_range=[0.0, CURVE_Y_MAX, 1.0],
-            x_length=ACTION_W,
-            y_length=ACTION_H,
-            axis_config={
-                "color": INK,
-                "stroke_width": 2.5,
-                "include_ticks": False,
-                "tip_length": 0.18,
-                "tip_width": 0.18,
-            },
-        )
-        axes.move_to([ACTION_X, y, 0])
-        return axes
-
-    def _action_plot(self, axes, label, func, domain, color, x_label=False):
-        """That objective's labels and curve, the labels in its own color.
-
-        Only the lower plot is given the action label, since the two share an x
-        axis; it goes at the right end, leaving the space under the axis for the
-        controllers' own labels.
-        """
-        axes.y_axis.set_color(color)
-        text = Tex(label, font_size=AXIS_LABEL_SIZE, color=color)
-        text.rotate(np.pi / 2).next_to(axes.y_axis, LEFT, buff=0.18)
-        labels = VGroup(text)
-        if x_label:
-            labels.add(action_label().next_to(axes.x_axis.get_end(), DOWN, buff=0.2))
-        curve = axes.plot(func, x_range=domain, color=color, stroke_width=CURVE_STROKE)
-        return VGroup(labels, curve)
-
-    def _front_axes(self):
-        """The objective space: metabolic cost across, comfort up."""
-        axes = Axes(
-            x_range=[0.0, FRONT_X_MAX, 1.0],
-            y_range=[0.0, FRONT_Y_MAX, 1.0],
-            x_length=FRONT_W,
-            y_length=FRONT_H,
-            axis_config={
-                "color": INK,
-                "stroke_width": 2.5,
-                "include_ticks": False,
-                "tip_length": 0.18,
-                "tip_width": 0.18,
-            },
-        )
-        axes.move_to([FRONT_X, FRONT_Y, 0])
-        axes.x_axis.set_color(COST_COLOR)
-        axes.y_axis.set_color(COMFORT_COLOR)
-
-        x_label = Tex("metabolic cost", font_size=AXIS_LABEL_SIZE, color=COST_COLOR)
-        x_label.next_to(axes.x_axis, DOWN, buff=0.18)
-        y_label = Tex("comfort", font_size=AXIS_LABEL_SIZE, color=COMFORT_COLOR)
-        y_label.rotate(np.pi / 2).next_to(axes.y_axis, LEFT, buff=0.18)
-        return axes, VGroup(x_label, y_label)
+        # What `MogpScene` opens on: the axes, their labels, the true curves and the
+        # attainable landscape, and nothing else. Everything this scene drew over
+        # them goes, so the two scenes cut together with no redraw.
+        self.play(FadeOut(VGroup(title, front, pointer, pointer_label,
+                                 first, legs, second), run_time=0.8))
+        self.wait(0.4)
 
     def _front_curves(self, axes):
         """The whole attainable landscape, and the front that is drawn over it.
@@ -243,15 +173,16 @@ class ParetoScene(Scene):
         return arrow, label
 
     def _mark(self, action, label, metabolic_axes, comfort_axes, front_axes):
-        """One controller, drawn in all three plots at once.
+        """One controller, drawn in all three plots at once, and returned.
 
         The two left plots share an x axis, so a single dashed line at `action`
         crosses both; the point it names in objective space is the pair of values
-        the two dots read off.
+        the two dots read off. Returned because `MogpScene` opens on the bare
+        axes, so everything drawn over them here is cleared before the cut.
         """
 
         drop = DashedLine(
-            metabolic_axes.c2p(action, CURVE_Y_MAX),
+            metabolic_axes.c2p(action, AXIS_Y_MAX),
             comfort_axes.c2p(action, 0.0),
             color=DROP_COLOR,
             stroke_width=2.5,
@@ -274,9 +205,11 @@ class ParetoScene(Scene):
             Write(action_text, run_time=0.5),
         )
         self.play(FadeIn(point, scale=0.5, run_time=0.4), Write(point_text, run_time=0.5))
+        return VGroup(drop, dots, action_text, point, point_text)
 
     def _tradeoff(self, axes):
-        """The two legs from a_1 to a_2: first what it gains, then what that costs.
+        """The two legs from a_1 to a_2, returned: first what it gains, then what
+        that costs.
 
         They are the sides of the right triangle spanning the two points, so each
         leg is the change in one objective on its own. Going up first turns the
@@ -294,6 +227,7 @@ class ParetoScene(Scene):
         self.play(Create(gain, run_time=0.7))
         self.wait(0.2)
         self.play(Create(loss, run_time=0.7))
+        return VGroup(gain, loss)
 
     def _leg(self, start, end, color):
         """One dotted leg with a solid head, since a dashed tip reads as a smudge."""

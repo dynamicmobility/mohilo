@@ -1,110 +1,137 @@
-"""The two objectives every scene in this package draws, as plain functions of the action.
+"""The two objectives every scene in this package draws, as one pypolar groundtruth.
 
-Metabolic cost is a bowl and comfort a hump, both parabolas about their own
-optimum, so the action that minimizes cost is not the one that maximizes comfort.
-Nothing here touches manim: a scene decides how to draw these, and both the HILO
-loop and the Pareto front read the same curves.
+Metabolic cost is a bowl and comfort a hump, both `IdealPoint`s squashed by a tanh
+into a band, so the action that minimizes cost is not the one that maximizes comfort.
+They are built here as a `MOSyntheticOracle` rather than written out as curves,
+which is what lets a scene both *draw* them noiselessly and *measure* them with
+noise from one definition -- and lets `mogp.py` fit the repo's own
+`DecoupledMOGP` to those measurements. `hilo/shared/simulation.py` builds the live
+experiment's groundtruth the same way, in three dimensions instead of one.
 """
 
 import numpy as np
+import pypolar as plr
+from scipy.optimize import minimize_scalar
 
-# True draws a cost bowl with its minimum at OPTIMUM_A; False flips both curves.
-CONVEX = True
+COST_NAME = 'Metabolic Cost'
+COMFORT_NAME = 'Comfort'
 
 CURVE_X_RANGE = (0.0, 1.0)
-CURVE_Y_MAX = 1.15
-OPTIMUM_A = 0.3
-CURVE_FLOOR = 0.12
-CURVE_PEAK = 1.0
-# Narrows the parabolas: each is as wide as this fraction of the span that would
-# put CURVE_PEAK at the far end of the x range. Comfort is the wider of the two,
-# which is what keeps its value at the cost optimum clear of the cost curve.
-COST_WIDTH = 0.55
-COMFORT_WIDTH = 0.72
+OPTIMUM_A = 0.25
+COMFORT_OPTIMUM_A = 0.75
 
-# The second objective peaks at a different action, so the two disagree.
-COMFORT_OPTIMUM_A = 0.58
+# The band each bowl is squashed into, and its curvature before the squash. The
+# comfort weight is negative, which is what flips its bowl into a hump: the tanh
+# then puts CURVE_PEAK at its optimum instead of its floor. The two magnitudes
+# differ so that the objectives do not saturate in lockstep, which is what bows
+# the front rather than leaving it a straight diagonal.
+COST_BAND = (0.12, 1.0)
+COMFORT_BAND = (0.0, 1.0)
+COST_WEIGHT = 16.0
+COMFORT_WEIGHT = -6.0
+
+CURVE_FLOOR = COST_BAND[0]
+CURVE_PEAK = max(COST_BAND[1], COMFORT_BAND[1])
+# Headroom above the band, for the axis tips. Nothing is ever clipped to it:
+# a bounded bowl cannot leave its own band.
+CURVE_Y_MAX = CURVE_PEAK * 1.15
+
+# Observation noise, as a fraction of each objective's own spread, and the seed
+# its draws come from.
+NOISE_STD = 0.25
+SEED = 0
+
+TRUTH_PARAMS = plr.SyntheticOracleParams(
+    func          = 'IdealPoint',
+    objectives    = (COST_NAME, COMFORT_NAME),
+    dim           = 1,
+    box           = CURVE_X_RANGE,
+    optima        = ((OPTIMUM_A,), (COMFORT_OPTIMUM_A,)),
+    weights       = (COST_WEIGHT, COMFORT_WEIGHT),
+    low           = (COST_BAND[0], COMFORT_BAND[0]),
+    high          = (COST_BAND[1], COMFORT_BAND[1]),
+    rel_noise_std = NOISE_STD,
+    seed          = SEED,
+    measure       = 'std',
+)
+
+TRUTH = TRUTH_PARAMS.build()
+COST_TRUTH = TRUTH.get_oracle(0).truth
+COMFORT_TRUTH = TRUTH.get_oracle(1).truth
 
 
-def reach(optimum, width):
-    """The half-width over which the parabola about `optimum` rises by its full range."""
-    return width * max(optimum - CURVE_X_RANGE[0], CURVE_X_RANGE[1] - optimum)
+def _actions(a):
+    """`a` as the `(n, 1)` array a truth takes, clipped into the action box.
 
-
-def parabola(a, optimum, width, convex=True):
-    """A parabola about `optimum`, rising from CURVE_FLOOR at a rate set by `reach`.
-
-    At `width = 1` it reaches CURVE_PEAK at whichever end of the x range is
-    further from the optimum; narrower than that it leaves the axes before then,
-    and `curve_domain` is what keeps it on screen. `convex=False` flips the bowl
-    into a hump, putting CURVE_PEAK at the optimum.
+    Both halves are load-bearing. A `SyntheticTestFunction` reads its action
+    dimension off the last axis, so a bare float raises rather than broadcasting,
+    and manim's `axes.plot` calls an objective one float at a time. It also
+    rejects actions outside its bounds, and stepping a float `x_range` overshoots
+    the end of the box by an epsilon.
     """
-    scale = (CURVE_PEAK - CURVE_FLOOR) / reach(optimum, width) ** 2
-    value = scale * (a - optimum) ** 2 + CURVE_FLOOR
-    return value if convex else CURVE_PEAK + CURVE_FLOOR - value
+    return np.clip(np.reshape(np.asarray(a, dtype=float), (-1, 1)), *CURVE_X_RANGE)
 
 
-def curve_domain(optimum, width, convex=True):
-    """The x interval over which that parabola stays inside the axes.
+def _values(truth, a):
+    """That truth's noiseless values at `a`, shaped like `a` was."""
+    values = plr.truth_at(truth, _actions(a))
+    return float(values[0]) if np.ndim(a) == 0 else values
 
-    A bowl is drawn up to CURVE_Y_MAX and a hump down to the x axis, so each
-    curve ends at an edge of the plot rather than being clipped flat against it.
+
+def cost(a):
+    """The metabolic cost curve: a bowl bottoming out at OPTIMUM_A."""
+    return _values(COST_TRUTH, a)
+
+
+def comfort(a):
+    """The comfort curve: a hump peaking at COMFORT_OPTIMUM_A."""
+    return _values(COMFORT_TRUTH, a)
+
+
+def measure(actions):
+    """Both objectives measured with noise at the same actions, `(n, 2)`.
+
+    One call for both columns, so a pair of measurements really is one visit to
+    one action, and the draws advance a single stream rather than two.
     """
-    headroom = CURVE_Y_MAX - CURVE_FLOOR if convex else CURVE_PEAK
-    half = reach(optimum, width) * np.sqrt(headroom / (CURVE_PEAK - CURVE_FLOOR))
-    return [
-        max(CURVE_X_RANGE[0], optimum - half),
-        min(CURVE_X_RANGE[1], optimum + half),
-    ]
+    return TRUTH(_actions(actions))
 
 
-def curvature(optimum, width):
-    """The multiplier on `(a - optimum) ** 2` in that parabola."""
-    return (CURVE_PEAK - CURVE_FLOOR) / reach(optimum, width) ** 2
+def sobol_actions(n, seed=SEED):
+    """`n` actions spanning the box, `(n, 1)`, space-filling rather than clumped."""
+    return plr.sample_actions(bounds=TRUTH.bounds, n=n, kind='sobol', seed=seed)
+
+
+def attainable_actions():
+    """The actions a curve is drawn over: the whole box.
+
+    A bounded bowl stays inside its band everywhere, so unlike an unbounded one
+    there is no sub-interval to restrict a curve to.
+    """
+    return list(CURVE_X_RANGE)
+
+
+def front_actions():
+    """The actions whose objective values are Pareto optimal.
+
+    Below OPTIMUM_A both objectives are worse than at OPTIMUM_A, and above
+    COMFORT_OPTIMUM_A both are worse than there, so every non-dominated point
+    comes from between the two single-objective optima. The tanh is monotone in
+    the squared distance from an optimum, so squashing the bowls does not move
+    that interval.
+    """
+    return [OPTIMUM_A, COMFORT_OPTIMUM_A]
 
 
 def scalarized_argmin(w1):
     """The action minimizing `w1 * cost - (1 - w1) * comfort`, with `w` on the simplex.
 
-    Cost is a bowl `kc (a - ac)^2` and comfort a hump `-kf (a - af)^2`, both up to
-    a constant, so subtracting the hump leaves a sum of two upward parabolas. Its
-    minimum is where the derivative vanishes, at the curvature-weighted average of
-    the two optima, which runs from `ac` at `w1 = 1` to `af` at `w1 = 0`.
+    Solved numerically rather than in closed form: the two curves are tanh-squashed
+    bowls rather than parabolas, so their weighted difference is no longer a
+    quadratic with an analytic minimum. Brent on the bounded interval is the right
+    tool because the sum has a single interior minimum, which was checked against a
+    4001-point grid argmin over the whole simplex -- the two agree to the grid's own
+    resolution, and the path from OPTIMUM_A to COMFORT_OPTIMUM_A is monotone.
     """
-    cost_weight = w1 * curvature(OPTIMUM_A, COST_WIDTH)
-    comfort_weight = (1.0 - w1) * curvature(COMFORT_OPTIMUM_A, COMFORT_WIDTH)
-    numerator = cost_weight * OPTIMUM_A + comfort_weight * COMFORT_OPTIMUM_A
-    return numerator / (cost_weight + comfort_weight)
-
-
-def cost(a):
-    """The metabolic cost curve: a bowl bottoming out at OPTIMUM_A."""
-    return parabola(a, OPTIMUM_A, COST_WIDTH, convex=CONVEX)
-
-
-def comfort(a):
-    """The comfort curve: a hump peaking at COMFORT_OPTIMUM_A."""
-    return parabola(a, COMFORT_OPTIMUM_A, COMFORT_WIDTH, convex=not CONVEX)
-
-
-def cost_domain():
-    """The actions over which the cost bowl is inside its axes."""
-    return curve_domain(OPTIMUM_A, COST_WIDTH, convex=CONVEX)
-
-
-def comfort_domain():
-    """The actions over which the comfort hump is inside its axes."""
-    return curve_domain(COMFORT_OPTIMUM_A, COMFORT_WIDTH, convex=not CONVEX)
-
-
-def attainable_actions():
-    """The actions where *both* curves are on screen, which is the attainable set.
-
-    A point of the objective space is only drawable if both of its coordinates are,
-    so the Pareto front is the image of this interval rather than of the whole x
-    range. By construction of `curve_domain` its ends are where cost hits
-    CURVE_Y_MAX and comfort hits zero.
-    """
-    low = max(cost_domain()[0], comfort_domain()[0])
-    high = min(cost_domain()[1], comfort_domain()[1])
-    return [low, high]
+    scalarized = lambda a: w1 * cost(a) - (1.0 - w1) * comfort(a)
+    return minimize_scalar(scalarized, bounds=CURVE_X_RANGE, method='bounded').x

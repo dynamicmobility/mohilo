@@ -38,15 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from video.clip import VideoClip  # noqa: E402
 from video.objectives import (  # noqa: E402
     COMFORT_OPTIMUM_A,
-    COMFORT_WIDTH,
-    CONVEX,
-    COST_WIDTH,
     CURVE_X_RANGE,
     CURVE_Y_MAX,
     OPTIMUM_A,
+    attainable_actions,
     comfort,
     cost,
-    curve_domain,
+    measure,
     scalarized_argmin,
 )
 from video.style import (  # noqa: E402
@@ -116,16 +114,15 @@ SAMPLE_SPREAD = 0.3
 SAMPLE_DECAY = 0.6
 SAMPLE_SEED = 0
 SAMPLE_MARGIN = 0.03
-# Measurement noise on the sampled costs, in the units of the drawn curve.
-SAMPLE_NOISE_STD = 0.07
 TRAIL_OPACITY = 0.5
 
 
 def sample_measurements():
-    """N_SAMPLES actions closing in on OPTIMUM_A, and their noisy costs.
+    """N_SAMPLES actions closing in on OPTIMUM_A, and their measured costs.
 
-    Returns `(actions, values)`, both `(N_SAMPLES,)` and both kept inside the
-    drawn axes.
+    The costs come from the objectives' own oracle rather than from noise added
+    here, so the scatter a viewer sees is the same observation model the GP in
+    `mogp.py` is fit under. Returns `(actions, values)`, both `(N_SAMPLES,)`.
     """
     rng = np.random.default_rng(SAMPLE_SEED)
     signs = rng.choice([-1.0, 1.0], size=N_SAMPLES)
@@ -135,8 +132,7 @@ def sample_measurements():
         CURVE_X_RANGE[0] + SAMPLE_MARGIN,
         CURVE_X_RANGE[1] - SAMPLE_MARGIN,
     )
-    values = cost(actions) + rng.normal(0.0, SAMPLE_NOISE_STD, size=N_SAMPLES)
-    return actions, np.clip(values, SAMPLE_MARGIN, CURVE_Y_MAX - SAMPLE_MARGIN)
+    return actions, measure(actions)[:, 0]
 
 
 class HiloScene(Scene):
@@ -165,11 +161,10 @@ class HiloScene(Scene):
 
         axes = self._axes(optimization)
         cost_labels, cost_curve, cost_star = self._objective(
-            axes, "metabolic cost", cost, OPTIMUM_A, COST_COLOR, COST_WIDTH, convex=CONVEX
+            axes, "metabolic cost", cost, OPTIMUM_A, COST_COLOR
         )
         comfort_labels, comfort_curve, comfort_star = self._objective(
-            axes, "comfort", comfort, COMFORT_OPTIMUM_A, COMFORT_COLOR, COMFORT_WIDTH,
-            convex=not CONVEX, twin=True,
+            axes, "comfort", comfort, COMFORT_OPTIMUM_A, COMFORT_COLOR, twin=True
         )
 
         self.play(Write(title, run_time=1.0))
@@ -358,7 +353,7 @@ class HiloScene(Scene):
         axes.y_axis.set_color(COST_COLOR)
         return axes
 
-    def _objective(self, axes, label, func, optimum, color, width, convex=True, twin=False):
+    def _objective(self, axes, label, func, optimum, color, twin=False):
         """One objective on `axes`: its labels, curve and starred optimum, all in `color`.
 
         `twin=False` labels the left y axis, which `_axes` already drew; `twin=True`
@@ -367,7 +362,7 @@ class HiloScene(Scene):
         """
         curve = axes.plot(
             func,
-            x_range=curve_domain(optimum, width, convex=convex),
+            x_range=attainable_actions(),
             color=color,
             stroke_width=5.0,
         )

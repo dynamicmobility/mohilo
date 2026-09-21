@@ -1,15 +1,17 @@
 # ICRA videos
 
 Manim scenes for the paper. Rendered with Manim Community v0.21.0 in the
-`pypolar` conda environment; nothing here imports `pypolar`.
+`pypolar` conda environment. The objectives and the GP fit to them come from
+`pypolar` itself; the drawing does not.
 
 ```
 video/
 ├── style.py        # palette, box geometry, manim config, box/arrow helpers
-├── objectives.py   # the two objective curves, shared by every scene
+├── objectives.py   # the two objectives, as one pypolar groundtruth
 ├── clip.py         # VideoClip: a video file drawn as frames inside a scene
 ├── hilo.py         # HiloScene: device and optimization exchanging feedback
 ├── pareto.py       # ParetoScene: the same objectives, and their front
+├── mogp.py         # MogpScene: a DecoupledMOGP learning them, point by point
 ├── subjects/       # subject footage
 ├── render.sh       # one scene at 1080p60
 └── media/          # manim output (images/, videos/)
@@ -19,14 +21,17 @@ video/
 
 ```bash
 conda activate pypolar
-video/render.sh                       # HiloScene at -qh (1080p60)
-video/render.sh ParetoScene           # the other scene, same quality
+video/render.sh                       # every scene at -qh (1080p60)
+video/render.sh ParetoScene           # just that one
 video/render.sh HiloScene -ql         # draft, 480p15
+video/render.sh -ql                   # every scene as a draft
 manim -ql -s video/hilo.py HiloScene  # last frame only, as a PNG
 ```
 
 `render.sh` maps a scene name to its file, so it takes the scene rather than the
-path; anything else it does not know about it refuses rather than guessing.
+path, and refuses a name it does not know rather than guessing. Naming no scene
+renders all of them; a first argument starting with `-` is read as a flag rather
+than a scene, so flags alone apply to the whole set.
 
 Output lands in `video/media/`, set by `style.py` so it does not depend on the
 directory the command is run from.
@@ -46,26 +51,42 @@ every label. Each objective keeps one color across both videos — metabolic cos
 Pareto scene. Comfort is violet rather than red for exactly that reason, and not
 amber because `style.STAR_COLOR` already marks the optima in gold.
 
-`objectives.py` holds the two curves themselves and no manim: metabolic cost is
-a bowl at `OPTIMUM_A` and comfort a hump at `COMFORT_OPTIMUM_A`, both from one
-`parabola`. Both scenes import them, so the two videos cannot drift apart.
+`objectives.py` holds the two objectives and no manim. They are not drawn curves
+but a pypolar groundtruth: one `SyntheticOracleParams(func='IdealPoint', dim=1)`
+builds a `MOSyntheticOracle` of two bowls sharing the action box `CURVE_X_RANGE`,
+metabolic cost bottoming out at `OPTIMUM_A` and comfort peaking at
+`COMFORT_OPTIMUM_A`. Comfort is a hump because its weight is *negative*, which is
+how `IdealPoint` flips a bowl; direction is otherwise an `Objective`'s business,
+not a truth's. `hilo/shared/simulation.py` builds the live experiment's
+groundtruth the same way, in three action dimensions instead of one.
+
+Both bowls are **bounded**: `low` and `high` squash them through a tanh into a
+band, so every value lies in `[CURVE_FLOOR, CURVE_PEAK]` by construction. Three
+things follow. Nothing needs clipping to the axes, so every curve is drawn over
+the whole box and `attainable_actions()` returns just that. `CURVE_Y_MAX` is only
+headroom for the axis tips, not a threshold. And the curves are no longer
+quadratics, which is why `scalarized_argmin` is a bounded `scipy.optimize.
+minimize_scalar` rather than a closed form — checked against a 4001-point grid
+argmin across the whole simplex, where the two agree to the grid's resolution and
+the path between the optima is monotone.
+
+Using a truth rather than a formula is what lets a scene *measure*: `measure()`
+returns a noisy reading of both objectives at the same actions, drawn from the
+oracle at `NOISE_STD` of each objective's own spread. `HiloScene`'s search scatter
+and `MogpScene`'s data both come from there, so one observation model feeds every
+video and the GP is fit under the noise a viewer can see.
 
 ## HiloScene
 
 `hilo.sample_measurements()` places the five actions the dot visits and
 their costs: the offset from `OPTIMUM_A` shrinks by `SAMPLE_DECAY` each step and
-falls on a random side of it, and each cost carries `SAMPLE_NOISE_STD` of
-Gaussian noise, so the points scatter off the curve. Both come from one seeded
-generator, so every render is identical. Each visited point stays on screen at
+falls on a random side of it, and the costs come from `objectives.measure()`, so
+the points scatter off the curve by the oracle's own noise rather than by a
+figure the scene invents. Both streams are seeded, so every render is identical. Each visited point stays on screen at
 `TRAIL_OPACITY` once the dot moves on, until the comfort curve is drawn and
 `_search`'s returned `samples` group fades out with it, leaving the two optima,
 their dashed lines and the gap arrow. The dot finishes on the curve's optimum
 rather than on a noisy value, and the star appears over it.
-
-`hilo.CONVEX` picks the cost curve's direction: `True` draws a bowl with
-its minimum starred, `False` a hump with its maximum starred. `hilo.comfort()`
-is the same parabola flipped the other way and peaked at `COMFORT_OPTIMUM_A`,
-so the two objectives disagree about which action is best.
 
 Both curves share one set of axes with a twin y axis: the left y axis is
 metabolic cost in `style.COST_COLOR`, and `_objective(twin=True)` copies it to
@@ -74,15 +95,6 @@ rotated label taking its curve's color. The x axis runs on to `AXIS_X_MAX` so
 its tip clears that second y axis. Both curves are drawn against the same
 `y_range`, which is what lets one dashed line at the cost optimum be read
 against either.
-
-`COST_WIDTH` and `COMFORT_WIDTH` narrow the parabolas: each is that fraction of
-the width that would put `CURVE_PEAK` at the far end of the x range. Narrow
-curves leave the axes before the ends of `CURVE_X_RANGE`, so `curve_domain()`
-returns the interval where each one is still on screen and the curve is plotted
-only there, rather than being clipped flat against the top. Comfort is the wider
-of the two so that its value at the cost optimum lands mid-plot, clear of the
-cost curve. `SAMPLE_SPREAD` is set to keep the sampled actions inside the
-narrowed cost curve's own domain.
 
 Each objective is one color throughout: the device sends metabolic cost up a
 blue arrow at `COST_FEEDBACK_Y` from the moment the loop is drawn, and comfort
@@ -101,12 +113,10 @@ Last, `_scalarize` writes the scalarized objective in the band below the boxes
 and sweeps its weights. `w` is on the simplex, so one `ValueTracker` carries
 `w_1` and the readout shows `1 - w_1` beside it, and the solid line is at
 `scalarized_argmin(w_1)` — the argmin of the written objective itself, not an
-interpolation between the two stars. Both curves are parabolas, so subtracting
-the comfort hump from the cost bowl leaves a sum of two upward parabolas whose
-minimum is the curvature-weighted average `(w_1 k_c a_c + w_2 k_f a_f) / (w_1 k_c
-+ w_2 k_f)`; that runs from the cost optimum at `w = [1, 0]` to the comfort
-optimum at `w = [0, 1]`, and its speed along the way is set by the two
-curvatures rather than by `w` alone. A second `\bm{a}_{\bm{w}}` rides the x axis
+interpolation between the two stars. It runs from the cost optimum at
+`w = [1, 0]` to the comfort optimum at `w = [0, 1]`, and its speed along the way
+is set by the two curvatures rather than by `w` alone. The solve is numeric, for
+the reason the Notes give. A second `\bm{a}_{\bm{w}}` rides the x axis
 under that line, which is why the axis's own `\bm{a}` label sits at the right end
 of the axis rather than centered beneath it. The weights are `DecimalNumber`s dropped
 into a single `MathTex`'s hidden slots: one LaTeX expression keeps the brackets
@@ -132,9 +142,8 @@ against the action, stacked on one shared x axis; the right panel plots them
 against each other, which is the objective space the front lives in.
 
 The attainable curve there is `(cost(a), comfort(a))` traced over
-`objectives.attainable_actions()` — the actions where both curves are inside
-their own axes, which by construction of `curve_domain` runs from where comfort
-reaches zero to where cost reaches `CURVE_Y_MAX`. The whole landscape is drawn
+`objectives.attainable_actions()` — the whole action box, since a bounded bowl
+never leaves its band. The whole landscape is drawn
 dim first, then the bright front is drawn over the stretch of it spanned by
 `front_actions()`, the interval between the two single-objective optima, and an
 arrow from the middle of the panel names it `\mathcal{F}`. Its tip is the front's
@@ -156,3 +165,41 @@ comfort at `a_1`'s cost — which is above the front and so attained by no
 controller; the red leg is the walk back onto it. That is the point: the gain is
 only there if the loss is paid, and a move that was all green would mean `a_1`
 was dominated and not on the front at all.
+
+## MogpScene
+
+The same two objectives again, now being *learned*. No title and no annotation:
+the two action plots on the left, and on the right the whole attainable curve in
+one dim color, dominated arms and all, since this video is not about which part
+of it is Pareto optimal.
+
+Then the loop, `N_POINTS` actions from `objectives.sobol_actions()`. Each is one
+visit to one controller: `measure()` is called once and returns a noisy reading of
+*both* objectives, so the pair of dots that appears is one measurement, not two.
+From `N_SEED` onward the scene refits `pypolar`'s own `DecoupledMOGP` after every
+point and redraws the posterior. The first `N_SEED - 1` points arrive with no fit
+behind them because a single measurement has no spread of its own to standardize
+by and two badly underestimate it, so a band drawn from them would *widen* at the
+third point rather than narrow.
+
+`fit()` pins `action_bounds` on both objectives. Left unpinned, an `Objective`
+normalizes actions by their measured range, so the frame — and with it every
+lengthscale and the whole posterior — would shift each time a point is added, for
+reasons having nothing to do with the new measurement. `posterior()` then reads
+the fit twice: `posterior_at(grid)` in maximization space, where both objectives
+are larger-is-better and `get_nondominated` can be asked which grid points are
+non-dominated, and `posterior_at(grid, raw=True)` for the coordinates to draw. The
+two calls are what `hilo/explore_front.py` makes for the same reason.
+
+Everything the model believes is drawn in `style.INK`: a dashed posterior mean on
+each left plot, and on the right the model's own front, its posterior mean at the
+non-dominated grid points. The band is `BAND_STD` standard deviations of the
+*latent* posterior — the model's uncertainty about the noiseless curve, which is
+what a truth curve should sit inside — tinted in the objective's color, built from
+a fixed `BAND_POINTS` vertices so one step's band morphs into the next, and
+clipped to the axes since an early band is wider than the plot.
+
+Expect the predicted front to sit slightly outside the true one even once the
+band has collapsed. That is not a bug: taking the non-dominated subset of an
+estimate selects the points where the estimate happened to be optimistic, so a
+fitted front is biased outward.
