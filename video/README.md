@@ -339,18 +339,54 @@ validation points cannot disagree. `validation_points` calls that script's own
 action counts as a match to a measurement under the same `MATCH_TOL` the
 static figure uses.
 
-The reveal is in four beats, one source at a time, run once across all three
-panels together rather than column by column: every Pareto-sourced validation
-action's prediction (a star) first, then every one of its measurements (a
-square) together with the line joining it to its own star; then the same two
-beats again for the anti-Pareto actions. Stars before squares is deliberate —
-it shows what the GP thought would happen before showing what was actually
-measured — and both markers of one kind land together across subjects so the
-video never singles one panel out. Colors are `SOURCE_COLORS['pareto']` and
-`SOURCE_COLORS['antipareto']`, the same star/square/joining-line
-`validation_pareto.py`'s `plot_validation` draws in one axes call, staged here
-as four animations instead.
+The point reveal is four beats, one source at a time, run once across all
+three panels together rather than column by column: every Pareto-sourced
+validation action's prediction (a star) first, then every one of its
+measurements (a square) together with the line joining it to its own star;
+then the same two beats again for the anti-Pareto actions. Stars before
+squares is deliberate — it shows what the GP thought would happen before
+showing what was actually measured — and every marker of one kind lands
+together across subjects so the video never singles one panel out. The
+star/square/joining-line is the same one `validation_pareto.py`'s
+`plot_validation` draws in one axes call, staged here as animations instead.
+Colors are `SOURCE_COLORS['pareto']` and `SOURCE_COLORS['antipareto']`
+throughout.
+
+Only once every star and square is down does the hypervolume appear, in two
+more beats: `hypervolume_shape` reads a source's non-dominated *squares*
+alone (what was actually measured, not the GP's scan) and shades the
+hypervolume they attain — the union of the axis-aligned rectangles each
+non-dominated square opens toward a reference corner, exactly the staircase
+`plr.hypervolume_from_nondominated` integrates over. Non-domination is read
+in maximization space via `plr.get_nondominated_tol`, so cost is negated and
+comfort is not, per `model.objectives.maximize`. The Pareto shape is drawn
+first and held, then
+`Transform`ed in place into the anti-Pareto shape — `SOURCE_COLORS` is
+insertion-ordered pareto before antipareto, which is what `first, second =
+SOURCE_COLORS` relies on to pick the direction — so the region visibly
+shrinks rather than sitting as two shapes a viewer has to compare
+side by side. Only `hv_areas[first]` is ever added to the scene; the
+anti-Pareto shapes exist only as the `Transform` target and are never drawn
+on their own.
+
+The reference corner is not read off each source alone. `hypervolume_reference`
+mirrors `hilo/analysis/validation.py`'s own `ref_point` — `plr.
+reference_point_from_objectives(pareto_pts + antipareto_pts, margin=0.1)` —
+which pools *both* sources' measurements before taking the worst value per
+objective, so one subject's Pareto and anti-Pareto hypervolumes are shaded
+against the same corner and read directly comparable; only the corner itself
+changes from subject to subject, off that subject's own combined range.
+
 `small_front_axes` (imported from `subjects_grid.py`, now taking optional
 `width`/`height`/`pad`) is sized off the whole scan **and** every validation
 point together, not the scan alone, since a validation measurement can fall
 outside the region the posterior scan covers.
+
+The legend is two rows, both built once and faded in together right after the
+panels. The top row is `SOURCE_LABELS` in their own colors, same as before;
+the bottom row says what a marker *shape* means regardless of source — a star
+is a GP prediction, a square is a measurement, a shaded square is a
+hypervolume region — so it is drawn with neutral white-filled, ink-edged
+icons (`legend_marker`, matching `validation_pareto.py`'s own
+`legend_handles` convention of `mfc='white', mec='black'` for its generic
+proxies) rather than either source's color.

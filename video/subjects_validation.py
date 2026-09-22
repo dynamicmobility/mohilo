@@ -1,11 +1,15 @@
-"""Three subjects' fronts, then their held-out validation points.
+"""Three subjects' fronts, then their held-out validation points and the
+hypervolume those points attain.
 
 Draws the same panel `subjects_grid.py`'s top row does -- one subject's
 inferred front per column -- and then replays `scripts/icra/validation_pareto.py`
 on top of it, one source at a time: every subject's stars (the GP's
 prediction) first, then every subject's squares (what was measured) together
 with the line joining each to its own star, and only then the same two beats
-for the anti-Pareto actions.
+for the anti-Pareto actions. Only once every star and square is on screen does
+the hypervolume appear -- the Pareto region first, then morphed into the
+anti-Pareto one in place, so the shrink from one to the other is the thing a
+viewer watches happen rather than two static shapes they have to compare.
 """
 
 import sys
@@ -14,16 +18,21 @@ from pathlib import Path
 import numpy as np
 from manim import (
     DOWN,
+    LEFT,
+    RIGHT,
     UP,
+    WHITE,
     Create,
     FadeIn,
     FadeOut,
     Line,
     ManimColor,
+    Polygon,
     Scene,
     Square,
     Star,
     Tex,
+    Transform,
     VGroup,
     Write,
 )
@@ -68,9 +77,16 @@ SQUARE_SIZE = 0.13
 MARKER_STROKE = 1.5
 LINE_STROKE = 3.0
 
-LEGEND_Y = 3.15
+HV_MARGIN = 0.1     # reference point's gap past the worst square, as a
+                    # fraction of that source's own range -- `reference_point`'s
+                    # own default
+HV_OPACITY = 0.18
+
+LEGEND_Y = 2.55
+LEGEND_ROW_GAP = 0.28
 LEGEND_GAP = 0.55
 LEGEND_SIZE = 22
+HV_SWATCH_SIZE = 0.22
 
 HOLD = 1.2
 
@@ -123,22 +139,100 @@ def marker(kind, point, color, size):
     return shape.move_to(point)
 
 
+def hypervolume_reference(points, maximize, margin=HV_MARGIN):
+    """One subject's shared hypervolume reference: `(m,)`, in raw units.
+
+    Mirrors `hilo/analysis/validation.py`'s own `ref_point` — `plr.
+    reference_point_from_objectives(pareto_pts + antipareto_pts, margin=0.1)` —
+    which reads its range from *both* sources' measurements added together, so
+    one subject's Pareto and anti-Pareto hypervolumes share one reference and
+    are directly comparable; only the reference varies subject to subject.
+    `points` is `{source: (predicted, measured)}` as `validation_points`
+    returns it, and `reference_point` on the stacked `measured` columns is the
+    same computation `reference_point_from_objectives` does off each
+    objective's own `ydata` range.
+    """
+    measured = np.vstack([m for _, m in points.values()])
+    return plr.reference_point(values=measured, maximize=maximize, margin=margin)
+
+
+def hypervolume_shape(measured, maximize, ref, axes, color):
+    """One source's hypervolume region, shaded on `axes`.
+
+    `measured` is that source's `(k, 2)` raw squares alone -- not the GP's
+    scan -- so this reads what was actually attained rather than what the
+    model believes. Non-domination is read in maximization space, which is
+    what `plr.get_nondominated_tol` wants (larger is better in every column),
+    so cost is not simply sorted on: `maximize` (`model.objectives.maximize`)
+    says which raw columns need flipping first. `ref` is shared with the other
+    source on the same subject -- see `hypervolume_reference` -- so it is
+    taken as an argument rather than read off `measured` alone.
+
+    The returned `Polygon` is the staircase union of the axis-aligned
+    rectangles each non-dominated square opens toward `ref`, which is the
+    hypervolume itself -- not the smooth region a straight line through the
+    squares would enclose -- drawn as a shaded region a viewer can compare
+    between sources and subjects by eye.
+    """
+    sign = np.where(maximize, 1.0, -1.0)
+    nd_idx = plr.get_nondominated_tol(measured * sign)
+    front = measured[nd_idx[np.argsort(measured[nd_idx, 0])]]
+
+    verts = [(front[0, 0], ref[1]), tuple(front[0])]
+    for x, y in front[1:]:
+        verts.append((x, verts[-1][1]))
+        verts.append((x, y))
+    verts.append((ref[0], verts[-1][1]))
+    verts.append((ref[0], ref[1]))
+
+    return Polygon(*(axes.c2p(*v) for v in verts), stroke_width=0,
+                   fill_color=color, fill_opacity=HV_OPACITY).set_z_index(-1)
+
+
+def legend_marker(kind):
+    """One neutral `Star`/`Square` icon, white-filled with an ink edge -- the
+    same generic-marker convention `validation_pareto.py`'s own
+    `legend_handles` draws its proxies in (`mfc='white', mec='black'`), since
+    a legend icon means the *shape*, not any one source's color."""
+    return (Star(n=5, outer_radius=STAR_SIZE, color=WHITE, fill_color=WHITE,
+                fill_opacity=1.0, stroke_color=INK, stroke_width=MARKER_STROKE)
+            if kind == "predicted" else
+            Square(side_length=SQUARE_SIZE, color=WHITE, fill_color=WHITE,
+                  fill_opacity=1.0, stroke_color=INK, stroke_width=MARKER_STROKE))
+
+
 def legend(colors):
-    """One swatch per validation source, `SOURCE_LABELS` beside it, in a row."""
-    rows = VGroup()
+    """Two rows: `SOURCE_LABELS` in their own colors, then what a star, a
+    square and a shaded region each mean, generic across sources."""
+    source_row = VGroup()
     for source, color in colors.items():
-        swatch = Line(np.zeros(3), np.array([0.5, 0, 0]), color=color, stroke_width=5)
+        swatch = Line(LEFT * 0.25, RIGHT * 0.25, color=color, stroke_width=5)
         text = Tex(SOURCE_LABELS[source], font_size=LEGEND_SIZE, color=INK)
         text.next_to(swatch, buff=0.15)
-        rows.add(VGroup(swatch, text))
-    rows.arrange(buff=LEGEND_GAP)
-    return rows.move_to([0.0, LEGEND_Y, 0])
+        source_row.add(VGroup(swatch, text))
+    source_row.arrange(buff=LEGEND_GAP)
+
+    marker_row = VGroup()
+    for icon, label in (
+        (legend_marker("predicted"), "GP prediction"),
+        (legend_marker("measured"), "measured"),
+        (Square(side_length=HV_SWATCH_SIZE, fill_color=INK, fill_opacity=HV_OPACITY,
+                stroke_width=0), "hypervolume"),
+    ):
+        text = Tex(label, font_size=LEGEND_SIZE, color=INK)
+        text.next_to(icon, buff=0.15)
+        marker_row.add(VGroup(icon, text))
+    marker_row.arrange(buff=LEGEND_GAP)
+
+    key = VGroup(source_row, marker_row).arrange(DOWN, buff=LEGEND_ROW_GAP)
+    return key.move_to([0.0, LEGEND_Y, 0])
 
 
 class SubjectValidationScene(Scene):
-    """Every subject's front, then its Pareto and anti-Pareto validation points:
-    every subject's stars together, then every subject's squares and joining
-    lines together, one source at a time."""
+    """Every subject's front, then its Pareto and anti-Pareto validation points
+    -- stars together, then squares and joining lines together, one source at
+    a time -- and only once every point is down, the hypervolume: Pareto's
+    shown, then morphed into anti-Pareto's, so the shrink reads as motion."""
 
     def construct(self):
         title = Tex(TITLE, font_size=SCENE_TITLE_SIZE, color=INK)
@@ -149,6 +243,7 @@ class SubjectValidationScene(Scene):
         squares = {source: VGroup() for source in SOURCE_COLORS}
         stars = {source: VGroup() for source in SOURCE_COLORS}
         segments = {source: VGroup() for source in SOURCE_COLORS}
+        hv_areas = {source: VGroup() for source in SOURCE_COLORS}
         colors = {source: ManimColor(hex_) for source, hex_ in SOURCE_COLORS.items()}
 
         for run, x in zip(RUNS, COL_X):
@@ -165,6 +260,7 @@ class SubjectValidationScene(Scene):
             name_label.next_to(f_axes, UP, buff=0.2)
             panels.add(VGroup(f_axes, f_labels, cloud, line, markers, name_label))
 
+            ref = hypervolume_reference(points, model.objectives.maximize)
             for source, (predicted, measured) in points.items():
                 for p, m in zip(predicted, measured):
                     p2, m2 = f_axes.c2p(*p), f_axes.c2p(*m)
@@ -172,6 +268,9 @@ class SubjectValidationScene(Scene):
                     stars[source].add(marker("predicted", p2, colors[source], STAR_SIZE))
                     segments[source].add(Line(p2, m2, color=colors[source],
                                               stroke_width=LINE_STROKE).set_z_index(-1))
+
+                hv_areas[source].add(hypervolume_shape(
+                    measured, model.objectives.maximize, ref, f_axes, colors[source]))
 
         self.play(Create(panels))
         key = legend(colors)
@@ -184,5 +283,15 @@ class SubjectValidationScene(Scene):
             self.play(FadeIn(squares[source]), Create(segments[source]))
             self.wait(HOLD)
 
+        # `SOURCE_COLORS` is insertion-ordered pareto, antipareto, so `first`
+        # is drawn and `second` is what it morphs into -- the shrink itself is
+        # the point, not either shape alone.
+        first, second = SOURCE_COLORS
+        self.play(FadeIn(hv_areas[first]))
+        self.wait(HOLD)
+        self.play(Transform(hv_areas[first], hv_areas[second]))
+        self.wait(HOLD)
+
         self.play(FadeOut(VGroup(title, key, panels, *squares.values(),
-                                 *stars.values(), *segments.values())))
+                                 *stars.values(), *segments.values(),
+                                 hv_areas[first])))
