@@ -4,11 +4,11 @@ even means.
 
 Draws the same panel `subjects_grid.py`'s top row does -- one subject's
 inferred front per column -- and then replays `scripts/icra/validation_pareto.py`
-on top of it, one source at a time: every subject's stars (the GP's
-prediction) first, then every subject's squares (what was measured) together
-with the line joining each to its own star, and only then the same two beats
-for the anti-Pareto actions. Only once every star and square is on screen does
-the hypervolume appear -- the Pareto region first, then morphed into the
+on top of it in three beats: every subject's Pareto stars (the GP's
+prediction), then every subject's anti-Pareto stars, and only then every
+square (what was measured) across both sources together, with the line
+joining each to its own star. Only once every star and square is on screen
+does the hypervolume appear -- the Pareto region first, then morphed into the
 anti-Pareto one in place, so the shrink from one to the other is the thing a
 viewer watches happen rather than two static shapes they have to compare.
 
@@ -106,8 +106,10 @@ LEGEND_SIZE = 22
 HV_SWATCH_SIZE = 0.22
 
 HOLD = 1.2
+FAST_RUNTIME = 0.35  # stars/squares/lines/numbers beats in `_ordering_section`
+FAST_GAP = 0.15      # gap between those beats, in place of `HOLD`
 
-ZOOM_TITLE = "Subject 1 --- Ordering the Same Front Two Ways"
+ZOOM_TITLE = "Subject 1: Pareto Pairwise Comparisons per Objective"
 ZOOM_LEFT_X, ZOOM_RIGHT_X = -3.3, 3.3
 ZOOM_Y = -0.2
 ZOOM_W, ZOOM_H = 5.4, 4.8
@@ -280,9 +282,10 @@ def legend(colors):
 
 class SubjectValidationScene(Scene):
     """Every subject's front, then its Pareto and anti-Pareto validation points
-    -- stars together, then squares and joining lines together, one source at
-    a time -- and only once every point is down, the hypervolume: Pareto's
-    shown, then morphed into anti-Pareto's, so the shrink reads as motion."""
+    -- Pareto stars, then anti-Pareto stars, then every square and its
+    joining line across both sources at once -- and only once every point is
+    down, the hypervolume: Pareto's shown, then morphed into anti-Pareto's,
+    so the shrink reads as motion."""
 
     def construct(self):
         title = Tex(TITLE, font_size=SCENE_TITLE_SIZE, color=INK)
@@ -337,8 +340,10 @@ class SubjectValidationScene(Scene):
         for source in SOURCE_COLORS:
             self.play(FadeIn(stars[source]))
             self.wait(HOLD)
-            self.play(FadeIn(squares[source]), Create(segments[source]))
-            self.wait(HOLD)
+
+        self.play(*(FadeIn(squares[source]) for source in SOURCE_COLORS),
+                  *(Create(segments[source]) for source in SOURCE_COLORS))
+        self.wait(HOLD)
 
         # `SOURCE_COLORS` is insertion-ordered pareto, antipareto, so `first`
         # is drawn and `second` is what it morphs into -- the shrink itself is
@@ -387,9 +392,6 @@ class SubjectValidationScene(Scene):
         right_title = Tex("Ordered by Comfort", font_size=ZOOM_PANEL_TITLE_SIZE, color=INK)
         right_title.next_to(right_axes, UP, buff=0.25)
 
-        self.play(Create(VGroup(left_axes, left_labels, right_axes, right_labels)),
-                  FadeIn(left_title, right_title))
-
         def panel_points(axes):
             """That axes' posterior cloud, stars, squares and star-to-square
             lines -- the same four groups the main section draws, rebuilt
@@ -407,13 +409,24 @@ class SubjectValidationScene(Scene):
         left_cloud, left_squares, left_stars, left_segments = panel_points(left_axes)
         right_cloud, right_squares, right_stars, right_segments = panel_points(right_axes)
 
-        self.play(FadeIn(left_cloud), FadeIn(right_cloud))
+        # Axes and the posterior cloud they carry come on together, rather
+        # than the axes first and the cloud in a separate beat. `lag_ratio=0`
+        # is load-bearing: `Create`'s own default of 1.0 draws a VGroup's
+        # submobjects one after another, which is what staggered the left
+        # and right axes instead of drawing them at once.
+        self.play(Create(VGroup(left_axes, left_labels, right_axes, right_labels), lag_ratio=0),
+                  FadeIn(left_title, right_title, left_cloud, right_cloud))
         self.wait(HOLD)
-        self.play(FadeIn(left_stars), FadeIn(right_stars))
-        self.wait(HOLD)
+
+        # Stars, then squares/lines, then numbers are back-to-back beats
+        # rather than `HOLD`-separated ones -- the point of this section is
+        # the two rankings, not the reveal of the points feeding them, so it
+        # moves at `FAST_RUNTIME`/`FAST_GAP` instead.
+        self.play(FadeIn(left_stars), FadeIn(right_stars), run_time=FAST_RUNTIME)
+        self.wait(FAST_GAP)
         self.play(FadeIn(left_squares), Create(left_segments),
-                  FadeIn(right_squares), Create(right_segments))
-        self.wait(HOLD)
+                  FadeIn(right_squares), Create(right_segments), run_time=FAST_RUNTIME)
+        self.wait(FAST_GAP)
 
         # Each panel's numbers take the color of the objective doing the
         # ordering -- `COST_COLOR`/`COMFORT_COLOR` are the same ones
@@ -422,9 +435,7 @@ class SubjectValidationScene(Scene):
         cost_labels = rank_labels(left_axes, front, cost_ranks, COST_COLOR)
         comfort_labels = rank_labels(right_axes, front, comfort_ranks, COMFORT_COLOR)
 
-        self.play(FadeIn(cost_labels))
-        self.wait(HOLD)
-        self.play(FadeIn(comfort_labels))
+        self.play(FadeIn(cost_labels), FadeIn(comfort_labels), run_time=FAST_RUNTIME)
         self.wait(2 * HOLD)
 
         self.play(FadeOut(VGroup(

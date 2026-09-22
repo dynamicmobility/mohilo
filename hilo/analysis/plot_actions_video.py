@@ -1,5 +1,6 @@
 """Every subject's inferred Pareto set, animated to video: one subject's
-action-space front revealed at a time, on one 3D panel.
+action-space front revealed at a time, on one 3D panel, followed by a
+highlight sequence once all subjects are shown.
 
 Mirrors `scripts/icra/subject_actions.py`'s single `'3d'` panel -- the same
 fronts, read off the same Sobol scan, in the same Okabe-Ito subject colors --
@@ -7,6 +8,16 @@ but written as an mp4 through ffmpeg, built up subject by subject rather than
 drawn all at once, in the same style as `hilo/analysis/plot_fit_video.py`:
 1920x1080, `video/style.py`'s background and ink, and a Computer Modern title
 set through matplotlib rather than manim.
+
+Each newly added subject fades in (alpha 0 to its normal alpha, over
+`TRANSITION_SECONDS`) rather than appearing on a hard cut. After the build-up,
+when there are at least three subjects, the first three (subject 1, 2, 3 in
+`SUBJECTS` order) run through a highlight sequence: subject 2 lights up while
+subjects 1 and 3 dim, subject 3 also lights up (subject 2 staying lit),
+everyone returns to normal, subject 1 alone lights up while 2 and 3 dim, then
+everyone returns to normal for the final hold -- each step again a
+`TRANSITION_SECONDS` fade rather than a hard cut, which is why the video
+defaults to a higher `FPS` than either sequence alone would need.
 """
 
 import argparse
@@ -19,7 +30,7 @@ from matplotlib.lines import Line2D
 
 import pypolar as plr
 from scripts.icra.human_pareto import ACTION_LABELS
-from scripts.icra.subject_actions import SUBJECT_COLORS, pareto_actions, plot_subject
+from scripts.icra.subject_actions import SUBJECT_COLORS, pareto_actions
 from scripts.icra.subjects_pareto import SUBJECTS
 from video.style import BG, INK
 
@@ -33,9 +44,40 @@ SEED  = 95
 ELEV  = 25        # 3D view elevation, degrees
 AZIM  = -60       # 3D view azimuth, degrees
 
-FPS            = 2.0
-REVEAL_SECONDS = 1.0    # how long each newly added subject holds before the next
-HOLD_SECONDS   = 10.0   # total dwell time of the final, all-subjects frame
+DELAY_DIM     = 2       # the action dimension ACTION_LABELS calls 'Delay'
+DELAY_SECONDS = 0.005   # hip_delay_idx is a 200 Hz controller tick count, not seconds
+
+FPS            = 24.0
+REVEAL_SECONDS = 1.0    # how long each newly added subject holds, after its fade in, before the next
+HOLD_SECONDS   = 10.0   # dwell time of the full-reveal frame, before highlighting starts
+
+TRANSITION_SECONDS = 0.5   # fade time into each new subject, and into each highlight state
+HIGHLIGHT_SECONDS   = 2.0   # dwell time of a lit/dimmed highlight state, after its fade in
+RETURN_SECONDS      = 1.0   # dwell time of an intermediate return-to-normal state, after its fade in
+FINAL_HOLD_SECONDS  = 5.0   # dwell time of the closing, all-normal frame, after its fade in
+
+STATE_ALPHA = {'dim': 0.25, 'normal': 0.8, 'lit': 1.0}   # point/edge alpha per highlight state
+STATE_SIZE  = {'dim': 25,   'normal': 25,  'lit': 45}    # marker size per highlight state
+
+# Highlight states for (subject 1, subject 2, subject 3), applied in order, each
+# following a `TRANSITION_SECONDS` fade and then held for its own dwell time.
+# The sequence starts from all-normal, the state the build-up ends on.
+HIGHLIGHT_SEQUENCE = [
+    (('normal', 'normal', 'normal'), None),
+    (('dim', 'lit', 'dim'),          HIGHLIGHT_SECONDS),
+    (('dim', 'lit', 'lit'),          HIGHLIGHT_SECONDS),
+    (('normal', 'normal', 'normal'), RETURN_SECONDS),
+    (('lit', 'dim', 'dim'),          HIGHLIGHT_SECONDS),
+    (('normal', 'normal', 'normal'), FINAL_HOLD_SECONDS),
+]
+
+
+def smoothstep(t):
+    """Ease `t` in `[0, 1]` with zero velocity at both ends (`3t^2 - 2t^3`), so
+    a linear fade in `t` reads as a smooth accelerate-decelerate instead of a
+    constant-speed ramp."""
+    return 3 * t**2 - 2 * t**3
+
 
 DPI       = 150
 FIGSIZE   = (12.8, 7.2)   # 1920x1080 at DPI, the manim scenes' own 16:9 frame
@@ -44,6 +86,18 @@ MATH_FONT = 'cm'
 TITLE_SIZE = 40
 TICK_SIZE  = 15
 LABEL_SIZE = 19
+
+
+def plot_subject_state(ax, actions, color, alpha, size):
+    """One subject's (k, 2) or (k, 3) Pareto actions as a path of points in
+    `color`, at the given marker `alpha` and `size` -- the two values a
+    highlight fade interpolates between `STATE_ALPHA` / `STATE_SIZE` entries.
+    Returns the `ax`."""
+    shade = {'depthshade': False} if ax.name == '3d' else {}
+    ax.scatter(*actions.T, s=size, c=color, alpha=alpha, edgecolors='black',
+               linewidths=0.6, zorder=2 + alpha, **shade)
+
+    return ax
 
 
 def make_video(subjects=tuple(SUBJECTS), data_dir=DATA_DIR, path=None, title=TITLE,
@@ -58,9 +112,12 @@ def make_video(subjects=tuple(SUBJECTS), data_dir=DATA_DIR, path=None, title=TIT
         trial: the optimization trial whose GP each front is read from.
         scan, seed: the Sobol scan each front is read off.
         elev, azim: the 3D view angle.
-        fps: frame granularity; each reveal step and the final hold are timed
-            in seconds via `REVEAL_SECONDS` / `HOLD_SECONDS`, not by `fps`
-            directly.
+        fps: frame granularity; every step -- reveal, hold, highlight fade and
+            highlight dwell -- is timed in seconds (`REVEAL_SECONDS`,
+            `HOLD_SECONDS`, `TRANSITION_SECONDS` and `HIGHLIGHT_SEQUENCE`'s own
+            per-state durations), not by `fps` directly. A higher `fps` only
+            makes the highlight fades smoother, since the timings themselves
+            don't change.
 
     Returns:
         Where the video went.
@@ -74,40 +131,85 @@ def make_video(subjects=tuple(SUBJECTS), data_dir=DATA_DIR, path=None, title=TIT
                          np.max([b[1] for b in boxes], axis=0)])   # (2, d) union of every box
     fronts   = [pareto_actions(d, trial, scan, seed) for d in datasets]
 
+    # display only: hip_delay_idx is a raw 200 Hz tick count, not seconds --
+    # the GP/action_bounds stay in tick units, only what's drawn is converted
+    bounds = bounds.copy()
+    bounds[:, DELAY_DIM] *= DELAY_SECONDS
+    fronts = [f.copy() for f in fronts]
+    for f in fronts:
+        f[:, DELAY_DIM] *= DELAY_SECONDS
+    labels = list(ACTION_LABELS)
+    labels[DELAY_DIM] = 'Delay (s)'
+
     fig = plt.figure(figsize=FIGSIZE, dpi=DPI, facecolor=BG.to_hex())
     fig.suptitle(title, fontsize=TITLE_SIZE, fontfamily=FONT,
                 math_fontfamily=MATH_FONT, color=INK.to_hex())
     ax = fig.add_subplot(1, 1, 1, projection='3d')
     fig.subplots_adjust(left=0.02, right=0.98, top=0.86, bottom=0.05)
 
+    def draw_frame(shown, styles):
+        """Redraw the panel with subjects `shown` (a slice of `subjects`'
+        indices), each at its entry of `styles` -- an `(alpha, size)` pair."""
+        ax.clear()
+        for j, (alpha, size) in zip(shown, styles):
+            plot_subject_state(ax, fronts[j], SUBJECT_COLORS[j], alpha, size)
+
+        for axis, dim in zip(('x', 'y', 'z'), (0, 1, 2)):
+            getattr(ax, f'set_{axis}label')(labels[dim])
+            getattr(ax, f'set_{axis}lim')(bounds[:, dim])
+        ax.view_init(elev=elev, azim=azim)
+
+        handles = [Line2D([], [], color=SUBJECT_COLORS[j], marker='o', mec='black',
+                          label=SUBJECTS[datasets[j].subject])
+                  for j in shown]
+        ax.legend(handles=handles, fontsize=LABEL_SIZE, framealpha=0.9, loc='upper left')
+
+        # after the legend, so its text takes the house font too
+        plr.dress_axis(ax, tick_size=TICK_SIZE, label_size=LABEL_SIZE,
+                       num_xticks=4, num_yticks=4, num_zticks=4)
+
+    normal_style = (STATE_ALPHA['normal'], STATE_SIZE['normal'])
+
     path = Path(path or OUTPUT)
     path.parent.mkdir(parents=True, exist_ok=True)
     writer = FFMpegWriter(fps=fps, extra_args=['-vcodec', 'libx264', '-pix_fmt', 'yuv420p'])
-    reveal_frames = max(1, round(REVEAL_SECONDS * fps))
-    hold_frames   = max(1, round(HOLD_SECONDS * fps))
+    reveal_frames     = max(1, round(REVEAL_SECONDS * fps))
+    hold_frames       = max(1, round(HOLD_SECONDS * fps))
+    transition_frames = max(1, round(TRANSITION_SECONDS * fps))
     with writer.saving(fig, path, dpi=DPI):
         for i in range(len(subjects)):
-            ax.clear()
-            for j in range(i + 1):
-                plot_subject(ax, fronts[j], SUBJECT_COLORS[j])
+            shown       = range(i + 1)
+            from_styles = [normal_style] * i + [(0.0, STATE_SIZE['normal'])]
+            to_styles   = [normal_style] * (i + 1)
 
-            for axis, dim in zip(('x', 'y', 'z'), (0, 1, 2)):
-                getattr(ax, f'set_{axis}label')(ACTION_LABELS[dim])
-                getattr(ax, f'set_{axis}lim')(bounds[:, dim])
-            ax.view_init(elev=elev, azim=azim)
-
-            handles = [Line2D([], [], color=SUBJECT_COLORS[j], marker='o', mec='black',
-                              label=SUBJECTS[datasets[j].subject])
-                      for j in range(i + 1)]
-            ax.legend(handles=handles, fontsize=LABEL_SIZE, framealpha=0.9, loc='upper left')
-
-            # after the legend, so its text takes the house font too
-            plr.dress_axis(ax, tick_size=TICK_SIZE, label_size=LABEL_SIZE,
-                           num_xticks=4, num_yticks=4, num_zticks=4)
+            for frame in range(1, transition_frames + 1):
+                t = smoothstep(frame / transition_frames)
+                styles = [(fa + (ta - fa) * t, fs + (ts - fs) * t)
+                         for (fa, fs), (ta, ts) in zip(from_styles, to_styles)]
+                draw_frame(shown, styles)
+                writer.grab_frame()
 
             repeats = hold_frames if i == len(subjects) - 1 else reveal_frames
             for _ in range(repeats):
                 writer.grab_frame()
+
+        if len(subjects) >= 3:
+            prev_states, _ = HIGHLIGHT_SEQUENCE[0]
+            for states, seconds in HIGHLIGHT_SEQUENCE[1:]:
+                from_styles = [(STATE_ALPHA[s], STATE_SIZE[s]) for s in prev_states]
+                to_styles   = [(STATE_ALPHA[s], STATE_SIZE[s]) for s in states]
+
+                for frame in range(1, transition_frames + 1):
+                    t = smoothstep(frame / transition_frames)
+                    styles = [(fa + (ta - fa) * t, fs + (ts - fs) * t)
+                             for (fa, fs), (ta, ts) in zip(from_styles, to_styles)]
+                    draw_frame(range(3), styles)
+                    writer.grab_frame()
+
+                for _ in range(max(1, round(seconds * fps))):
+                    writer.grab_frame()
+
+                prev_states = states
 
     plt.close(fig)
 
