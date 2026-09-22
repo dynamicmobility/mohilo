@@ -126,10 +126,11 @@ class MethodScene(Scene):
 
         box = highlight(figure, EXOSKELETON)
         self.play(Create(box))
-        self.wait(HOLD)
+        self.wait(HOLD + 4.0)
 
         for region in (METABOLIC, COMFORT):
             self.play(Transform(box, highlight(figure, region)))
             self.wait(HOLD)
 
+        self.wait(2.7)
         self.play(FadeOut(Group(title, figure, box)))

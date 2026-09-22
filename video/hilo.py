@@ -187,6 +187,7 @@ class HiloScene(Scene):
         self.wait(0.4)
         self._scalarize(axes)
         self.wait(max(0.5, clip.duration - self.renderer.time))
+        self.wait(0.8)
 
     def _search(self, axes, star):
         """Step a dot through the noisy measurements, marking each, and onto the star.
@@ -225,6 +226,7 @@ class HiloScene(Scene):
             run_time=0.9,
         )
         self.play(FadeIn(star, scale=0.4, run_time=0.6))
+        self.wait(4.0)
         return samples
 
     def _second_objective(
@@ -292,7 +294,7 @@ class HiloScene(Scene):
         self.play(Create(sweep, run_time=0.5), FadeIn(moving_label, run_time=0.5))
         self.play(weight.animate.set_value(0.0), run_time=SWEEP_TIME)
         self.wait(0.4)
-        self.play(weight.animate.set_value(1.0), run_time=SWEEP_TIME)
+        self.play(weight.animate.set_value(1.0), run_time=SWEEP_TIME + 1.0)
 
     def _scalarized_equation(self, weight):
         """The scalarized objective, with a `w` readout driven by `weight`.

@@ -390,3 +390,30 @@ hypervolume region — so it is drawn with neutral white-filled, ink-edged
 icons (`legend_marker`, matching `validation_pareto.py`'s own
 `legend_handles` convention of `mfc='white', mec='black'` for its generic
 proxies) rather than either source's color.
+
+Last, once that whole comparison fades out, `_ordering_section` closes the
+scene on a single question: does "the front" order the same way no matter
+which objective you sort it by? `subject1` — the model, the scan
+(`raw_mu`/`nd_idx`/`cloud_colors`) and the Pareto `(predicted, measured)`
+pair — is captured off `RUNS[0]`'s own iteration of the main loop above
+rather than read back out of `panels`/`stars`/`squares`/`segments`, since
+those mobjects are already faded out by the time this section runs.
+`panel_points` rebuilds the full panel from that captured data on a fresh
+`axes` — the posterior cloud and inferred front (`front_cloud`, the same
+call the main loop makes), the stars, the squares, and the line from each
+star to its own square (`marker`/`Line`, also the same calls) — and is
+called once per side, so the left and right panels are exact duplicates
+built from identical data on identical zoomed axes (`small_front_axes`
+again, sized off the combined scan and Pareto points, at a larger
+`ZOOM_W`/`ZOOM_H` than the three-across panels earlier).
+
+What differs between the two panels is only the numbers laid over the
+non-dominated squares. `cost_ranks` is just the front's own row order, since
+`nondominated_front` already sorts ascending cost and cost is minimized, so
+row 0 *is* rank 1. `comfort_ranks` is the opposite direction — comfort is
+maximized, so its rank 1 is the largest value, `np.argsort(-front[:, 1])` —
+computed independently rather than assumed to be the reverse of the cost
+order, even though on this front it happens to be exactly that: cost and
+comfort move together here, so ranking by one is exactly ranking by the
+other backwards, and the duplicated panels are what make that visible
+without the viewer having to hold both orderings in their head at once.

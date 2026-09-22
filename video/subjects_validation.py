@@ -1,5 +1,6 @@
 """Three subjects' fronts, then their held-out validation points and the
-hypervolume those points attain.
+hypervolume those points attain, then a close look at what "ordering" a front
+even means.
 
 Draws the same panel `subjects_grid.py`'s top row does -- one subject's
 inferred front per column -- and then replays `scripts/icra/validation_pareto.py`
@@ -10,6 +11,13 @@ for the anti-Pareto actions. Only once every star and square is on screen does
 the hypervolume appear -- the Pareto region first, then morphed into the
 anti-Pareto one in place, so the shrink from one to the other is the thing a
 viewer watches happen rather than two static shapes they have to compare.
+
+Last, once that whole comparison has faded out, `_ordering_section` zooms into
+Subject 1's Pareto panel alone -- posterior cloud, stars and squares, joined
+by the same star-to-square lines as before -- drawn twice side by side, then
+numbered on top of that: by cost on the left and by comfort on the right, so
+a viewer sees that "point 1" is a different square depending on which
+objective is doing the ordering.
 """
 
 import sys
@@ -52,7 +60,15 @@ from scripts.icra.validation_pareto import (  # noqa: E402
     measured_at,
 )
 from video.front import SUBJECTS  # noqa: E402
-from video.style import AXIS_LABEL_SIZE, INK, SCENE_TITLE_SIZE, TITLE_EDGE_BUFF  # noqa: E402
+from video.style import (  # noqa: E402
+    AXIS_LABEL_SIZE,
+    BG,
+    COMFORT_COLOR,
+    COST_COLOR,
+    INK,
+    SCENE_TITLE_SIZE,
+    TITLE_EDGE_BUFF,
+)
 from video.subjects_grid import (  # noqa: E402
     HUMAN_DATA,
     NAME_LABEL_SIZE,
@@ -64,7 +80,8 @@ from video.subjects_grid import (  # noqa: E402
 TITLE = "Validation Against Held-Out Actions"
 
 TRIAL = -1        # the optimization trial whose GP is drawn, and predicts
-SCAN = 2**11       # Sobol points the front is read off
+SCAN = 2**12       # Sobol points the front is read off -- matches
+                   # `scripts/icra/human_pareto.py`'s own `SCAN`
 SEED = 95
 
 COL_X = (-4.7, 0.0, 4.7)
@@ -89,6 +106,16 @@ LEGEND_SIZE = 22
 HV_SWATCH_SIZE = 0.22
 
 HOLD = 1.2
+
+ZOOM_TITLE = "Subject 1 --- Ordering the Same Front Two Ways"
+ZOOM_LEFT_X, ZOOM_RIGHT_X = -3.3, 3.3
+ZOOM_Y = -0.2
+ZOOM_W, ZOOM_H = 5.4, 4.8
+ZOOM_PAD = 0.18
+ZOOM_PANEL_TITLE_SIZE = 28
+RANK_SIZE = 30
+RANK_OFFSET = np.array([0.08, 0.32, 0.0])   # up and slightly right of each square
+RANK_HALO = 6.0
 
 
 def subject_panel_data(run, trial=TRIAL, scan=SCAN, seed=SEED):
@@ -156,17 +183,42 @@ def hypervolume_reference(points, maximize, margin=HV_MARGIN):
     return plr.reference_point(values=measured, maximize=maximize, margin=margin)
 
 
+def nondominated_front(measured, maximize):
+    """The non-dominated subset of `measured`, `(k, 2)`, sorted ascending
+    along the first (cost) column.
+
+    Shared by `hypervolume_shape` and the ordering section below, so both read
+    the same front off the same squares. Non-domination is read in
+    maximization space, which is what `plr.get_nondominated_tol` wants (larger
+    is better in every column), so cost is not simply sorted on: `maximize`
+    says which raw columns need flipping first.
+    """
+    sign = np.where(maximize, 1.0, -1.0)
+    nd_idx = plr.get_nondominated_tol(measured * sign)
+    return measured[nd_idx[np.argsort(measured[nd_idx, 0])]]
+
+
+def rank_labels(axes, front, ranks, color, offset=RANK_OFFSET):
+    """One number per front point, `ranks[i]` beside `front[i]`, haloed
+    against `BG` so a label stays legible over the line or a square it lands
+    near."""
+    labels = VGroup()
+    for p, r in zip(front, ranks):
+        text = Tex(str(r), font_size=RANK_SIZE, color=color)
+        text.move_to(axes.c2p(*p) + offset)
+        text.set_stroke(BG, width=RANK_HALO, background=True)
+        labels.add(text)
+    return labels
+
+
 def hypervolume_shape(measured, maximize, ref, axes, color):
     """One source's hypervolume region, shaded on `axes`.
 
     `measured` is that source's `(k, 2)` raw squares alone -- not the GP's
     scan -- so this reads what was actually attained rather than what the
-    model believes. Non-domination is read in maximization space, which is
-    what `plr.get_nondominated_tol` wants (larger is better in every column),
-    so cost is not simply sorted on: `maximize` (`model.objectives.maximize`)
-    says which raw columns need flipping first. `ref` is shared with the other
-    source on the same subject -- see `hypervolume_reference` -- so it is
-    taken as an argument rather than read off `measured` alone.
+    model believes. `ref` is shared with the other source on the same subject
+    -- see `hypervolume_reference` -- so it is taken as an argument rather
+    than read off `measured` alone.
 
     The returned `Polygon` is the staircase union of the axis-aligned
     rectangles each non-dominated square opens toward `ref`, which is the
@@ -174,9 +226,7 @@ def hypervolume_shape(measured, maximize, ref, axes, color):
     squares would enclose -- drawn as a shaded region a viewer can compare
     between sources and subjects by eye.
     """
-    sign = np.where(maximize, 1.0, -1.0)
-    nd_idx = plr.get_nondominated_tol(measured * sign)
-    front = measured[nd_idx[np.argsort(measured[nd_idx, 0])]]
+    front = nondominated_front(measured, maximize)
 
     verts = [(front[0, 0], ref[1]), tuple(front[0])]
     for x, y in front[1:]:
@@ -246,9 +296,16 @@ class SubjectValidationScene(Scene):
         hv_areas = {source: VGroup() for source in SOURCE_COLORS}
         colors = {source: ManimColor(hex_) for source, hex_ in SOURCE_COLORS.items()}
 
+        subject1 = None    # `RUNS[0]`'s panel data, kept for the ordering
+                           # section below, which re-draws the same posterior
+                           # cloud and Pareto points rather than reusing any
+                           # of the `panels` mobjects (those get faded out)
+
         for run, x in zip(RUNS, COL_X):
             name, model, raw_mu, nd_idx, cloud_colors = subject_panel_data(run)
             points = validation_points(run, model)
+            if run == RUNS[0]:
+                subject1 = (model, raw_mu, nd_idx, cloud_colors, points["pareto"])
 
             f_axes, f_labels = small_front_axes(
                 (x, FRONT_Y),
@@ -295,3 +352,82 @@ class SubjectValidationScene(Scene):
         self.play(FadeOut(VGroup(title, key, panels, *squares.values(),
                                  *stars.values(), *segments.values(),
                                  hv_areas[first])))
+
+        self._ordering_section(*subject1, colors["pareto"])
+
+    def _ordering_section(self, model, raw_mu, nd_idx, cloud_colors, pareto, color):
+        """Subject 1's Pareto panel -- posterior cloud, stars, squares and the
+        lines joining each star to its own square -- duplicated left and
+        right, then numbered by cost on the left and by comfort on the right,
+        so the same squares read as two different rankings depending on which
+        axis you sort by.
+        """
+        predicted, measured = pareto
+        front = nondominated_front(measured, model.objectives.maximize)
+
+        # Front is already sorted ascending cost, so "1" (best, since cost is
+        # minimized) is just its row order. Comfort is maximized, so its best
+        # is the largest value; `comfort_ranks[i]` is where row `i` falls in
+        # that descending order, independent of the cost ordering.
+        cost_ranks = np.arange(1, len(front) + 1)
+        comfort_ranks = np.empty(len(front), dtype=int)
+        comfort_ranks[np.argsort(-front[:, 1])] = np.arange(1, len(front) + 1)
+
+        section_title = Tex(ZOOM_TITLE, font_size=SCENE_TITLE_SIZE, color=INK)
+        section_title.to_edge(UP, buff=TITLE_EDGE_BUFF)
+        self.play(Write(section_title, run_time=1.0))
+
+        combined = np.vstack([raw_mu, predicted, measured])
+        left_axes, left_labels = small_front_axes(
+            (ZOOM_LEFT_X, ZOOM_Y), combined, width=ZOOM_W, height=ZOOM_H, pad=ZOOM_PAD)
+        right_axes, right_labels = small_front_axes(
+            (ZOOM_RIGHT_X, ZOOM_Y), combined, width=ZOOM_W, height=ZOOM_H, pad=ZOOM_PAD)
+        left_title = Tex("Ordered by Metabolic Cost", font_size=ZOOM_PANEL_TITLE_SIZE, color=INK)
+        left_title.next_to(left_axes, UP, buff=0.25)
+        right_title = Tex("Ordered by Comfort", font_size=ZOOM_PANEL_TITLE_SIZE, color=INK)
+        right_title.next_to(right_axes, UP, buff=0.25)
+
+        self.play(Create(VGroup(left_axes, left_labels, right_axes, right_labels)),
+                  FadeIn(left_title, right_title))
+
+        def panel_points(axes):
+            """That axes' posterior cloud, stars, squares and star-to-square
+            lines -- the same four groups the main section draws, rebuilt
+            here since `panels`/`stars`/`squares`/`segments` there were
+            already faded out."""
+            cloud, cloud_line, cloud_markers = front_cloud(axes, raw_mu, nd_idx, cloud_colors)
+            squares, stars, segments = VGroup(), VGroup(), VGroup()
+            for p, m in zip(predicted, measured):
+                p2, m2 = axes.c2p(*p), axes.c2p(*m)
+                squares.add(marker("measured", m2, color, SQUARE_SIZE))
+                stars.add(marker("predicted", p2, color, STAR_SIZE))
+                segments.add(Line(p2, m2, color=color, stroke_width=LINE_STROKE).set_z_index(-1))
+            return VGroup(cloud, cloud_line, cloud_markers), squares, stars, segments
+
+        left_cloud, left_squares, left_stars, left_segments = panel_points(left_axes)
+        right_cloud, right_squares, right_stars, right_segments = panel_points(right_axes)
+
+        self.play(FadeIn(left_cloud), FadeIn(right_cloud))
+        self.wait(HOLD)
+        self.play(FadeIn(left_stars), FadeIn(right_stars))
+        self.wait(HOLD)
+        self.play(FadeIn(left_squares), Create(left_segments),
+                  FadeIn(right_squares), Create(right_segments))
+        self.wait(HOLD)
+
+        # Each panel's numbers take the color of the objective doing the
+        # ordering -- `COST_COLOR`/`COMFORT_COLOR` are the same ones
+        # `small_front_axes` already colored that panel's own axis with --
+        # rather than the Pareto source color the markers use.
+        cost_labels = rank_labels(left_axes, front, cost_ranks, COST_COLOR)
+        comfort_labels = rank_labels(right_axes, front, comfort_ranks, COMFORT_COLOR)
+
+        self.play(FadeIn(cost_labels))
+        self.wait(HOLD)
+        self.play(FadeIn(comfort_labels))
+        self.wait(2 * HOLD)
+
+        self.play(FadeOut(VGroup(
+            section_title, left_axes, left_labels, left_title, left_cloud, left_squares,
+            left_stars, left_segments, cost_labels, right_axes, right_labels, right_title,
+            right_cloud, right_squares, right_stars, right_segments, comfort_labels)))

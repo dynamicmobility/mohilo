@@ -12,6 +12,7 @@ from pathlib import Path
 from manim import (
     DOWN,
     LEFT,
+    RIGHT,
     UP,
     Arrow,
     Create,
@@ -20,6 +21,7 @@ from manim import (
     FadeIn,
     FadeOut,
     GrowArrow,
+    Line,
     MathTex,
     Scene,
     Tex,
@@ -61,13 +63,23 @@ from video.style import (  # noqa: E402
 
 TITLE = "Pareto Optimality"
 
-# The two controllers compared on the front, both between the single-objective
-# optima so that neither dominates the other.
-A1, A2 = 0.34, 0.66
+# The two controllers compared on the front, placed at its two ends so the
+# gain/loss legs span the whole set rather than an interior slice of it.
+A1, A2 = front_actions()
+
+# The red segment marking the Pareto set on each left-column plot's action
+# axis, and the font size of its one label -- matching POINTER_LABEL_SIZE
+# below, since the two labels name the same set in the two spaces.
+SET_COLOR = LOSS_COLOR
+SET_LINE_WIDTH = 6.0
+SET_LABEL_SIZE = 36
 
 # Where the label naming the front sits, in objective units. Its arrow lands on
-# the middle of the front, which is computed rather than placed.
-POINTER_AT = (0.47, 0.72)
+# the middle of the front, which is computed rather than placed. Pushed further
+# up and left of the front's actual midpoint (0.53, 0.81) so the connecting
+# arrow has room to be visible.
+POINTER_AT = (0.75, 0.5)
+POINTER_LABEL_SIZE = 36
 
 # The dotted legs between the two controllers.
 LEG_DASH = 0.07
@@ -112,23 +124,51 @@ class ParetoScene(Scene):
             Create(landscape, run_time=1.6),
         )
         self.wait(0.4)
+        self.wait(5.7)
 
-        self.play(Create(front, run_time=1.2))
+        metabolic_set = self._pareto_set(metabolic_axes)
+        comfort_set, set_label = self._pareto_set(comfort_axes, label=True)
+        self.play(
+            Create(front, run_time=1.2),
+            Create(metabolic_set, run_time=1.2),
+            Create(comfort_set, run_time=1.2),
+            Write(set_label, run_time=0.8),
+        )
         self.play(GrowArrow(pointer, run_time=0.6), Write(pointer_label, run_time=0.7))
         self.wait(0.4)
 
-        first = self._mark(A1, r"\bm{a}_1", metabolic_axes, comfort_axes, front_axes)
+        first = self._mark(A1, r"\bm{a}_1", LEFT, metabolic_axes, comfort_axes, front_axes)
         self.wait(0.3)
         legs = self._tradeoff(front_axes)
-        second = self._mark(A2, r"\bm{a}_2", metabolic_axes, comfort_axes, front_axes)
+        second = self._mark(A2, r"\bm{a}_2", RIGHT, metabolic_axes, comfort_axes, front_axes)
         self.wait(1.0)
 
         # What `MogpScene` opens on: the axes, their labels, the true curves and the
         # attainable landscape, and nothing else. Everything this scene drew over
         # them goes, so the two scenes cut together with no redraw.
         self.play(FadeOut(VGroup(title, front, pointer, pointer_label,
+                                 metabolic_set, comfort_set, set_label,
                                  first, legs, second), run_time=0.8))
         self.wait(0.4)
+
+    def _pareto_set(self, axes, label=False):
+        """The Pareto set's extent on one left-column plot's action axis, in red.
+
+        `front_actions()` is the same action range `_front_curves` draws the
+        bright arc over, so the segment lands under exactly that stretch of the
+        curve above it. Labeled once, under whichever axis the caller marks,
+        since the two plots share one action axis.
+        """
+        start, end = front_actions()
+        line = Line(
+            axes.c2p(start, 0.0), axes.c2p(end, 0.0),
+            color=SET_COLOR, stroke_width=SET_LINE_WIDTH,
+        )
+        if not label:
+            return line
+        text = Tex(r"Pareto set $\mathcal{P}$", font_size=SET_LABEL_SIZE, color=SET_COLOR)
+        text.next_to(line, DOWN, buff=0.15)
+        return line, text
 
     def _front_curves(self, axes):
         """The whole attainable landscape, and the front that is drawn over it.
@@ -159,7 +199,7 @@ class ParetoScene(Scene):
         The tip is the front's own midpoint in action, so it follows the curve if
         either optimum moves rather than being a placed coordinate.
         """
-        label = MathTex(r"\mathcal{F}", font_size=AXIS_LABEL_SIZE, color=INK)
+        label = Tex(r"Pareto Front $\mathcal{F}$", font_size=POINTER_LABEL_SIZE, color=INK)
         label.move_to(axes.c2p(*POINTER_AT))
         middle = sum(front_actions()) / 2.0
         arrow = Arrow(
@@ -172,13 +212,17 @@ class ParetoScene(Scene):
         )
         return arrow, label
 
-    def _mark(self, action, label, metabolic_axes, comfort_axes, front_axes):
+    def _mark(self, action, label, side, metabolic_axes, comfort_axes, front_axes):
         """One controller, drawn in all three plots at once, and returned.
 
         The two left plots share an x axis, so a single dashed line at `action`
         crosses both; the point it names in objective space is the pair of values
-        the two dots read off. Returned because `MogpScene` opens on the bare
-        axes, so everything drawn over them here is cleared before the cut.
+        the two dots read off. `side` (`LEFT` for a_1, `RIGHT` for a_2, since the
+        two are now the front's two ends) puts the action label above the shared
+        axis and to that side of the drop line, clear of the Pareto set's red
+        segment and its label sitting below the axis. Returned because
+        `MogpScene` opens on the bare axes, so everything drawn over them here is
+        cleared before the cut.
         """
 
         drop = DashedLine(
@@ -193,7 +237,7 @@ class ParetoScene(Scene):
             Dot(comfort_axes.c2p(action, comfort(action)), radius=0.08, color=INK),
         )
         action_text = MathTex(label, font_size=AXIS_LABEL_SIZE, color=INK)
-        action_text.next_to(comfort_axes.c2p(action, 0.0), DOWN, buff=0.15)
+        action_text.next_to(comfort_axes.c2p(action, 0.0), UP + side, buff=0.12)
 
         point = Dot(front_axes.c2p(cost(action), comfort(action)), radius=0.09, color=INK)
         point_text = MathTex(label, font_size=AXIS_LABEL_SIZE, color=INK)
