@@ -53,7 +53,7 @@ HIGHLIGHT_STROKE = 5.0
 HIGHLIGHT_PAD = 0.08
 
 HOLD = 1.2
-
+END_HOLD = 5.0
 
 def inkscape():
     """The Inkscape executable, from the PATH or from the macOS app bundle."""
@@ -132,5 +132,5 @@ class MethodScene(Scene):
             self.play(Transform(box, highlight(figure, region)))
             self.wait(HOLD)
 
-        self.wait(2.7)
+        self.wait(END_HOLD)
         self.play(FadeOut(Group(title, figure, box)))
