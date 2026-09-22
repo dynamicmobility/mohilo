@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCENES=(HiloScene ParetoScene MogpScene ValidationScene)
+SCENES=(HiloScene ParetoScene MogpScene ValidationScene MethodScene FrontScene ParetoSetsScene SubjectsGridScene TradeoffScene)
 # A first argument that is a flag names no scene, so it applies to all of them.
 if [[ $# -gt 0 && $1 != -* ]]; then
   SCENES=("$1")
@@ -17,6 +17,11 @@ for scene in "${SCENES[@]}"; do
     ParetoScene) file=video/pareto.py ;;
     MogpScene) file=video/mogp.py ;;
     ValidationScene) file=video/validation.py ;;
+    MethodScene) file=video/method.py ;;
+    FrontScene) file=video/front.py ;;
+    ParetoSetsScene) file=video/pareto_sets.py ;;
+    SubjectsGridScene) file=video/subjects_grid.py ;;
+    TradeoffScene) file=video/tradeoff.py ;;
     *) echo "unknown scene: $scene" >&2; exit 1 ;;
   esac
   manim -qh ${1+"$@"} "$file" "$scene"
