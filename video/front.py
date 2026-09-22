@@ -63,7 +63,7 @@ SUBJECTS = {"MB02": "Subject 1", "MB04": "Subject 2", "MB05": "Subject 3"}
 
 # The scan the front is read off. manim draws every point as its own vector
 # object, so this is two powers below the gif's 2^12 and still reads as a cloud.
-SCAN = 2**11
+SCAN = 2**12
 SEED = 95
 
 ACTION_LABELS = ("Hip Flexion Scale", "Hip Extension Scale", "Delay")

@@ -1,4 +1,4 @@
-"""Each subject's last trial: front and set, on black, for the video.
+"""Each subject's last trial: front and set, for the video.
 
 Three columns, one per subject's most recent GP, plus the delay-color key on
 the right — the same panels `human_pareto.py` draws for one subject across
@@ -34,46 +34,7 @@ SCAN = 2**14      # Sobol points the front is read off
 SEED = 95
 DPI  = 300
 
-BG    = '#000000'   # figure background
-INK   = '#F2F2F2'   # text, ticks, connecting lines
-MUTED = '#5A6672'   # spines, grid, 3D panes
-
-
-def darken(ax):
-    """Recolor one already-`dress_axis`-ed axes for a black figure.
-
-    `dress_axis` is the house style for a *light* figure, so this runs after
-    it rather than replacing it: every color it set gets overridden here, and
-    everything else — font, tick count, label size — is left alone. A plotted
-    line defaults to black (`plot_pareto`'s connecting line, `plot_pareto_actions`'
-    path), invisible on this background, so those are recolored too.
-    """
-    ax.set_facecolor('white')
-    is_3d = ax.name == '3d'
-    axes = (ax.xaxis, ax.yaxis, ax.zaxis) if is_3d else (ax.xaxis, ax.yaxis)
-
-    for axis in axes:
-        axis.label.set_color(INK)
-        if is_3d:
-            axis.pane.set_facecolor((0, 0, 0, 0))
-            axis.pane.set_edgecolor(MUTED)
-            axis.line.set_color(MUTED)
-            axis._axinfo['grid']['color'] = (1, 1, 1, 0.12)
-        ax.tick_params(axis=axis.axis_name, colors=MUTED, labelcolor=INK)
-
-    if not is_3d:
-        for side in ('top', 'right'):
-            ax.spines[side].set_visible(False)
-        for side in ('left', 'bottom'):
-            ax.spines[side].set_color(MUTED)
-        ax.grid(True, color=INK, alpha=0.12, lw=0.8)
-
-    ax.title.set_color(INK)
-    for line in ax.get_lines():
-        if line.get_color() in ('black', '#000000', (0.0, 0.0, 0.0, 1.0)):
-            line.set_color(INK)
-
-    return ax
+BG = '#FFFFFF'   # figure background
 
 
 def make_figure(
@@ -139,8 +100,6 @@ def make_figure(
                               num_yticks=6, title_size=30)
         a_ax = plr.dress_axis(a_ax, tick_size=20, label_size=22, num_xticks=4, num_yticks=4,
                               num_zticks=4)
-        darken(p_ax)
-        darken(a_ax)
 
     # spacing between panels; the saved image is cropped to what is drawn
     fig.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.95,
@@ -155,8 +114,6 @@ def make_figure(
     key         = grid[:, -1].subgridspec(n_slices, 1, hspace=SLICE_GAP * n_slices / room)
     slice_axes  = [fig.add_subplot(key[i, 0]) for i in range(n_slices)]
     plot_color_slices(slice_axes, model.objectives)
-    for ax in slice_axes:
-        darken(ax)
 
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=dpi, bbox_inches=content_bbox(fig), facecolor=BG)

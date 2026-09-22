@@ -112,20 +112,23 @@ def subject_front_and_set(name, scan=SCAN, seed=SEED):
     return (SUBJECTS[name], X, raw_mu, nd_idx, colors)
 
 
-def small_front_axes(center, raw_mu):
+def small_front_axes(center, raw_mu, width=FRONT_W, height=FRONT_H, pad=0.08):
     """A front-space axes box, sized for one grid cell, with numbered ticks.
 
     Sized off the whole scan `raw_mu`, not just the front, since the cloud is
-    drawn too and the box must hold all of it.
+    drawn too and the box must hold all of it. `width`, `height` and `pad`
+    default to this module's own grid-cell geometry; a caller with a
+    differently sized panel, such as `subjects_validation.py`'s single-row
+    layout, passes its own.
     """
-    low, high = padded_limits(raw_mu, 0.08)
+    low, high = padded_limits(raw_mu, pad)
     x_ticks, x_decimals = nice_ticks(low[0], high[0], n=N_TICKS)
     y_ticks, y_decimals = nice_ticks(low[1], high[1], n=N_TICKS)
     axes = Axes(
         x_range=[low[0], high[0], x_ticks[1] - x_ticks[0]],
         y_range=[low[1], high[1], y_ticks[1] - y_ticks[0]],
-        x_length=FRONT_W,
-        y_length=FRONT_H,
+        x_length=width,
+        y_length=height,
         axis_config={**AXIS_CONFIG, "include_ticks": True},
     ).move_to([center[0], center[1], 0])
     axes.x_axis.set_color(COST_COLOR)

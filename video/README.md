@@ -6,6 +6,13 @@ Manim scenes for the paper. Rendered with Manim Community v0.21.0 in the
 it draws measured curves, so it imports `scripts.icra.final_dim` — and through it
 `pypolar`, `pandas` and `matplotlib` — rather than reading the CSVs itself.
 
+Two videos here are not manim scenes: `hilo/analysis/plot_fit_video.py` and
+`hilo/analysis/plot_actions_video.py` reach into `style.py` from outside
+`video/` to borrow its palette, so a plain matplotlib animation still matches
+these scenes' look. `subject_actions.py`'s `SubjectActionsScene` is a manim
+scene drawing the same thing the second of those does. See
+[Subject videos](#subject-videos) below.
+
 ```
 video/
 ├── style.py        # palette, box geometry, manim config, box/arrow helpers
@@ -257,3 +264,93 @@ directories are `objs1`..`objs4` and each holds that many measured objectives
 (`compare_objs.py` writes `objs{NUM_OBJS}`), so `final_obj.py` labels the same four
 lines `m = 1..4`. The numbers live in one place, `Ablation.labels`, if that needs to
 change.
+
+## Subject videos
+
+`hilo/analysis/plot_fit_video.py` animates one subject's run trial by trial: the
+front panel is objective space (metabolic cost against comfort), the pareto-set
+panel beside it is the non-dominated actions in the three-dimensional action
+space. It is matplotlib, not manim — every posterior comes from `pypolar` the
+same way the scenes above read it, but the panels themselves are `plr.plot_pareto`
+and `plr.plot_pareto_actions`, dressed with `plr.dress_axis`. It reuses
+`hilo/analysis/plot_fit_gif.py`'s posterior-reading and frame-drawing (`draw_frame`,
+`measured_pairs`, `padded_limits`) and writes an mp4 through ffmpeg where that
+script writes a gif through Pillow.
+
+It matches this package's videos in two ways rather than one. The figure is sized
+`(12.8, 7.2)` at 150 dpi, 1920x1080, the same 16:9 the manim scenes render at, and
+it imports `style.BG`, `style.INK`, `style.COST_COLOR` and `style.COMFORT_COLOR`
+directly rather than choosing its own palette — the white background and dark ink
+are `style.py`'s, and the front panel's axes are colored cost/comfort exactly as
+`front_axes` colors them in `pareto.py` and `mogp.py`. The title is set through
+matplotlib in the same Computer Modern (`cmr10`/`cm`) family `dress_axis` already
+uses elsewhere in `pypolar`, sized and colored to read as a manim scene title
+even though nothing here is a `Tex` mobject.
+
+Run it as `python -m hilo.analysis.plot_fit_video [dataset] --output ... --title
+... --trial-lo ... --trial-hi ...`; trials are given 0-indexed but every frame is
+labeled 1-indexed (`Trial {trial - trial_lo + 1}`), and the last frame holds for
+`HOLD_SECONDS` before the video ends.
+
+`hilo/analysis/plot_actions_video.py` is the same idea applied to
+`scripts/icra/subject_actions.py`'s figure instead of `plot_fit_gif.py`'s: every
+subject's inferred Pareto set, as one 3D panel of actions in the units they were
+commanded in. It reuses that script's `pareto_actions`, `plot_subject` and
+`SUBJECT_COLORS` (Okabe-Ito, one per subject) rather than choosing its own
+per-subject palette, and reads each subject's display name from
+`scripts/icra/subjects_pareto.py`'s `SUBJECTS` mapping. Where `plot_fit_video.py`
+animates one run across trials, this one animates across *subjects*: each is
+revealed in turn, its own legend entry appearing with it, and the fully-revealed
+frame — every subject drawn together — is what holds at the end. `REVEAL_SECONDS`
+sets how long each new subject holds before the next is added and `HOLD_SECONDS`
+the final hold; `fps` only sets the granularity those seconds are split into
+frames at, since the reveal is driven by wall-clock time, not frame count.
+
+Same figure sizing and title treatment as `plot_fit_video.py` — `(12.8, 7.2)` at
+150 dpi, `style.BG`/`style.INK`, a matplotlib `cmr10`/`cm` title — but no
+per-axis coloring, since these are action dimensions rather than the
+cost/comfort objectives `_colorize_objectives` exists for.
+
+`subject_actions.py`'s `SubjectActionsScene` is a manim scene drawing the same
+thing `plot_actions_video.py` writes as an mp4: the same `pareto_actions` fronts,
+the same `SUBJECT_COLORS`, the same `SUBJECTS` display names, and the same
+`TRIAL`/`SCAN`/`SEED`, so the two draw the same points. It is not that script
+adapted into a manim `ThreeDScene` — like `front.py` and `pareto_sets.py`, the
+3D box is a fixed parallel projection built in an unrotated frame and turned
+into the view by `orient`/`project`, so this scene reuses `front.py`'s
+`action_axes`, `action_box_faces` and `action_ticks` directly. Its own
+`action_labels` is a copy of `front.py`'s, parameterized on the label text,
+because `plot_actions_video.py` draws `scripts/icra/human_pareto.py`'s
+abbreviated action names where `front.py` spells them out in full. Each
+subject's markers fade in with its legend row, one subject at a time, ending
+on the same fully-revealed frame the mp4 holds on.
+
+## SubjectValidationScene
+
+`subjects_validation.py` is the manim counterpart of
+`scripts/icra/validation_pareto.py`: MB02, MB04 and MB05's inferred fronts,
+one per column exactly as `subjects_grid.py` draws its top row, followed by
+that script's own validation replay drawn as an animation instead of one
+static figure. `subject_panel_data` reads each subject's `model` the same way
+`plot_validation` does — `dataset.get_model(TRIAL)` at `TRIAL = -1` — so the
+front drawn in the panel and the predictions read off `model` for the
+validation points cannot disagree. `validation_points` calls that script's own
+`front_order` and `measured_at` rather than copies of them, so a validation
+action counts as a match to a measurement under the same `MATCH_TOL` the
+static figure uses.
+
+The reveal is in four beats, one source at a time, run once across all three
+panels together rather than column by column: every Pareto-sourced validation
+action's prediction (a star) first, then every one of its measurements (a
+square) together with the line joining it to its own star; then the same two
+beats again for the anti-Pareto actions. Stars before squares is deliberate —
+it shows what the GP thought would happen before showing what was actually
+measured — and both markers of one kind land together across subjects so the
+video never singles one panel out. Colors are `SOURCE_COLORS['pareto']` and
+`SOURCE_COLORS['antipareto']`, the same star/square/joining-line
+`validation_pareto.py`'s `plot_validation` draws in one axes call, staged here
+as four animations instead.
+`small_front_axes` (imported from `subjects_grid.py`, now taking optional
+`width`/`height`/`pad`) is sized off the whole scan **and** every validation
+point together, not the scan alone, since a validation measurement can fall
+outside the region the posterior scan covers.

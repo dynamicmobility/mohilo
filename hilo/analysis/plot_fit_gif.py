@@ -20,7 +20,7 @@ import pypolar as plr
 DATASET = Path('hilo/output/experiments/Aug28_Neil/MT01.json')
 OUTPUT  = Path('hilo/output/front_samples.gif')
 
-SCAN       = 2**12      # Sobol points the front is read off
+SCAN       = 2**14      # Sobol points the front is read off
 SEED       = 95
 FPS        = 1.5
 DPI        = 120
@@ -78,11 +78,16 @@ def draw_frame(p_ax, a_ax, X, mu, raw_mu, measured, names, mogp: plr.DecoupledMO
     """
     nd_idx = front_order(mu, raw_mu)
     colors = mogp.objectives.xtransform(X)
+    # each axis label states which way that objective is optimized, the same
+    # convention `human_pareto.py`'s own hardcoded labels follow
+    objective = [f'{name} ({"$\\downarrow$" if not o.maximize else "$\\uparrow$"})'
+                for name, o in zip(names, mogp.objectives)]
     p_ax = plr.plot_pareto(
         ax                      = p_ax,
         pareto                  = raw_mu,
         nd_idx                  = nd_idx,
         colors                  = colors,
+        objective               = objective,
         connect                 = True,
         show_dominated          = True,
         dominated_alpha         = 0.4,
