@@ -26,19 +26,19 @@ from manim import (
 
 from video.objectives import CURVE_Y_MAX
 
-# Palette: light ink on black, one color per objective, one accent for the optimum,
+# Palette: dark ink on white, one color per objective, one accent for the optimum,
 # and a green/red pair kept free to mean gain and loss.
-BG = ManimColor("#000000")
-INK = ManimColor("#F2F2F2")
-BOX_FILL = ManimColor("#12171D")
+BG = ManimColor("#FFFFFF")
+INK = ManimColor("#0D0D0D")
+BOX_FILL = ManimColor("#EDE8E2")
 BOX_STROKE = ManimColor("#8AA0B4")
 ARROW_COLOR = ManimColor("#C7D3DE")
-COST_COLOR = ManimColor("#4CC9F0")
-COMFORT_COLOR = ManimColor("#C08CF5")
-STAR_COLOR = ManimColor("#FFB703")
+COST_COLOR = ManimColor("#0F7DA8")
+COMFORT_COLOR = ManimColor("#8A4FD6")
+STAR_COLOR = ManimColor("#B87A00")
 GAIN_COLOR = ManimColor("#4FD17A")
 LOSS_COLOR = ManimColor("#F25F5C")
-SAMPLE_COLOR = ManimColor("#F2F2F2")
+SAMPLE_COLOR = ManimColor("#0D0D0D")
 DROP_COLOR = ManimColor("#6E7B87")
 
 SCENE_TITLE_SIZE = 54

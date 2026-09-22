@@ -126,8 +126,8 @@ NUMBER_SIZE = 22
 
 CURVE_STROKE = 4.0
 NUM_DASHES = 26
-# matplotlib's 0.12 was read on white; a band needs a little more than that on black.
-BAND_OPACITY = 0.15
+# Matches matplotlib's own band opacity, now that this scene is on white too.
+BAND_OPACITY = 0.12
 
 # Legend geometry. The block is built about the origin and moved as a whole, so the
 # wide row labels do not pull it off center.

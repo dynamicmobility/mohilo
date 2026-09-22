@@ -34,7 +34,6 @@ import pypolar as plr  # noqa: E402
 from hilo.analysis.plot_fit_gif import front_order, padded_limits  # noqa: E402
 from video.front import (  # noqa: E402
     ACTION_LABELS,
-    COLOR_LIFT,
     FRONT_RADIUS,
     FRONT_STROKE,
     SUBJECTS,
@@ -95,8 +94,8 @@ def subject_front_and_set(name, scan=SCAN, seed=SEED):
     `nd_idx` are the front's indices into both, ordered along the first
     objective by `front_order`; `colors` are `(n, 3)`, one action-derived RGB
     per scanned point — the same convention `scripts/icra/human_pareto.py`
-    colors a run by, lifted for visibility on black the way every other scene
-    here lifts it. Returning the whole scan rather than just the front is what
+    colors a run by, with no lift, matching its colors exactly. Returning the
+    whole scan rather than just the front is what
     lets a caller draw every point `human_pareto.py` does, dominated ones
     included, not only the ones that survive to the front.
     """
@@ -108,8 +107,7 @@ def subject_front_and_set(name, scan=SCAN, seed=SEED):
     raw_mu = mogp.posterior_at(X, raw=True)[0]
     nd_idx = front_order(mu, raw_mu)
 
-    colors = np.clip(COLOR_LIFT + (1 - COLOR_LIFT) * mogp.objectives.xtransform(X),
-                     0.0, 1.0)
+    colors = np.clip(mogp.objectives.xtransform(X), 0.0, 1.0)
 
     return (SUBJECTS[name], X, raw_mu, nd_idx, colors)
 

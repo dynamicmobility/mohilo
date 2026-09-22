@@ -98,8 +98,8 @@ FRONT_STROKE = 2.5
 PATH_STROKE = 3.0
 
 # An action is drawn as its own RGB, so a point's color says where in the action
-# box it sits. Raw, that is black at the box's origin; the lift keeps it visible.
-COLOR_LIFT = 0.35
+# box it sits -- the same convention `scripts/icra/human_pareto.py` uses, and
+# with no lift, matching its colors exactly.
 
 STEP_TIME = 0.45
 HOLD = 1.0
@@ -158,8 +158,7 @@ def load_run(path=DATASET, scan=SCAN, seed=SEED):
         frames.append((raw_mu, front_order(mu, raw_mu)))
 
     colors = models[-1].objectives.xtransform(X)
-    return (dataset.name, trials, X,
-            np.clip(COLOR_LIFT + (1 - COLOR_LIFT) * colors, 0.0, 1.0), frames)
+    return (dataset.name, trials, X, np.clip(colors, 0.0, 1.0), frames)
 
 
 def nice_ticks(low, high, n=N_TICKS):

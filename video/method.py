@@ -107,7 +107,7 @@ def highlight(figure, region):
 
 
 class MethodScene(Scene):
-    """The method figure on black, with one box visiting the exoskeleton and
+    """The method figure, with one box visiting the exoskeleton and
     then each of the two objectives it is measured on."""
 
     def construct(self):

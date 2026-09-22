@@ -10,7 +10,7 @@ against each other. Every controller measured gives a noisy reading of *both*
 objectives at the same action; after each one the repo's own `DecoupledMOGP` is
 refit and its posterior redrawn, so the band narrows and the front it predicts
 settles onto the true one. The posterior over the action is drawn in `INK` and the
-front it predicts in `LOSS_COLOR`, against the true front in white; the objectives
+front it predicts in `LOSS_COLOR`, against the true front in `INK`; the objectives
 themselves stay in their own colors.
 """
 
