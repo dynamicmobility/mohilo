@@ -10,8 +10,9 @@ against each other. Every controller measured gives a noisy reading of *both*
 objectives at the same action; after each one the repo's own `DecoupledMOGP` is
 refit and its posterior redrawn, so the band narrows and the front it predicts
 settles onto the true one. The posterior over the action is drawn in `INK` and the
-front it predicts in `LOSS_COLOR`, against the true front in `INK`; the objectives
-themselves stay in their own colors.
+front it predicts as dots graded from `COST_COLOR` to `COMFORT_COLOR` along the
+predicted ordering, against the true front in `INK`; the objectives themselves
+stay in their own colors.
 """
 
 import sys
@@ -23,6 +24,7 @@ import torch
 from manim import (
     DOWN,
     UP,
+    Arrow,
     Create,
     DashedVMobject,
     Dot,
@@ -34,7 +36,6 @@ from manim import (
     Tex,
     Transform,
     VGroup,
-    VMobject,
     Write,
 )
 
@@ -59,7 +60,6 @@ from video.style import (  # noqa: E402
     COMFORT_COLOR,
     COMFORT_Y,
     COST_COLOR,
-    CURVE_STROKE,
     DROP_COLOR,
     GAIN_COLOR,
     INK,
@@ -86,7 +86,7 @@ TITLE_LINE_BUFF = 0.15
 # underestimate -- and because an acquisition scores against measurements.
 N_POINTS = 10
 N_SEED = 3
-SAMPLE_SEED = 1
+SAMPLE_SEED = 2
 
 # The acquisition: qLogNParEGO draws a fresh random Chebyshev scalarization of the
 # two objectives per call and runs noisy log-EI on it, so a different corner of the
@@ -124,6 +124,19 @@ TRUE_FRONT_OPACITY = 0.35
 MEAN_STROKE = 3.5
 MEAN_DASH = 0.1
 DOT_RADIUS = 0.075
+FRONT_DOT_RADIUS = 0.06
+
+# The estimated Pareto set, marked on the action axes the same way `ParetoScene`
+# marks the true one.
+SET_COLOR = LOSS_COLOR
+SET_LINE_WIDTH = 6.0
+SET_LABEL_SIZE = 36
+
+# The caption naming the estimated front, placed and pointed the same way
+# `ParetoScene` names the true one -- static, since it captions the panel rather
+# than tracking dots that move fit to fit.
+POINTER_AT = (0.75, 0.5)
+POINTER_LABEL_SIZE = 36
 
 GRID = np.linspace(*CURVE_X_RANGE, GRID_POINTS)
 COLORS = (COST_COLOR, COMFORT_COLOR)
@@ -230,6 +243,7 @@ class MogpScene(Scene):
 
         gp = fit(actions, values)
         drawn = self._draw_fit(axes, front_axes, gp, None)
+        self.play(Write(self._labels(comfort_axes, front_axes), run_time=0.8))
         query = None
 
         for step in range(N_POINTS - N_SEED):
@@ -279,7 +293,8 @@ class MogpScene(Scene):
         )
 
     def _draw_fit(self, axes, front_axes, gp, drawn):
-        """The bands, means and predicted front of one fit, morphed from the last.
+        """The bands, means, predicted front and estimated Pareto set of one fit,
+        morphed from the last.
 
         Returns what to pass back as `drawn` at the next fit; `None` means nothing
         is on screen yet, so everything is created rather than transformed.
@@ -289,19 +304,21 @@ class MogpScene(Scene):
                          for i, (ax, color) in enumerate(zip(axes, COLORS))))
         means = VGroup(*(self._mean(ax, mu[:, i]) for i, ax in enumerate(axes)))
         predicted = self._front(front_axes, mu, front)
+        sets = VGroup(*(self._pareto_set(ax, front) for ax in axes))
 
         if drawn is None:
             self.play(FadeIn(bands, run_time=0.8), Create(means, run_time=0.8),
-                      Create(predicted, run_time=0.8))
+                      Create(predicted, run_time=0.8), Create(sets, run_time=0.8))
         else:
             self.play(
                 Transform(drawn[0], bands, run_time=0.8),
                 ReplacementTransform(drawn[1], means, run_time=0.8),
                 ReplacementTransform(drawn[2], predicted, run_time=0.8),
+                ReplacementTransform(drawn[3], sets, run_time=0.8),
             )
             bands = drawn[0]     # Transform leaves the original on screen
         self.wait(0.25)
-        return (bands, means, predicted)
+        return (bands, means, predicted, sets)
 
     def _mean(self, axes, mu):
         """The posterior mean over the action box, dashed so the truth stays legible."""
@@ -335,12 +352,73 @@ class MogpScene(Scene):
 
     def _front(self, axes, mu, front):
         """The model's front: the true objectives at the actions the posterior calls
-        non-dominated.
+        non-dominated, one dot per action rather than a connecting line.
 
-        The GP picks the actions; the curve is where those actions really land, so
+        The GP picks the actions; the dots sit where those actions really land, so
         the gap to the true front is the cost of the model's mistakes rather than of
-        its posterior mean being off. `mu` is unused here for that reason.
+        its posterior mean being off. `mu` is unused here for that reason. `front`
+        is already ordered along the predicted front (`posterior`'s doc), so a dot's
+        position in that order -- not its coordinates -- sets its color, from
+        `COST_COLOR` to `COMFORT_COLOR`. A line through the true coordinates would
+        zigzag wherever the predicted and true orderings disagree; dots show that
+        disagreement instead of papering over it with an extra stroke.
         """
-        points = [axes.c2p(cost(GRID[i]), comfort(GRID[i])) for i in front]
-        return VMobject(color=LOSS_COLOR, stroke_width=CURVE_STROKE).set_points_smoothly(points)
+        n = len(front)
+        weights = np.linspace(0.0, 1.0, n) if n > 1 else [0.0]
+        return VGroup(*(
+            Dot(axes.c2p(cost(GRID[i]), comfort(GRID[i])), radius=FRONT_DOT_RADIUS,
+                color=COST_COLOR.interpolate(COMFORT_COLOR, w))
+            for i, w in zip(front, weights)
+        ))
+
+    def _pareto_set(self, axes, front):
+        """The estimated Pareto set on one action axis, in red: the same red line
+        `ParetoScene` draws for the true set, over the action range the posterior
+        -- not the truth -- calls non-dominated.
+
+        `front` indexes `GRID`, but not in grid order (`posterior`'s doc orders it
+        along the front instead), so it is re-sorted here to find where it is
+        contiguous. A posterior front need not be a single interval, so each
+        contiguous run of grid indices gets its own segment rather than one line
+        spanning gaps the model itself does not call Pareto optimal.
+        """
+        order = np.sort(front)
+        runs = np.split(order, np.where(np.diff(order) > 1)[0] + 1)
+        return VGroup(*(
+            Line(axes.c2p(GRID[run[0]], 0.0), axes.c2p(GRID[run[-1]], 0.0),
+                 color=SET_COLOR, stroke_width=SET_LINE_WIDTH)
+            for run in runs
+        ))
+
+    def _labels(self, comfort_axes, front_axes):
+        """Captions naming the surrogate Pareto set and front, written once.
+
+        Placed at the true front's own location (`front_actions`, `POINTER_AT`)
+        rather than tracked to the estimate: the estimate is what moves fit to
+        fit and settles onto the truth, so anchoring the captions to where it
+        settles keeps them legible throughout instead of chasing every step.
+        """
+        start, end = front_actions()
+        set_line = Line(comfort_axes.c2p(start, 0.0), comfort_axes.c2p(end, 0.0))
+        set_label = Tex(
+            r"Surrogate Pareto Set $\mathcal{P}_{\hat{\bm{f}}}$",
+            font_size=SET_LABEL_SIZE, color=SET_COLOR,
+        )
+        set_label.next_to(set_line, DOWN, buff=0.15)
+
+        front_label = Tex(
+            r"Surrogate Pareto Front $\mathcal{F}_{\hat{\bm{f}}}$",
+            font_size=POINTER_LABEL_SIZE, color=INK,
+        )
+        front_label.move_to(front_axes.c2p(*POINTER_AT))
+        middle = sum(front_actions()) / 2.0
+        arrow = Arrow(
+            front_label.get_top(),
+            front_axes.c2p(cost(middle), comfort(middle)),
+            buff=0.12,
+            color=INK,
+            stroke_width=3.0,
+            max_tip_length_to_length_ratio=0.15,
+        )
+        return VGroup(set_label, front_label, arrow)
 
