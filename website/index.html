@@ -3,85 +3,285 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="pyPolar: multi-objective Bayesian optimization for human-in-the-loop robotics.">
-  <title>pyPolar: Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics</title>
-  <!-- Favicon: <link rel="icon" type="image/x-icon" href="static/images/favicon.ico"> -->
+  <meta name="title" content="MO-HILBO: Multi-Objective Human-in-the-Loop Bayesian Optimization of a Lower-Limb Exoskeleton">
+  <meta name="description" content="MO-HILBO infers a personalized Pareto-optimal set of exoskeleton controllers from human-in-the-loop feedback across multiple objectives, built on the open-source mohilo library.">
+  <meta name="keywords" content="Multi-objective Bayesian optimization, human-in-the-loop, exoskeleton, personalization, Pareto front">
+  <meta name="author" content="Neil Janwani, Matthew T. Lerner, Aaron J. Young, Maegan Tucker">
+  <meta name="robots" content="index, follow">
+  <meta name="language" content="English">
+  <title>MO-HILBO: Multi-Objective Human-in-the-Loop Bayesian Optimization of a Lower-Limb Exoskeleton</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/bulma/0.9.4/css/bulma.min.css">
+  <link rel="stylesheet" href="style.css">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1/css/academicons.min.css">
-  <link rel="stylesheet" href="style.css">
+  <script>
+    // Set the theme before first paint so there is no flash of the wrong theme.
+    (function() {
+      try {
+        var stored = localStorage.getItem('theme');
+        var theme = stored || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) {}
+    })();
+  </script>
 </head>
 <body>
-  <main>
-    <section class="hero">
-      <!-- Banner video: <video class="hero-video" autoplay muted loop playsinline><source src="static/videos/banner.mp4" type="video/mp4"></video> -->
-      <div class="container">
-        <h1 class="title">pyPolar</h1>
-        <h2 class="subtitle">Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics</h2>
+  <button class="scroll-to-top" onclick="window.scrollTo({top:0, behavior:'smooth'})" title="Scroll to top" aria-label="Scroll to top">
+    <i class="fas fa-chevron-up"></i>
+  </button>
+  <button class="theme-toggle" onclick="toggleTheme()" title="Toggle dark mode" aria-label="Toggle dark mode">
+    <i class="fas fa-moon"></i>
+  </button>
 
-        <div class="authors">
-          <span><a href="https://njanwani.github.io/" target="_blank">Neil Janwani</a>,</span>
-          <span><a href="#">Author Two</a>,</span>
-          <span><a href="#">Author Three</a></span>
-        </div>
-        <div class="affiliation">Dynamic Mobility Lab, Georgia Tech<br>In Review</div>
+  <main id="main-content">
+    <section class="hero publication-header">
+      <div class="hero-body">
+        <div class="container is-max-desktop">
+          <div class="columns is-centered">
+            <div class="column has-text-centered">
+              <h1 class="title is-1 publication-title">MO-HILBO</h1>
+              <h1 class="title is-3 publication-title">Multi-Objective Human-in-the-Loop Bayesian Optimization of a Lower-Limb Exoskeleton</h1>
+              <div class="is-size-5 publication-authors">
+                <span class="author-block"><a href="https://njanwani.github.io/" target="_blank">Neil Janwani</a>,</span>
+                <span class="author-block">Matthew T. Lerner,</span>
+                <span class="author-block">Aaron J. Young,</span>
+                <span class="author-block"><a href="http://maegantucker.com/" target="_blank">Maegan Tucker</a></span>
+              </div>
+              <div class="is-size-5 publication-authors">
+                <span class="author-block">Dynamic Mobility Lab, Georgia Institute of Technology<br>In Review</span>
+              </div>
+              <div class="column has-text-centered">
+                <div class="publication-links">
+                  <span class="link-block">
+                    <a href="https://github.com/dynamicmobility/mohilo" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                      <span class="icon"><i class="fab fa-github"></i></span>
+                      <span>mohilo Code</span>
+                    </a>
+                  </span>
+                  <span class="link-block">
+                    <a href="https://njanwani.github.io/data/MOHILBO.pdf" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                      <span class="icon"><i class="fas fa-file-alt"></i></span>
+                      <span>Paper</span>
+                    </a>
+                  </span>
+                  <span class="link-block">
+                    <a href="#cite" class="external-link button is-normal is-rounded is-dark">
+                      <span class="icon"><i class="fas fa-quote-right"></i></span>
+                      <span>Cite</span>
+                    </a>
+                  </span>
+                  <span class="link-block">
+                    <a href="#video" class="external-link button is-normal is-rounded is-dark">
+                      <span class="icon"><i class="fas fa-video"></i></span>
+                      <span>Video</span>
+                    </a>
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
 
-        <div class="links">
-          <a class="button" href="https://arxiv.org/abs/XXXX.XXXXX" target="_blank">
-            <i class="ai ai-arxiv"></i><span>arXiv</span>
-          </a>
-          <a class="button" href="https://github.com/dynamicmobility/pyPolar" target="_blank">
-            <i class="fab fa-github"></i><span>Code</span>
-          </a>
-          <a class="button" href="./">
-            <i class="fas fa-book"></i><span>Documentation</span>
-          </a>
+          <div class="columns is-centered is-vcentered abstract-hero-row">
+            <div class="column is-half-desktop abstract-col">
+              <h2 class="title is-3 has-text-left abstract-heading">Abstract</h2>
+              <div class="content has-text-justified">
+                <p>
+                  Human-in-the-loop optimization (HILO) is a common approach for optimizing the control of assistive
+                  devices to account for the wearer's unique biomechanics and subjective preferences. However, despite
+                  research suggesting that a person may have a different prioritization of objectives depending on
+                  time-varying factors such as the environment, their mood, or energy levels, existing HILO approaches
+                  only consider a single objective or enforce a fixed weighting on a set of objectives. Neither approach
+                  is capable of representing an individual's preferences <em>over objectives</em>. In this work, we
+                  propose Multi-Objective Human-in-the-loop Bayesian Optimization (MO-HILBO), which builds on explicit
+                  multi-objective Bayesian optimization to efficiently infer a personalized set of Pareto-optimal
+                  controllers. We compare our approach with an existing multi-objective HILO method and experimentally
+                  demonstrate MO-HILBO on a lower-limb exoskeleton across two objectives: metabolic cost (efficiency) and
+                  ordinal human feedback (comfort). We find that MO-HILBO (1) discovers Pareto-optimal controllers, and
+                  (2) that the pairwise ordering of points on the Pareto front itself is consistent with validation
+                  trials. Lastly, we open-source <code>mohilo</code>, a Python package for running both HILO and
+                  MO-HILBO on wearable devices.
+                </p>
+              </div>
+            </div>
+            <div class="column is-half-desktop hero-fig-col">
+              <div class="publication-banner">
+                <img src="static/images/hero.jpg" alt="MO-HILBO overview: exoskeleton hardware, comfort and metabolic cost objectives, and the resulting Pareto front and set.">
+              </div>
+              <p class="has-text-centered caption-text">
+                MO-HILBO on a lower-limb exoskeleton across two objectives: metabolic cost, measured by indirect calorimetry, and
+                subjective comfort, recorded on a tablet. The protocol identifies the Pareto set of controllers (bottom)
+                by learning a probabilistic surrogate of the Pareto front (top) directly from human feedback.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- Teaser figure/video: <section class="section"><div class="container"><img src="static/images/teaser.png" alt="..."><p class="caption">...</p></div></section> -->
+    <!-- Project video -->
+    <section class="section" id="video">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">Overview Video</h2>
+        <div class="columns is-centered">
+          <div class="column is-10">
+            <figure class="image">
+              <video controls muted playsinline poster="static/images/video-poster.jpg" style="width: 100%; border-radius: 10px; box-shadow: var(--shadow-lg);">
+                <source src="static/videos/project_video.mp4" type="video/mp4">
+              </video>
+            </figure>
+          </div>
+        </div>
+      </div>
+    </section>
 
-    <section class="section">
-      <div class="container narrow">
-        <h2 class="section-title">Abstract</h2>
-        <p>
-          Personalizing assistive and wearable robots to an individual user requires
-          balancing several competing objectives, such as metabolic cost, walking speed,
-          and subjective comfort, each of which is expensive and noisy to measure on a
-          human. We present pyPolar, an open-source library for multi-objective Bayesian
-          optimization in human-in-the-loop settings. pyPolar models each objective with
-          an independent Gaussian process over a shared action space, allowing objectives
-          to be measured on decoupled schedules and at different rates. Built entirely on
-          BoTorch, it provides principled noise modeling, leave-one-out diagnostics, and
-          Pareto-front estimation from sparse human data. We evaluate pyPolar on synthetic
-          benchmarks and on pilot data from human subjects, and show that it recovers
-          accurate trade-off fronts from few measurements. pyPolar is designed to make
-          multi-objective personalization reproducible and accessible to the robotics
-          community.
+    <!-- Method -->
+    <section class="section hero is-light">
+      <div class="container" style="max-width: 1200px;">
+        <h2 class="title is-3 has-text-centered">Method</h2>
+        <figure class="image">
+          <img src="static/images/method.png" alt="MO-HILBO method overview: feedback collection, belief update, and acquisition-driven querying on the exoskeleton.">
+        </figure>
+        <p class="has-text-centered caption-text">
+          MO-HILBO efficiently identifies the Pareto set of mutually optimal actions across multiple objectives.
+          Like traditional HILO, it cycles over three steps: (1) collecting feedback from human users, (2) updating
+          the belief of the underlying objective function(s) from that feedback, and (3) selecting new queries for
+          the next iteration with a multi-objective acquisition function. We apply MO-HILBO to a lower-limb
+          exoskeleton across two objectives: subjective comfort, given as ordinal labels, and metabolic cost,
+          measured by indirect calorimetry.
         </p>
       </div>
     </section>
 
-    <!-- Method overview figure: <section class="section"><div class="container"><img src="static/images/method.png" alt="..."></div></section> -->
-
-    <!-- Results figures/videos: <section class="section"><div class="container"><video controls src="static/videos/results.mp4"></video></div></section> -->
-
+    <!-- Synthetic experiments -->
     <section class="section">
-      <div class="container narrow">
-        <h2 class="section-title">BibTeX</h2>
-        <pre><code>@article{janwani2026pypolar,
-  title   = {pyPolar: Multi-Objective Bayesian Optimization for Human-in-the-Loop Robotics},
-  author  = {Janwani, Neil and others},
-  journal = {arXiv preprint arXiv:XXXX.XXXXX},
-  year    = {2026}
+      <div class="container" style="max-width: 1200px;">
+        <h2 class="title is-3 has-text-centered">Synthetic Experiments</h2>
+        <div class="content has-text-justified" style="max-width: 900px; margin: 0 auto 2rem;">
+          <p>
+            We compare MO-HILBO against Zhang et al.'s NSGA-II-based multi-objective HILO method on a synthetic test
+            domain that mirrors a human-subject study: high observation noise and a small feedback budget. We measure
+            approximation quality with the inverted generational distance plus (IGD+), where lower is better, averaged
+            over 50 runs per configuration.
+          </p>
+        </div>
+        <figure class="image">
+          <img src="static/images/synthetic.png" alt="Synthetic ablations comparing MO-HILBO and NSGA-II across noise level, action dimension, and number of objectives.">
+        </figure>
+        <p class="has-text-centered caption-text">
+          Across noise level, action dimension, and number of objectives, MO-HILBO consistently reaches a lower IGD+
+          than NSGA-II under a small sample budget and high measurement noise&mdash;precisely the regime a human-subject
+          protocol operates in.
+        </p>
+      </div>
+    </section>
+
+    <!-- Human subject study -->
+    <section class="section hero is-light">
+      <div class="container" style="max-width: 1200px;">
+        <h2 class="title is-3 has-text-centered">Human-Subject Study</h2>
+        <div class="content has-text-justified" style="max-width: 900px; margin: 0 auto 2rem;">
+          <p>
+            We demonstrate MO-HILBO on a real lower-limb exoskeleton, optimizing three controller parameters
+            (a temporal delay and two torque-scaling coefficients) across two objectives: metabolic cost and
+            ordinal comfort feedback collected on a tablet. Each subject's Pareto set is discovered directly from
+            their own feedback, with no assumption about how they weigh comfort against efficiency.
+          </p>
+        </div>
+        <figure class="image">
+          <img src="static/images/pareto-progression.jpg" alt="Pareto set progression for a subject, narrowing from the full action space to a low-dimensional Pareto set.">
+        </figure>
+        <p class="has-text-centered caption-text">
+          A subject's Pareto set progression throughout optimization: it begins as the entire action box and
+          converges toward low delay, low hip-extension scale. For this subject, hip-flexion scale was the primary
+          decision variable trading off comfort against efficiency&mdash;MO-HILBO reduces the search space from the
+          full 3D action box (bottom left) to a compact, near-1D Pareto set (bottom right).
+        </p>
+        <br>
+        <figure class="image">
+          <img src="static/images/accuracy.jpg" alt="Predicted versus measured objective values, held-out validation points, and overlayed Pareto sets across subjects.">
+        </figure>
+        <p class="has-text-centered caption-text">
+          Predicted versus measured points and discovered Pareto sets. (a) A fitted multi-objective GP where the
+          training data cluster near the Pareto front&mdash;evidence that MO-HILBO's acquisition function explores and
+          refines the front rather than the whole action space. (b) Held-out validation points (stars), unseen during
+          training, spaced across the front. (c) Overlayed Pareto sets across subjects: sets rarely overlap in action
+          space, and while subjects' optimal controllers vary in flexion/extension torque, none require a high delay.
+        </p>
+      </div>
+    </section>
+
+    <!-- BibTeX -->
+    <section class="section" id="cite">
+      <div class="container is-max-desktop">
+        <h2 class="title is-3 has-text-centered">BibTeX</h2>
+        <div class="bibtex-header">
+          <span>Paper is currently in review; citation will be finalized on acceptance.</span>
+          <button class="copy-bibtex-btn" onclick="copyBibtex()"><i class="fas fa-copy"></i><span class="copy-text">Copy</span></button>
+        </div>
+        <pre><code id="bibtex-code">@article{janwani2027mohilbo,
+  title   = {Multi-Objective Human-in-the-Loop Bayesian Optimization of a Lower-Limb Exoskeleton},
+  author  = {Janwani, Neil and Lerner, Matthew T. and Young, Aaron J. and Tucker, Maegan},
+  journal = {arXiv preprint},
+  year    = {2027}
 }</code></pre>
       </div>
     </section>
   </main>
 
-  <footer>
-    <p>Page template adapted from the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a>.</p>
+  <script>
+    function copyBibtex() {
+      var text = document.getElementById('bibtex-code').innerText;
+      navigator.clipboard.writeText(text).then(function() {
+        var btn = document.querySelector('.copy-bibtex-btn');
+        var label = btn.querySelector('.copy-text');
+        btn.classList.add('copied');
+        label.textContent = 'Copied!';
+        setTimeout(function() {
+          btn.classList.remove('copied');
+          label.textContent = 'Copy';
+        }, 2000);
+      });
+    }
+
+    var scrollBtn = document.querySelector('.scroll-to-top');
+    window.addEventListener('scroll', function() {
+      scrollBtn.classList.toggle('visible', window.scrollY > 400);
+    });
+
+    function themeToggleIcon() {
+      return document.querySelector('.theme-toggle i');
+    }
+
+    function updateThemeIcon(theme) {
+      var icon = themeToggleIcon();
+      icon.className = theme === 'dark' ? 'fas fa-sun' : 'fas fa-moon';
+    }
+
+    function toggleTheme() {
+      var current = document.documentElement.getAttribute('data-theme');
+      var next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('theme', next); } catch (e) {}
+      updateThemeIcon(next);
+    }
+
+    updateThemeIcon(document.documentElement.getAttribute('data-theme'));
+  </script>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="columns is-centered">
+        <div class="column is-8">
+          <div class="content has-text-centered">
+            <p>
+              This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a>, adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
+              You are free to borrow the source code of this website, we just ask that you link back to this page in the footer. <br> This website is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-sa/4.0/" target="_blank">Creative Commons Attribution-ShareAlike 4.0 International License</a>.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   </footer>
 </body>
 </html>
