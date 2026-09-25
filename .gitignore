@@ -66,7 +66,6 @@ core.*
 *.pdf
 
 output/
-docs/
 scripts/1d/output
 
 pyPolar.code-workspace
@@ -76,3 +75,4 @@ pyPolar.code-workspace
 *.gif
 *.svg
 *.MOV
+!docs/static/videos/*.mp4
