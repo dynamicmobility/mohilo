@@ -1,5 +1,5 @@
 import numpy as np
-from pypolar.feedback import rewards
+from mohilo.feedback import rewards
     
 class BradleyTerryOracle:
     def __init__(

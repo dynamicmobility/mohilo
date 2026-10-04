@@ -10,8 +10,8 @@ from botorch.utils.multi_objective.box_decompositions.dominated import (
 )
 from sklearn.metrics import r2_score
 
-import pypolar as plr
-from pypolar.optimization.gp import DTYPE
+import mohilo as plr
+from mohilo.optimization.gp import DTYPE
 
 # TODO: this needs to be remade with up-to-date code and plot metrics + LOO + recommendations etc...
 # you should create an example dataset using synthetics for testing.

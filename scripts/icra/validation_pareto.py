@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-import pypolar as plr
+import mohilo as plr
 
 SUBJECTS    = [Path('human_data/MB02'), Path('human_data/MB04'), Path('human_data/MB05')]
 OUTPUT      = Path('hilo/output/validation.jpg')

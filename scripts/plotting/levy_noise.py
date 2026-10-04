@@ -12,8 +12,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pypolar as plr
-from pypolar.utils.plotting import MODEL_COLOR, SAMPLE_COLOR, TRUTH_COLOR
+import mohilo as plr
+from mohilo.utils.plotting import MODEL_COLOR, SAMPLE_COLOR, TRUTH_COLOR
 
 FUNC      = 'Levy'
 DIM       = 1

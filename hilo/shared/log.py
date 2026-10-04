@@ -11,7 +11,7 @@ TO_BOTH = {"console": True}   # extra= for a record that also prints
 
 # this project's loggers. Everything else inherits the root's level, which is
 # where third-party DEBUG chatter is capped.
-OURS = ('hilo', 'pypolar', 'tablet', '__main__')
+OURS = ('hilo', 'mohilo', 'tablet', '__main__')
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ def setup_logger(logfile="app.log", level=logging.DEBUG,
         logging.getLogger(name).setLevel(level)
 
     for handler in list(root.handlers):
-        if getattr(handler, '_pypolar', False):
+        if getattr(handler, '_mohilo', False):
             root.removeHandler(handler)
             handler.close()
 
@@ -59,7 +59,7 @@ def setup_logger(logfile="app.log", level=logging.DEBUG,
     ch.setFormatter(logging.Formatter("%(message)s"))
 
     for handler in (fh, ch):
-        handler._pypolar = True
+        handler._mohilo = True
         root.addHandler(handler)
 
     return fh, ch

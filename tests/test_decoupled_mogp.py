@@ -13,13 +13,13 @@ import numpy as np
 import pytest
 import torch
 
-from pypolar.optimization.gp import (
+from mohilo.optimization.gp import (
     LENGTH_SCALE,
     SIGNAL_VAR,
     DecoupledMOGP,
     NoiseModel,
 )
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

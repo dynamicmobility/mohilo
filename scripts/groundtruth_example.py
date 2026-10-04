@@ -1,4 +1,4 @@
-import pypolar as plr
+import mohilo as plr
 
 
 oracle = plr.MOSyntheticOracle.from_name(

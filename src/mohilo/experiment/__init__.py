@@ -1,19 +1,19 @@
-from pypolar.experiment.dataset import (
+from mohilo.experiment.dataset import (
     ExperimentDataset,
     TrialDataset,
     gp_record,
     state_dict_record,
 )
-from pypolar.experiment.ledger import (
+from mohilo.experiment.ledger import (
     Ledger,
     fingerprint,
     read_events,
 )
-from pypolar.experiment.logger import (
+from mohilo.experiment.logger import (
     Device,
     Logger,
 )
-from pypolar.experiment.probe import (
+from mohilo.experiment.probe import (
     Probe,
 )
 

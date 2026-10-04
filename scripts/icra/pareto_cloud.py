@@ -22,8 +22,8 @@ from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from matplotlib.lines import Line2D
 
-import pypolar as plr
-from pypolar.utils.plotting import FONT
+import mohilo as plr
+from mohilo.utils.plotting import FONT
 from scripts.icra.human_pareto import content_bbox
 from scripts.icra.subject_actions import AZIM, ELEV, PANELS, dress_panel
 

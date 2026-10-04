@@ -6,11 +6,11 @@ them with :mod:`ast` instead and never executes anything.
 
 Two kinds of reference are checked:
 
-1. import statements  -- ``from pypolar.feedback import IdealPoint``
-2. alias attributes   -- ``import pypolar as plr`` ... ``plr.BasicGP``
+1. import statements  -- ``from mohilo.feedback import IdealPoint``
+2. alias attributes   -- ``import mohilo as plr`` ... ``plr.BasicGP``
 
 Both go stale the same way when the package is refactored: a module is renamed
-(``pypolar.oracles`` -> ``pypolar.feedback``) or a symbol is removed.
+(``mohilo.oracles`` -> ``mohilo.feedback``) or a symbol is removed.
 """
 
 # TODO: have this target the correct files
@@ -20,11 +20,11 @@ import pathlib
 
 import pytest
 
-import pypolar
+import mohilo
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 SEARCH_DIRS = ["examples", "scripts", "hilo"]
-PACKAGE = "pypolar"
+PACKAGE = "mohilo"
 
 
 def _python_files():
@@ -62,7 +62,7 @@ def _collect_problems(path):
     aliases = set()
 
     for node in ast.walk(tree):
-        # import pypolar as plr  /  import pypolar.feedback
+        # import mohilo as plr  /  import mohilo.feedback
         if isinstance(node, ast.Import):
             for alias in node.names:
                 if not _is_package_module(alias.name):
@@ -75,7 +75,7 @@ def _collect_problems(path):
                 if alias.name == PACKAGE:
                     aliases.add(alias.asname or alias.name)
 
-        # from pypolar.feedback import IdealPoint
+        # from mohilo.feedback import IdealPoint
         elif isinstance(node, ast.ImportFrom):
             if node.level or node.module is None:
                 continue
@@ -105,9 +105,9 @@ def _collect_problems(path):
                 continue
             if node.value.id not in aliases:
                 continue
-            if not hasattr(pypolar, node.attr):
+            if not hasattr(mohilo, node.attr):
                 problems.append(
-                    f"line {node.lineno}: pypolar has no attribute "
+                    f"line {node.lineno}: mohilo has no attribute "
                     f"'{node.attr}' (used as '{node.value.id}.{node.attr}')"
                 )
 
@@ -121,8 +121,8 @@ ALL_FILES = list(_python_files())
 @pytest.mark.parametrize(
     "path", ALL_FILES, ids=[str(p.relative_to(REPO_ROOT)) for p in ALL_FILES]
 )
-def test_no_stale_pypolar_references(path):
-    """Every pypolar module/symbol referenced by a script still exists."""
+def test_no_stale_mohilo_references(path):
+    """Every mohilo module/symbol referenced by a script still exists."""
     problems = _collect_problems(path)
     assert not problems, "{}:\n  {}".format(
         path.relative_to(REPO_ROOT), "\n  ".join(problems)

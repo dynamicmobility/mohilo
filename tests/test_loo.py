@@ -9,9 +9,9 @@ arguments it was promised.
 import numpy as np
 import pytest
 
-from pypolar.optimization.gp import BoTorchGP, GPHyperparameters, NoiseModel
-from pypolar.optimization.objectives import Objective
-from pypolar.performance.loo import loo
+from mohilo.optimization.gp import BoTorchGP, GPHyperparameters, NoiseModel
+from mohilo.optimization.objectives import Objective
+from mohilo.performance.loo import loo
 
 
 LOW  = np.array([0.0, -2.0])

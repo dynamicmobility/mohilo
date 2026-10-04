@@ -1,19 +1,19 @@
-from pypolar.optimization.gp import (
+from mohilo.optimization.gp import (
     BoTorchGP,
     DecoupledMOGP,
     ScalarizedGP,
     GPHyperparameters,
     NoiseModel
 )
-from pypolar.optimization.objectives import (
+from mohilo.optimization.objectives import (
     AffineTransform,
     Objective,
     DecoupledObjectives,
     as_bounds,
     sample_actions
 )
-from pypolar.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, reference_point_from_objectives, get_nondominated_tol, hypervolume_from_nondominated, hypervolume_from_objectives, sparsity_from_normalized_nondominated, gd_plus, igd_plus
-from pypolar.utils.plotting import (
+from mohilo.utils.pareto import get_pareto_statistics, get_nondominated, reference_point, reference_point_from_objectives, get_nondominated_tol, hypervolume_from_nondominated, hypervolume_from_objectives, sparsity_from_normalized_nondominated, gd_plus, igd_plus
+from mohilo.utils.plotting import (
     plot_test_function, 
     plot_fit_1d, 
     plot_mo_space, 
@@ -22,7 +22,7 @@ from pypolar.utils.plotting import (
     plot_pareto,
     plot_pareto_actions
 )
-from pypolar.feedback import (
+from mohilo.feedback import (
     AcquisitionFunction,
     AcquisitionParams,
     acquisition_factory_1d,
@@ -41,7 +41,7 @@ from pypolar.feedback import (
     construct_function,
     truth_at
 )
-from pypolar.experiment import (
+from mohilo.experiment import (
     Device,
     ExperimentDataset,
     TrialDataset,
@@ -53,14 +53,14 @@ from pypolar.experiment import (
     fingerprint,
     read_events
 )
-from pypolar.performance.mo import (pareto_overlay, groundtruth_hypervolume,
+from mohilo.performance.mo import (pareto_overlay, groundtruth_hypervolume,
                                     normalized_hypervolume_regret,
                                     attained_hypervolume_regret,
                                     front_alignment_regret,
                                     front_coverage_regret)
-from pypolar.peripherals.host import chime
-from pypolar.performance.loo import loo, loo_curve
-from pypolar.performance.regret import normalized_inference_regret
+from mohilo.peripherals.host import chime
+from mohilo.performance.loo import loo, loo_curve
+from mohilo.performance.regret import normalized_inference_regret
 
 __all__ = [
     # optimization

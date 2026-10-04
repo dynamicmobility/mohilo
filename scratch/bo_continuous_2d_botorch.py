@@ -12,9 +12,9 @@ directly comparable. Only the machinery differs:
 | maximizing it      | `maximize()`: Sobol + L-BFGS-B | `optimize_acqf`               |
 | recommendation     | `maximize(gp.mu_at)`           | `optimize_acqf(PosteriorMean)`|
 
-`pypolar` is still used for the *problem*: the groundtruth reward, the noisy
+`mohilo` is still used for the *problem*: the groundtruth reward, the noisy
 oracle, and `derive_gp_hyperparams`. Nothing in the optimization loop is
-pypolar's.
+mohilo's.
 
 Three points where the translation is not literal:
 
@@ -51,7 +51,7 @@ from botorch.utils.sampling import draw_sobol_samples
 from gpytorch.kernels import RBFKernel, ScaleKernel
 from gpytorch.means import ZeroMean
 
-import pypolar as plr
+import mohilo as plr
 
 LOW             = np.array([-2.0, -2.0])
 HIGH            = np.array([ 2.0,  2.0])
@@ -240,7 +240,7 @@ def main():
         expected_range = float(REWARD_RANGE[1] - REWARD_RANGE[0]),
         noise_var      = NOISE_STD ** 2,
     )
-    # pypolar states the likelihood as `precision * ||Sr - y||^2`, a Gaussian
+    # mohilo states the likelihood as `precision * ||Sr - y||^2`, a Gaussian
     # NLL with sigma^2 = 1/(2*precision). BoTorch wants the variance directly.
     sigma2 = 1.0 / (2.0 * precision)
 

@@ -36,7 +36,7 @@ from manim import (
 # put on sys.path for the imports below.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pypolar as plr  # noqa: E402
+import mohilo as plr  # noqa: E402
 
 from scripts.icra.human_pareto import ACTION_LABELS  # noqa: E402
 from scripts.icra.subject_actions import SUBJECT_COLORS, pareto_actions  # noqa: E402

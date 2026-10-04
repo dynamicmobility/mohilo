@@ -8,9 +8,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.distance import cdist
 
-import pypolar as plr
-from pypolar.experiment.dataset import ExperimentDataset
-from pypolar.utils.plotting import plot_mo_space
+import mohilo as plr
+from mohilo.experiment.dataset import ExperimentDataset
+from mohilo.utils.plotting import plot_mo_space
 from scripts.plotting.mo_exp_gif import inferred_front, measured_at, true_front
 
 I = 10

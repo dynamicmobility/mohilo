@@ -12,9 +12,9 @@ import numpy as np
 import pytest
 import torch
 
-from pypolar.feedback.synthetic import (IdealPoint, MOSyntheticOracle,
+from mohilo.feedback.synthetic import (IdealPoint, MOSyntheticOracle,
                                         SyntheticOracle, truth_at)
-from pypolar.optimization.objectives import sample_actions
+from mohilo.optimization.objectives import sample_actions
 
 
 OPTIMUM = np.array([0.5, -0.25])
@@ -175,7 +175,7 @@ class TestParams:
     stores, and the m bowls it rebuilds into."""
 
     def _params(self, **overrides):
-        from pypolar.feedback.synthetic import SyntheticOracleParams
+        from mohilo.feedback.synthetic import SyntheticOracleParams
         return SyntheticOracleParams(**{
             'func'       : 'IdealPoint',
             'objectives' : ('A', 'B'),
@@ -223,7 +223,7 @@ class TestParams:
     ])
     def test_a_json_round_trip_rebuilds_the_same_truth(self, overrides):
         from dataclasses import asdict
-        from pypolar.feedback.synthetic import SyntheticOracleParams
+        from mohilo.feedback.synthetic import SyntheticOracleParams
         params = self._params(**overrides)
         # json reads every sequence back as a list, which must not change
         # the truth or make the frozen record unhashable

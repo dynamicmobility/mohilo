@@ -1,4 +1,4 @@
-"""The two objectives every scene in this package draws, as one pypolar groundtruth.
+"""The two objectives every scene in this package draws, as one mohilo groundtruth.
 
 Metabolic cost is a bowl and comfort a hump, both `IdealPoint`s squashed by a tanh
 into a band, so the action that minimizes cost is not the one that maximizes comfort.
@@ -10,7 +10,7 @@ experiment's groundtruth the same way, in three dimensions instead of one.
 """
 
 import numpy as np
-import pypolar as plr
+import mohilo as plr
 from scipy.optimize import minimize_scalar
 
 COST_NAME = 'Metabolic Cost'

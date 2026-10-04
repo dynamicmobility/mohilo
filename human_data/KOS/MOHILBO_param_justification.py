@@ -6,7 +6,7 @@ is drawn, with its envelope shaded and the default parameters' profile (low-pass
 """
 
 from pathlib import Path
-import pypolar as plr
+import mohilo as plr
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.io import loadmat

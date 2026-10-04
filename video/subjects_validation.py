@@ -49,7 +49,7 @@ from manim import (
 # put on sys.path for the imports below.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pypolar as plr  # noqa: E402
+import mohilo as plr  # noqa: E402
 
 from hilo.analysis.plot_fit_gif import padded_limits  # noqa: E402
 from scripts.icra.validation_pareto import (  # noqa: E402

@@ -12,7 +12,7 @@ import pytest
 import torch
 from botorch.test_functions import Levy, StyblinskiTang
 
-from pypolar.optimization.objectives import (
+from mohilo.optimization.objectives import (
     AffineTransform,
     DecoupledObjectives,
     Objective,

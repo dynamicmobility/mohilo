@@ -13,9 +13,9 @@ import numpy as np
 import pytest
 
 import hilo.compare_front as cf
-from pypolar.experiment.dataset import ExperimentDataset
-from pypolar.optimization.gp import DecoupledMOGP, NoiseModel
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.experiment.dataset import ExperimentDataset
+from mohilo.optimization.gp import DecoupledMOGP, NoiseModel
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

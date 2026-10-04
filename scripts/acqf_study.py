@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from linear_operator.utils.warnings import NumericalWarning
 import torch
-import pypolar as plr
+import mohilo as plr
 from tqdm import tqdm
 import hilo.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)

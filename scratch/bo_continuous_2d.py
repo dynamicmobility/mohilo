@@ -34,7 +34,7 @@ import numpy as np
 from scipy.optimize import minimize
 from scipy.stats import norm, qmc
 
-import pypolar as plr
+import mohilo as plr
 
 LOW             = np.array([-2.0, -2.0])
 HIGH            = np.array([ 2.0,  2.0])

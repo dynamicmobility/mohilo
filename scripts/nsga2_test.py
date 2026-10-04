@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import to_rgba
 from linear_operator.utils.warnings import NumericalWarning
-import pypolar as plr
+import mohilo as plr
 from tqdm import tqdm
 import hilo.shared.simulation as hilo
 warnings.filterwarnings('ignore', category=NumericalWarning)

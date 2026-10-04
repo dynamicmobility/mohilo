@@ -17,11 +17,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from pypolar.experiment.ledger import fingerprint, jsonable
-from pypolar.feedback.acquisition import AcquisitionParams
-from pypolar.feedback.synthetic import SyntheticOracleParams
-from pypolar.optimization.gp import DTYPE, BoTorchGP, DecoupledMOGP, NoiseModel
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.experiment.ledger import fingerprint, jsonable
+from mohilo.feedback.acquisition import AcquisitionParams
+from mohilo.feedback.synthetic import SyntheticOracleParams
+from mohilo.optimization.gp import DTYPE, BoTorchGP, DecoupledMOGP, NoiseModel
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 def gp_record(gp: BoTorchGP | DecoupledMOGP):
@@ -439,7 +439,7 @@ class ExperimentDataset:
         ])
 
     def get_groundtruth(self):
-        """The groundtruth the run was scored against rebuilt as a pypolar object.
+        """The groundtruth the run was scored against rebuilt as a mohilo object.
         """
         if self.groundtruth is None:
             raise ValueError(f'{self.name} recorded no groundtruth')

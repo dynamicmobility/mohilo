@@ -3,7 +3,7 @@ a recommended action, in spreads of the groundtruth's own range."""
 
 import numpy as np
 
-from pypolar.feedback.synthetic import SyntheticOracle
+from mohilo.feedback.synthetic import SyntheticOracle
 
 
 def normalized_inference_regret(

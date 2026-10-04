@@ -10,8 +10,8 @@ and that a caller cannot state the range twice or state it in the wrong shape.
 import numpy as np
 import pytest
 
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
-from pypolar.utils.pareto import (get_nondominated, hypervolume_from_objectives,
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.utils.pareto import (get_nondominated, hypervolume_from_objectives,
                                   reference_point, reference_point_from_objectives)
 
 BOUNDS = np.array([[0.0, -1.0],      # low  per objective

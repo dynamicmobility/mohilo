@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial.distance import cdist
 import torch
-import pypolar as plr
+import mohilo as plr
 import logging
 import hilo.shared.log as log
 from hilo.fit_mogp import connect_to_exo, connect_to_ipad, find_dataset, send_to_exo, sio

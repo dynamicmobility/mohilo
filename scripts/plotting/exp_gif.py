@@ -14,8 +14,8 @@ import numpy as np
 import torch
 from matplotlib.animation import PillowWriter
 
-import pypolar as plr
-from pypolar.optimization.gp import DTYPE
+import mohilo as plr
+from mohilo.optimization.gp import DTYPE
 
 GRID_POINTS = 1024        # points both panels are drawn over
 NUM_PATHS   = 16          # posterior samples per frame

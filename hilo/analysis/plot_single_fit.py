@@ -15,7 +15,7 @@ from matplotlib.animation import PillowWriter
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 
-import pypolar as plr
+import mohilo as plr
 
 DATASET     = Path('hilo/output/experiments/Aug28_Neil/MT01.json')
 OUTPUT_DIR  = Path('hilo/output/')

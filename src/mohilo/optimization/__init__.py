@@ -1,5 +1,5 @@
-from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP, ScalarizedGP
-from pypolar.optimization.objectives import (
+from mohilo.optimization.gp import BoTorchGP, DecoupledMOGP, ScalarizedGP
+from mohilo.optimization.objectives import (
     AffineTransform,
     Objective,
     DecoupledObjectives,

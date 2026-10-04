@@ -1,5 +1,5 @@
 import matplotlib.pyplot as plt
-import pypolar as plr
+import mohilo as plr
 from pathlib import Path
 import numpy as np
 

@@ -21,7 +21,7 @@ from botorch.models.transforms.outcome import Standardize
 from gpytorch.likelihoods import FixedNoiseGaussianLikelihood, GaussianLikelihood
 from gpytorch.means import ZeroMean
 
-from pypolar.optimization.gp import (
+from mohilo.optimization.gp import (
     LENGTH_SCALE,
     SIGNAL_VAR,
     BoTorchGP,
@@ -29,7 +29,7 @@ from pypolar.optimization.gp import (
     build_botorch_gp,
     gp_hyperparameters,
 )
-from pypolar.optimization.objectives import Objective
+from mohilo.optimization.objectives import Objective
 
 
 # ---- fixtures --------------------------------------------------------------

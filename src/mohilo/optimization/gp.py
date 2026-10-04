@@ -17,7 +17,7 @@ from gpytorch.means import ZeroMean
 from gpytorch.mlls import ExactMarginalLogLikelihood, SumMarginalLogLikelihood
 from gpytorch.priors import LogNormalPrior
 
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 DTYPE           = torch.float64
 NOISE_STD       = 0.05      # observation noise, as a fraction of each objective's spread

@@ -17,8 +17,8 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.ticker import LogFormatter
 import numpy as np
 import pandas as pd
-import pypolar as plr
-from pypolar.utils.plotting import FONT, MUTED, TICK_SIZE
+import mohilo as plr
+from mohilo.utils.plotting import FONT, MUTED, TICK_SIZE
 import hilo.shared.simulation as hilo
 
 DATASET = Path('scripts/output/experiments/20260910_140158')

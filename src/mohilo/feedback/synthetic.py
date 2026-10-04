@@ -14,9 +14,9 @@ from botorch.test_functions.base import (
     MultiObjectiveTestProblem,
 )
 
-from pypolar.optimization.gp import DTYPE
-from pypolar.optimization.objectives import as_bounds, sample_actions
-from pypolar.utils.pareto import get_nondominated, hypervolume_from_nondominated, reference_point
+from mohilo.optimization.gp import DTYPE
+from mohilo.optimization.objectives import as_bounds, sample_actions
+from mohilo.utils.pareto import get_nondominated, hypervolume_from_nondominated, reference_point
 
 SPREAD_SAMPLES = 4096   # Sobol points a spread is measured over
 PROBE_SAMPLES  = 32     # Sobol points a candidate instance is probed at

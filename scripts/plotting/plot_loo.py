@@ -13,7 +13,7 @@ import numpy as np
 from linear_operator.utils.warnings import NumericalWarning
 from sklearn.metrics import r2_score
 
-import pypolar as plr
+import mohilo as plr
 from hilo.read_data import read_MH01_data, read_MT0x_data
 
 warnings.filterwarnings('ignore', category=NumericalWarning)

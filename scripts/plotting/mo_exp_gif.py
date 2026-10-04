@@ -13,9 +13,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.animation import PillowWriter
 
-import pypolar as plr
-from pypolar.utils.pareto import get_nondominated
-from pypolar.utils.plotting import plot_mo_space
+import mohilo as plr
+from mohilo.utils.pareto import get_nondominated
+from mohilo.utils.plotting import plot_mo_space
 
 FPS      = 1.5
 DPI      = 120

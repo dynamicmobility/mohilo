@@ -13,8 +13,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pypolar as plr
-from pypolar.utils.plotting import FONT, MATH_FONT, SAMPLE_COLOR
+import mohilo as plr
+from mohilo.utils.plotting import FONT, MATH_FONT, SAMPLE_COLOR
 from scripts.icra.validation_pareto import measured_at
 
 TRIAL       = -1          # the trial whose GP is drawn

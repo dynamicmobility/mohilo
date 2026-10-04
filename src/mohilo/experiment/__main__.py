@@ -1,9 +1,9 @@
-"""Prints a saved run: `plr-print <path>`, or `python -m pypolar.experiment <path>`."""
+"""Prints a saved run: `plr-print <path>`, or `python -m mohilo.experiment <path>`."""
 
 import argparse
 from pathlib import Path
 
-from pypolar.experiment.dataset import ExperimentDataset
+from mohilo.experiment.dataset import ExperimentDataset
 
 
 def main():

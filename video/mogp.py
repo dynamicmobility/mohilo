@@ -52,7 +52,7 @@ from manim import (
 # put on sys.path for the `video.style` import below.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import pypolar as plr  # noqa: E402
+import mohilo as plr  # noqa: E402
 from video.objectives import (  # noqa: E402
     COMFORT_NAME,
     COST_NAME,

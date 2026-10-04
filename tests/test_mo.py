@@ -16,14 +16,14 @@ import pytest
 
 from botorch.test_functions import multi_objective
 
-from pypolar.feedback.synthetic import MOSyntheticOracle
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
-from pypolar.performance.mo import (_attained_fraction,
+from mohilo.feedback.synthetic import MOSyntheticOracle
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.performance.mo import (_attained_fraction,
                                     attained_hypervolume_regret,
                                     front_alignment_regret,
                                     front_coverage_regret,
                                     normalized_hypervolume_regret)
-from pypolar.utils.pareto import (get_nondominated, hypervolume_from_nondominated,
+from mohilo.utils.pareto import (get_nondominated, hypervolume_from_nondominated,
                                   reference_point)
 
 SEED     = 3

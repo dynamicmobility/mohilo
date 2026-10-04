@@ -27,7 +27,7 @@ import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.ticker import FuncFormatter
 
-import pypolar as plr
+import mohilo as plr
 from hilo.analysis.plot_fit_gif import (
     SCAN,
     SEED,
@@ -48,7 +48,7 @@ FPS           = 24.0
 TRIAL_SECONDS = 2 / 3   # on-screen time per trial frame, matching the old fps=1.5 cadence
 DPI       = 150
 FIGSIZE   = (12.8, 7.2)   # 1920x1080 at DPI, the manim scenes' own 16:9 frame
-FONT      = 'cmr10'       # Computer Modern, matching pypolar's own house style
+FONT      = 'cmr10'       # Computer Modern, matching mohilo's own house style
 MATH_FONT = 'cm'
 TITLE_SIZE = 40
 

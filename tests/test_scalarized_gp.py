@@ -14,8 +14,8 @@ import numpy as np
 import pytest
 import torch
 
-from pypolar.optimization.gp import DecoupledMOGP, ScalarizedGP
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.optimization.gp import DecoupledMOGP, ScalarizedGP
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

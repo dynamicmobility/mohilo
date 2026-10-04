@@ -6,7 +6,7 @@ is the condition's estimated cost.
 """
 
 from pathlib import Path
-import pypolar as plr
+import mohilo as plr
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd

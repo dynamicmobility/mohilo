@@ -7,7 +7,7 @@ When explaining things, do not assume knowledge. Explain via deduction and don't
 
 Always ask how much code the user wants you to edit. Do not edit more than they ask you to without asking them first. Always pose this question before you implement something.
 
-# pypolar
+# mohilo
 
 Multi-objective Bayesian optimization for human-in-the-loop robotics. The GP
 layer is **BoTorch and nothing else** — there is no hand-written kernel algebra,
@@ -19,9 +19,9 @@ wrappers use it: `BoTorchGP` (one objective, one `SingleTaskGP`) and
 ## Project structure
 
 ```
-pyPolar/
+mohilo/
 ├── pyproject.toml                  # Package config, dependencies, pytest settings
-├── src/pypolar/                    # Installable package
+├── src/mohilo/                    # Installable package
 │   ├── __init__.py                 # Public API
 │   ├── optimization/
 │   │   ├── objectives.py           # AffineTransform, Objective, DecoupledObjectives
@@ -45,7 +45,7 @@ pyPolar/
 │   └── output/                     # Figures and recorded runs
 ├── scratch/                        # Scratch/experimentation files (not maintained)
 ├── docs/                           # LaTeX writeup and handoff record from the pre-BoTorch GP
-├── tablet/                         # iPad comfort survey (survey.py + survey.html), no pypolar import
+├── tablet/                         # iPad comfort survey (survey.py + survey.html), no mohilo import
 ├── human_data/                     # Pilot CSVs consumed by plot_pilot.py
 └── tests/                          # pytest test suite
     ├── test_public_api.py          # Every __all__ name imports
@@ -62,17 +62,17 @@ hilo/plot_pilot.py` puts `hilo/` on `sys.path` instead of the repo root.
 
 ## Environment setup
 
-Use the `pypolar` conda environment for all operations:
+Use the `mohilo` conda environment for all operations:
 
 ```bash
-conda activate pypolar
+conda activate mohilo
 pip install -e ".[dev]"    # editable install with test/plot deps
 ```
 
 ## How to run tests
 
 ```bash
-conda activate pypolar
+conda activate mohilo
 python -m pytest tests/ -v
 ```
 
@@ -89,7 +89,7 @@ scipy than a long-lived conda env will have.
 ## How to run experiments
 
 ```bash
-conda activate pypolar
+conda activate mohilo
 python -m hilo.plot_pilot        # fits the pilot data, writes hilo/output/test.png,
                                  # prints the best action per objective
 python -m hilo.gp_diagnostics    # leave-one-out R^2 and calibration on a synthetic
@@ -131,17 +131,17 @@ the noise is not a substitute for a design that can identify it.
 ## Package API
 
 ```python
-from pypolar import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
-from pypolar import DecoupledObjectives, Objective, AffineTransform
-from pypolar import sample_actions, as_bounds
-from pypolar import loo
-from pypolar import normalized_inference_regret
-from pypolar import truth_at, construct_function, SyntheticFunction
-from pypolar import SYNTHETIC_FUNCTIONS, SYNTHETIC_1D_FUNCTIONS
-from pypolar import plot_test_function, plot_fit_1d
+from mohilo import DecoupledMOGP, BoTorchGP, NoiseModel, GPHyperparameters
+from mohilo import DecoupledObjectives, Objective, AffineTransform
+from mohilo import sample_actions, as_bounds
+from mohilo import loo
+from mohilo import normalized_inference_regret
+from mohilo import truth_at, construct_function, SyntheticFunction
+from mohilo import SYNTHETIC_FUNCTIONS, SYNTHETIC_1D_FUNCTIONS
+from mohilo import plot_test_function, plot_fit_1d
 ```
 
-Everything runs on CPU in float64 (`pypolar.optimization.gp.DTYPE`). numpy is the
+Everything runs on CPU in float64 (`mohilo.optimization.gp.DTYPE`). numpy is the
 boundary in both directions: every public method takes and returns numpy arrays,
 and torch never escapes the module. Three arguments are the exception, all inputs
 only: `Objective.from_synthetic`'s `function`, a BoTorch `SyntheticTestFunction`
@@ -808,4 +808,4 @@ that no longer exist (`ConjugateGP`). `test_no_stale_references.py` searches
 `examples/`, `scripts/` and `hilo/`, none of which is `scratch/`, so nothing
 there is checked. `docs/` predates the BoTorch rewrite and describes the
 hand-written GP that `git rm`'d in "delete custom gps". `tablet/` is an
-independent iPad control panel and does not import `pypolar`.
+independent iPad control panel and does not import `mohilo`.

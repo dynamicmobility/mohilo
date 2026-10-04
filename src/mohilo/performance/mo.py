@@ -11,9 +11,9 @@ columns in the minimizing sense and carries no direction of its own."""
 
 import numpy as np
 
-from pypolar.feedback.synthetic import MOSyntheticOracle
-from pypolar.optimization.objectives import DecoupledObjectives
-from pypolar.utils.pareto import (gd_plus, get_nondominated, get_nondominated_tol,
+from mohilo.feedback.synthetic import MOSyntheticOracle
+from mohilo.optimization.objectives import DecoupledObjectives
+from mohilo.utils.pareto import (gd_plus, get_nondominated, get_nondominated_tol,
                                   igd_plus,
                                   get_pareto_statistics,
                                   hypervolume_from_nondominated, reference_point)

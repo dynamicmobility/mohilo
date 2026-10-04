@@ -10,7 +10,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-import pypolar as plr
+import mohilo as plr
 from scripts.icra.human_pareto import (ACTION_LABELS, SLICE_GAP, action_colors, content_bbox,
                                        front_order, plot_color_slices)
 

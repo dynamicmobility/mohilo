@@ -1,4 +1,4 @@
-import pypolar as plr
+import mohilo as plr
 import numpy as np
 import pandas as pd
 import argparse

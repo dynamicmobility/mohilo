@@ -1,6 +1,6 @@
 """Convert CSV files into Objective datastructures"""
 import pandas as pd
-import pypolar as plr
+import mohilo as plr
 from pathlib import Path
 import numpy as np
 

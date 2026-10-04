@@ -1,10 +1,10 @@
 # ICRA videos
 
 Manim scenes for the paper. Rendered with Manim Community v0.21.0 in the
-`pypolar` conda environment. The objectives and the GP fit to them come from
-`pypolar` itself; the drawing does not. Only `validation.py` reaches further out:
+`mohilo` conda environment. The objectives and the GP fit to them come from
+`mohilo` itself; the drawing does not. Only `validation.py` reaches further out:
 it draws measured curves, so it imports `scripts.icra.final_dim` — and through it
-`pypolar`, `pandas` and `matplotlib` — rather than reading the CSVs itself.
+`mohilo`, `pandas` and `matplotlib` — rather than reading the CSVs itself.
 
 Two videos here are not manim scenes: `hilo/analysis/plot_fit_video.py` and
 `hilo/analysis/plot_actions_video.py` reach into `style.py` from outside
@@ -16,7 +16,7 @@ scene drawing the same thing the second of those does. See
 ```
 video/
 ├── style.py        # palette, box geometry, manim config, box/arrow helpers
-├── objectives.py   # the two objectives, as one pypolar groundtruth
+├── objectives.py   # the two objectives, as one mohilo groundtruth
 ├── clip.py         # VideoClip: a video file drawn as frames inside a scene
 ├── hilo.py         # HiloScene: device and optimization exchanging feedback
 ├── pareto.py       # ParetoScene: the same objectives, and their front
@@ -30,7 +30,7 @@ video/
 ## Render
 
 ```bash
-conda activate pypolar
+conda activate mohilo
 video/render.sh                       # every scene at -qh (1080p60)
 video/render.sh ParetoScene           # just that one
 video/render.sh ValidationScene
@@ -63,7 +63,7 @@ Pareto scene. Comfort is violet rather than red for exactly that reason, and not
 amber because `style.STAR_COLOR` already marks the optima in gold.
 
 `objectives.py` holds the two objectives and no manim. They are not drawn curves
-but a pypolar groundtruth: one `SyntheticOracleParams(func='IdealPoint', dim=1)`
+but a mohilo groundtruth: one `SyntheticOracleParams(func='IdealPoint', dim=1)`
 builds a `MOSyntheticOracle` of two bowls sharing the action box `CURVE_X_RANGE`,
 metabolic cost bottoming out at `OPTIMUM_A` and comfort peaking at
 `COMFORT_OPTIMUM_A`. Comfort is a hump because its weight is *negative*, which is
@@ -187,7 +187,7 @@ of it is Pareto optimal.
 Then the loop, `N_POINTS` actions from `objectives.sobol_actions()`. Each is one
 visit to one controller: `measure()` is called once and returns a noisy reading of
 *both* objectives, so the pair of dots that appears is one measurement, not two.
-From `N_SEED` onward the scene refits `pypolar`'s own `DecoupledMOGP` after every
+From `N_SEED` onward the scene refits `mohilo`'s own `DecoupledMOGP` after every
 point and redraws the posterior. The first `N_SEED - 1` points arrive with no fit
 behind them because a single measurement has no spread of its own to standardize
 by and two badly underestimate it, so a band drawn from them would *widen* at the
@@ -270,7 +270,7 @@ change.
 `hilo/analysis/plot_fit_video.py` animates one subject's run trial by trial: the
 front panel is objective space (metabolic cost against comfort), the pareto-set
 panel beside it is the non-dominated actions in the three-dimensional action
-space. It is matplotlib, not manim — every posterior comes from `pypolar` the
+space. It is matplotlib, not manim — every posterior comes from `mohilo` the
 same way the scenes above read it, but the panels themselves are `plr.plot_pareto`
 and `plr.plot_pareto_actions`, dressed with `plr.dress_axis`. It reuses
 `hilo/analysis/plot_fit_gif.py`'s posterior-reading and frame-drawing (`draw_frame`,
@@ -284,7 +284,7 @@ directly rather than choosing its own palette — the white background and dark 
 are `style.py`'s, and the front panel's axes are colored cost/comfort exactly as
 `front_axes` colors them in `pareto.py` and `mogp.py`. The title is set through
 matplotlib in the same Computer Modern (`cmr10`/`cm`) family `dress_axis` already
-uses elsewhere in `pypolar`, sized and colored to read as a manim scene title
+uses elsewhere in `mohilo`, sized and colored to read as a manim scene title
 even though nothing here is a `Tex` mobject.
 
 Run it as `python -m hilo.analysis.plot_fit_video [dataset] --output ... --title

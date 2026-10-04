@@ -14,11 +14,11 @@ import pytest
 
 from botorch.acquisition import UpperConfidenceBound
 
-from pypolar.experiment.dataset import ExperimentDataset, TrialDataset
-from pypolar.feedback.acquisition import AcquisitionParams
-from pypolar.feedback.synthetic import SyntheticOracleParams
-from pypolar.optimization.gp import BoTorchGP, NoiseModel
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.experiment.dataset import ExperimentDataset, TrialDataset
+from mohilo.feedback.acquisition import AcquisitionParams
+from mohilo.feedback.synthetic import SyntheticOracleParams
+from mohilo.optimization.gp import BoTorchGP, NoiseModel
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

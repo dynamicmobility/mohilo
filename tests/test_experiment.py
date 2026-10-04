@@ -11,11 +11,11 @@ import json
 import numpy as np
 import pytest
 
-from pypolar.experiment.dataset import ExperimentDataset
-from pypolar.experiment.ledger import Ledger, fingerprint, read_events
-from pypolar.experiment.logger import Logger
-from pypolar.experiment.probe import Probe
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.experiment.dataset import ExperimentDataset
+from mohilo.experiment.ledger import Ledger, fingerprint, read_events
+from mohilo.experiment.logger import Logger
+from mohilo.experiment.probe import Probe
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

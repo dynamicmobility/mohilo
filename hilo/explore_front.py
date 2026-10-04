@@ -6,7 +6,7 @@ slider becomes an *index* into the front: 0 at the objective-1 end, 100 at the
 objective-2 end, and every position in between is a front point that is
 actually attainable rather than a blend of two endpoint actions.
 
-    conda activate pypolar
+    conda activate mohilo
     python -m hilo.explore_front --dataset hilo/output/experiments/<run>/MT01.json
 
 Each Send prints the front point the slider sits at and hands its action to
@@ -17,8 +17,8 @@ import argparse
 from pathlib import Path
 
 import numpy as np
-import pypolar as plr
-from pypolar.experiment.dataset import ExperimentDataset
+import mohilo as plr
+from mohilo.experiment.dataset import ExperimentDataset
 from tablet.preference import Preference
 import logging
 import hilo.shared.log as log

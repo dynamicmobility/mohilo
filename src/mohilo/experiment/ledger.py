@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pypolar.optimization.objectives import DecoupledObjectives
+from mohilo.optimization.objectives import DecoupledObjectives
 
 SESSION         = 'session'
 TRIAL_OPENED    = 'trial_opened'

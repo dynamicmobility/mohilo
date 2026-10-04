@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 import pandas as pd
-import pypolar as plr
+import mohilo as plr
 
 DATASET     = Path('scripts/output/final_exp/dim-100-again')
 OUTPUT      = DATASET / 'final_igd_plus.svg'

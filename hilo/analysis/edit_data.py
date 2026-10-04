@@ -10,7 +10,7 @@ clears every fit conditioned on a measurement it removed.
 
 import numpy as np
 
-import pypolar as plr
+import mohilo as plr
 
 SOURCE = 'human_data/MB03/MB03.json'
 DEST   = 'human_data/MB03/MB03_edited.json'

@@ -28,7 +28,7 @@ import numpy as np
 from matplotlib.animation import FFMpegWriter
 from matplotlib.lines import Line2D
 
-import pypolar as plr
+import mohilo as plr
 from scripts.icra.human_pareto import ACTION_LABELS
 from scripts.icra.subject_actions import SUBJECT_COLORS, pareto_actions
 from scripts.icra.subjects_pareto import SUBJECTS
@@ -81,7 +81,7 @@ def smoothstep(t):
 
 DPI       = 150
 FIGSIZE   = (12.8, 7.2)   # 1920x1080 at DPI, the manim scenes' own 16:9 frame
-FONT      = 'cmr10'       # Computer Modern, matching pypolar's own house style
+FONT      = 'cmr10'       # Computer Modern, matching mohilo's own house style
 MATH_FONT = 'cm'
 TITLE_SIZE = 40
 TICK_SIZE  = 15

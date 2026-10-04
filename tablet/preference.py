@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import websockets
 
-import pypolar as plr
+import mohilo as plr
 from tablet.survey import local_ips
 
 HTTP_PORT = 8001

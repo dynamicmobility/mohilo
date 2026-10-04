@@ -3,7 +3,7 @@ import warnings
 from dataclasses import dataclass, replace
 from pathlib import Path
 from linear_operator.utils.warnings import NumericalWarning
-import pypolar as plr
+import mohilo as plr
 warnings.filterwarnings('ignore', category=NumericalWarning)
 
 MULTITHREAD = False 

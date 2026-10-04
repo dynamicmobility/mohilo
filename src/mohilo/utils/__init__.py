@@ -1,7 +1,7 @@
-from pypolar.utils.plotting import (
+from mohilo.utils.plotting import (
     plot_test_function, plot_fit_1d, dress_axis, plot_pareto, plot_pareto_actions
 )
-from pypolar.utils.pareto import (
+from mohilo.utils.pareto import (
     get_nondominated, get_nondominated_tol, hypervolume_from_nondominated,
     sparsity_from_normalized_nondominated, get_pareto_statistics
 )

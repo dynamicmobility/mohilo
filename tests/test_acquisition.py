@@ -22,7 +22,7 @@ from botorch.acquisition import (
 )
 from botorch.acquisition.thompson_sampling import PathwiseThompsonSampling
 
-from pypolar.feedback.acquisition import (
+from mohilo.feedback.acquisition import (
     MO_STRATEGIES,
     SO_STRATEGIES,
     AcquisitionFunction,
@@ -32,8 +32,8 @@ from pypolar.feedback.acquisition import (
     acquisition_factory_1d,
     acquisition_factory_2d,
 )
-from pypolar.optimization.gp import BoTorchGP, DecoupledMOGP
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.optimization.gp import BoTorchGP, DecoupledMOGP
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 # ---- fixtures --------------------------------------------------------------

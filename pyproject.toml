@@ -3,9 +3,12 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "pypolar"
+name = "mohilo"
 version = "0.1.0"
-description = "Preference-based learning using POLAR (Preference Optimization and Learning Algorithm for Robotics)"
+description = "Multi-Objective Human-in-the-loop Optimization for Robotics"
+authors = [
+    { name="Neil Janwani", email="njanwani@gatech.edu" },
+]
 requires-python = ">=3.10"
 dependencies = [
     "numpy",
@@ -15,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-plr-print = "pypolar.experiment.__main__:main"
+plr-print = "mohilo.experiment.__main__:main"
 
 [project.optional-dependencies]
 dev = [

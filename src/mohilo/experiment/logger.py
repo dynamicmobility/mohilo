@@ -6,9 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-from pypolar.experiment.dataset import ExperimentDataset
-from pypolar.experiment.probe import Probe
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.experiment.dataset import ExperimentDataset
+from mohilo.experiment.probe import Probe
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
 
 
 class Device(ABC):

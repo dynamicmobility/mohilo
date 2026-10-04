@@ -25,7 +25,7 @@ from matplotlib.colors import Normalize, to_rgba
 from matplotlib.lines import Line2D
 from matplotlib.ticker import MaxNLocator
 
-import pypolar as plr
+import mohilo as plr
 from scripts.icra.validation_pareto import FRONT_COLOR, LAYOUTS, front_order, measured_at
 
 SUBJECTS    = ['MB02', 'MB04', 'MB05']

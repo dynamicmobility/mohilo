@@ -1,16 +1,16 @@
-from pypolar.feedback.acquisition import (
+from mohilo.feedback.acquisition import (
     AcquisitionFunction,
     AcquisitionParams,
     acquisition_factory_1d,
     acquisition_factory_2d,
 )
-from pypolar.feedback.oracles import (
+from mohilo.feedback.oracles import (
     BradleyTerryOracle,
     MultiObjectiveOracle,
     NoisyRegressionOracle,
 )
-from pypolar.feedback.rewards import InternalReward
-from pypolar.feedback.synthetic import (
+from mohilo.feedback.rewards import InternalReward
+from mohilo.feedback.synthetic import (
     SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
     MO_SYNTHETIC_FUNCTIONS,

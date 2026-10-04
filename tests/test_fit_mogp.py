@@ -9,7 +9,7 @@ socket and an iPad, so it is not here either.
 import pytest
 
 from hilo.fit_mogp import find_dataset, parse_args
-from pypolar.experiment.dataset import ExperimentDataset
+from mohilo.experiment.dataset import ExperimentDataset
 
 
 # ---- the command line ------------------------------------------------------

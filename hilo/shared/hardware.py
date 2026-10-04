@@ -3,7 +3,7 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from linear_operator.utils.warnings import NumericalWarning
-import pypolar as plr
+import mohilo as plr
 from tablet.survey import Survey
 import numpy as np
 import logging

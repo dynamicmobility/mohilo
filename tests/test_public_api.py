@@ -10,13 +10,13 @@ import importlib
 
 import pytest
 
-import pypolar
+import mohilo
 
 SUBPACKAGES = [
-    "pypolar.feedback",
-    "pypolar.optimization",
-    "pypolar.utils",
-    "pypolar.performance",
+    "mohilo.feedback",
+    "mohilo.optimization",
+    "mohilo.utils",
+    "mohilo.performance",
 ]
 
 
@@ -25,11 +25,11 @@ def _all_of(module_name):
     return module, getattr(module, "__all__", None)
 
 
-@pytest.mark.parametrize("name", pypolar.__all__)
+@pytest.mark.parametrize("name", mohilo.__all__)
 def test_toplevel_all_entries_resolve(name):
-    """Every name in ``pypolar.__all__`` is actually importable from pypolar."""
-    assert hasattr(pypolar, name), (
-        f"'{name}' is listed in pypolar.__all__ but does not exist on the "
+    """Every name in ``mohilo.__all__`` is actually importable from mohilo."""
+    assert hasattr(mohilo, name), (
+        f"'{name}' is listed in mohilo.__all__ but does not exist on the "
         f"package. It was probably deleted from its defining module without "
         f"being removed from __all__."
     )
@@ -47,7 +47,7 @@ def test_subpackage_all_entries_resolve(module_name):
     )
 
 
-@pytest.mark.parametrize("module_name", ["pypolar", *SUBPACKAGES])
+@pytest.mark.parametrize("module_name", ["mohilo", *SUBPACKAGES])
 def test_all_has_no_duplicates(module_name):
     """A name appearing twice in ``__all__`` usually means a bad merge."""
     module = importlib.import_module(module_name)
@@ -57,8 +57,8 @@ def test_all_has_no_duplicates(module_name):
 
 
 def test_star_import_surface_matches_all():
-    """``from pypolar import *`` yields exactly what ``__all__`` promises."""
+    """``from mohilo import *`` yields exactly what ``__all__`` promises."""
     namespace = {}
-    exec("from pypolar import *", namespace)  # noqa: S102
+    exec("from mohilo import *", namespace)  # noqa: S102
     namespace.pop("__builtins__", None)
-    assert set(namespace) == set(pypolar.__all__)
+    assert set(namespace) == set(mohilo.__all__)

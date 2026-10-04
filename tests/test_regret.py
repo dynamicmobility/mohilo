@@ -11,9 +11,9 @@ result can drift when the scan that normalizes it is finite.
 import numpy as np
 import pytest
 
-from pypolar.feedback.synthetic import SyntheticOracle
-from pypolar.optimization.objectives import sample_actions
-from pypolar.performance.regret import normalized_inference_regret
+from mohilo.feedback.synthetic import SyntheticOracle
+from mohilo.optimization.objectives import sample_actions
+from mohilo.performance.regret import normalized_inference_regret
 
 BOX  = 5.0
 SEED = 3

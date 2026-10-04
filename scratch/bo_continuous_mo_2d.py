@@ -1,9 +1,9 @@
 """Multi-objective Bayesian optimization over a continuous 2D action space.
 
 The multi-objective counterpart of `bo_continuous_2d_botorch.py`, and the
-BoTorch parallel to pypolar's `MultiObjectiveGP` + `QNEHVISampler`:
+BoTorch parallel to mohilo's `MultiObjectiveGP` + `QNEHVISampler`:
 
-| pypolar                          | BoTorch                                    |
+| mohilo                          | BoTorch                                    |
 |----------------------------------|--------------------------------------------|
 | `MultiObjectiveGP`               | `ModelListGP`                              |
 | `.gps` (list, one per objective) | the models passed to `ModelListGP(*models)`|
@@ -21,9 +21,9 @@ which is what lets an acquisition function reason about the objectives jointly.
 acquisition is maximized over the *continuous* box rather than enumerated over a
 grid, so no action is ever snapped to a lattice.
 
-`pypolar` is still used for the problem (`BoundedIdealPoint`,
+`mohilo` is still used for the problem (`BoundedIdealPoint`,
 `NoisyRegressionOracle`, `derive_gp_hyperparams`). Nothing in the loop is
-pypolar's, including the metrics: hypervolume comes from BoTorch's
+mohilo's, including the metrics: hypervolume comes from BoTorch's
 `DominatedPartitioning` and the fronts from `is_non_dominated`.
 
 The objective is two competing ideal points — objective 1 peaks at one corner of
@@ -55,7 +55,7 @@ from botorch.utils.sampling import draw_sobol_samples
 from gpytorch.kernels import RBFKernel, ScaleKernel
 from gpytorch.means import ZeroMean
 
-import pypolar as plr
+import mohilo as plr
 
 LOW             = np.array([-2.0, -2.0])
 HIGH            = np.array([ 2.0,  2.0])
@@ -281,7 +281,7 @@ def main():
         expected_range = float(REWARD_RANGE[1] - REWARD_RANGE[0]),
         noise_var      = NOISE_STD ** 2,
     )
-    # pypolar states the likelihood as `precision * ||Sr - y||^2`, a Gaussian
+    # mohilo states the likelihood as `precision * ||Sr - y||^2`, a Gaussian
     # NLL with sigma^2 = 1/(2*precision). BoTorch wants the variance directly.
     sigma2 = 1.0 / (2.0 * precision)
     signal_variances = [signal_variance] * NUM_OBJS

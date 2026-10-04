@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from linear_operator.utils.warnings import NumericalWarning
-import pypolar as plr
+import mohilo as plr
 from tqdm import tqdm
 warnings.filterwarnings('ignore', category=NumericalWarning)
 

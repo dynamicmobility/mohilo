@@ -6,7 +6,7 @@ import socketio
 from dataclasses import asdict
 import numpy as np
 import torch
-import pypolar as plr
+import mohilo as plr
 from tablet.survey import Survey
 import logging
 import hilo.shared.log as log

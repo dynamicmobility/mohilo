@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-import pypolar as plr
+import mohilo as plr
 
 NUM_OBJECTIVES = 2       # the registry entries plotted; the rest are skipped
 MAXIMIZE       = (False, False)  # direction per objective, as `Objective` takes it

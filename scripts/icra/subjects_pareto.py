@@ -11,7 +11,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pypolar as plr
+import mohilo as plr
 from scripts.icra.human_pareto import (
     ACTION_LABELS,
     SLICE_GAP,

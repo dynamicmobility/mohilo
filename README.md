@@ -1,4 +1,4 @@
-# pypolar
+# mohilo
 
 A Python implementation of POLAR (Preference Optimization and Learning Algorithm for Robotics) for preference-based learning. Learn a reward function from pairwise comparisons, coactive feedback, and ordinal labels using Gaussian processes with JAX autodiff.
 
@@ -7,15 +7,15 @@ A Python implementation of POLAR (Preference Optimization and Learning Algorithm
 Requires Python 3.10+. Install in a conda environment:
 
 ```bash
-conda create -n pypolar python=3.12
-conda activate pypolar
+conda create -n mohilo python=3.12
+conda activate mohilo
 pip install -e ".[dev]"
 ```
 
 ## Examples
 
 ```bash
-conda activate pypolar
+conda activate mohilo
 python examples/example_1d.py
 python examples/example_2d.py
 python examples/example_3d.py

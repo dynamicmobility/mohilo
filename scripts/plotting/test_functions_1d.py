@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-import pypolar as plr
+import mohilo as plr
 
 DIM   = 1     # 1 or 2
 BOX   = 5.0   # half-width of the action box, where the function accepts one

@@ -3,7 +3,7 @@
 import numpy as np
 from scipy.spatial.distance import pdist, squareform
 
-from pypolar.optimization.objectives import Objective
+from mohilo.optimization.objectives import Objective
 
 MIN_SIZE = 5    # smallest subset `loo_curve` scores by default
 

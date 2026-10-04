@@ -28,8 +28,8 @@ from botorch.sampling import SobolQMCNormalSampler
 from botorch.utils.multi_objective.box_decompositions import NondominatedPartitioning
 
 
-from pypolar.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES, BoTorchGP, NoiseModel
-from pypolar.optimization.objectives import as_bounds
+from mohilo.optimization.gp import DTYPE, NUM_RESTARTS, RAW_SAMPLES, BoTorchGP, NoiseModel
+from mohilo.optimization.objectives import as_bounds
 
 # Acquisition function stuff
 UCB_BETA       = 2.0    # ucb: explores sqrt(beta) posterior standard deviations

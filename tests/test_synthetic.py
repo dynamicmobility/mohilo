@@ -15,7 +15,7 @@ from botorch.test_functions import multi_objective, synthetic
 
 from dataclasses import asdict
 
-from pypolar.feedback.synthetic import (
+from mohilo.feedback.synthetic import (
     MO_SYNTHETIC_FUNCTIONS,
     SYNTHETIC_1D_FUNCTIONS,
     SYNTHETIC_FUNCTIONS,
@@ -26,8 +26,8 @@ from pypolar.feedback.synthetic import (
     construct_function,
     truth_at,
 )
-from pypolar.optimization.objectives import DecoupledObjectives, Objective
-from pypolar.utils.pareto import reference_point
+from mohilo.optimization.objectives import DecoupledObjectives, Objective
+from mohilo.utils.pareto import reference_point
 
 BOX  = 5.0
 SEED = 3

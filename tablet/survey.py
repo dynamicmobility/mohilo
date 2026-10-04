@@ -16,7 +16,7 @@ Usage:
     s.ask()               # (1,) rating, or (0,) if the window closed unanswered
     s.close()
 
-`ask` is what a `pypolar.Probe` calls, from the probe's own worker thread. The
+`ask` is what a `mohilo.Probe` calls, from the probe's own worker thread. The
 empty array is how a missed question reaches the experiment: `Probe` still counts
 the repeat, `Probe.data` drops it, and `Logger.end_trial` adds nothing to the
 objective for a trial whose every repeat timed out.

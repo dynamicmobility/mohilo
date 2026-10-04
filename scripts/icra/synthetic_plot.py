@@ -13,7 +13,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pypolar as plr
+import mohilo as plr
 import hilo.shared.simulation as hilo
 from scripts.plotting.comparison import METRIC, METRICS, load
 

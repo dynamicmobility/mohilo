@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-import pypolar as plr
+import mohilo as plr
 from scripts.icra.human_pareto import ACTION_LABELS, content_bbox
 from scripts.icra.validation_pareto import front_order
 
